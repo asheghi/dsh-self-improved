@@ -147,6 +147,7 @@ window.__ModuleLoader__.load({
       fFallback: "坏 JSON 回退原文摘要",
       fFlushDrain: "headless 退出前排空提取",
       fStrategy: "召回策略",
+      fStrategyHint: "keyword=纯关键词（默认，不调用向量服务）；hybrid=关键词+向量融合（需先配置下方 Embedding 端点，未配置时自动降级为关键词）。",
       fMaxResults: "召回条数上限",
       fScoreThreshold: "相似度阈值（0=不过滤）",
       fRecallTimeout: "召回超时（毫秒）",
@@ -265,6 +266,7 @@ window.__ModuleLoader__.load({
       fFallback: "Fallback to summary on bad JSON",
       fFlushDrain: "Drain extraction before headless exit",
       fStrategy: "Recall strategy",
+      fStrategyHint: "keyword = pure keyword (default, no embedding calls); hybrid = keyword + vector fusion (requires an Embedding endpoint below; auto-falls back to keyword if unset).",
       fMaxResults: "Max recall results",
       fScoreThreshold: "Score threshold (0 = off)",
       fRecallTimeout: "Recall timeout (ms)",
@@ -331,7 +333,7 @@ window.__ModuleLoader__.load({
       { path: ["extract", "dedup"], label: "fDedup", type: "checkbox", group: "groupExtract" },
       { path: ["extract", "fallbackOnBadJson"], label: "fFallback", type: "checkbox", group: "groupExtract" },
       { path: ["extract", "flushDrain"], label: "fFlushDrain", type: "checkbox", group: "groupExtract" },
-      { path: ["recall", "strategy"], label: "fStrategy", type: "select", options: ["keyword", "hybrid"], group: "groupRecall" },
+      { path: ["recall", "strategy"], label: "fStrategy", type: "select", options: ["keyword", "hybrid"], hint: "fStrategyHint", group: "groupRecall" },
       { path: ["recall", "maxResults"], label: "fMaxResults", type: "number", group: "groupRecall" },
       { path: ["recall", "scoreThreshold"], label: "fScoreThreshold", type: "number", group: "groupRecall" },
       { path: ["recall", "timeoutMs"], label: "fRecallTimeout", type: "number", group: "groupRecall" },
@@ -513,7 +515,8 @@ window.__ModuleLoader__.load({
             overridden ? h("span", { className: "__dsi_override" }, t("overridden")) : null
           ),
           input,
-          f.type === "password" ? h("span", { className: "__dsi_hint" }, t("secretHint")) : null
+          f.type === "password" ? h("span", { className: "__dsi_hint" }, t("secretHint")) : null,
+          f.hint ? h("span", { className: "__dsi_hint" }, t(f.hint)) : null
         ));
       });
 
