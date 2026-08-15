@@ -365,18 +365,6 @@ export function apply(ctx: Context, config: Config): void {
     if (newest > 0) lastEvolveTs = newest;
     return summary;
   };
-  // 定时轮（15 分钟）：只做"提取 + 免费维护"，不碰 LLM 重活（进化交给夜间回顾/手动/启动补跑）
-  const timer = setInterval(() => {
-    void extractor
-      .pump()
-      .then(() => runEvolution(false, false))
-      .then((s) => {
-        if (s.skipped) log("maintenance round (no heavy work)");
-      })
-      .catch((e) => console.warn("[dsh-self-improved] extract pump error:", String(e)));
-  }, config.extract.intervalMinutes * 60_000);
-  timer.unref?.();
-
   // 完整回顾：排空待提取 + 完整进化（巩固/技能/衰减/治理）
   const fullReview = async (reason: string): Promise<Record<string, unknown>> => {
     const pumped = await extractor.pump().catch((e) => {
@@ -388,14 +376,40 @@ export function apply(ctx: Context, config: Config): void {
     return { pumped, ...summary };
   };
 
-  // 夜间回顾：每天 config.review.time（默认 22:00）做一次；完成后重新武装下一天
+  // 定时器统一管理：跟随总开关——关闭立即全部停止，重新打开自动恢复武装
+  let timer: NodeJS.Timeout | undefined;
+  let reviewTimer: NodeJS.Timeout | undefined;
+  let startupTimer: NodeJS.Timeout | undefined;
+  let startupReviewDone = false;
+
   const parseHHMM = (s: string): number => {
     const m = /^(\d{1,2}):(\d{2})$/.exec(s.trim());
     if (!m) return 22 * 3_600_000; // 非法配置回退 22:00
     return Number(m[1]) * 3_600_000 + Number(m[2]) * 60_000;
   };
-  let reviewTimer: NodeJS.Timeout | undefined;
+
+  // 15 分钟轮：只做"提取 + 免费维护"，不碰 LLM 重活（进化交给夜间回顾/手动/启动补跑）
+  const armMaintenanceTimer = (): void => {
+    if (timer) clearInterval(timer);
+    timer = undefined;
+    if (!state.enabled) return;
+    timer = setInterval(() => {
+      void extractor
+        .pump()
+        .then(() => runEvolution(false, false))
+        .then((s) => {
+          if (s.skipped) log("maintenance round (no heavy work)");
+        })
+        .catch((e) => console.warn("[dsh-self-improved] extract pump error:", String(e)));
+    }, config.extract.intervalMinutes * 60_000);
+    timer.unref?.();
+  };
+
+  // 夜间回顾：每天 config.review.time（默认 22:00）做一次；完成后重新武装下一天
   const armNightlyReview = (): void => {
+    if (reviewTimer) clearTimeout(reviewTimer);
+    reviewTimer = undefined;
+    if (!state.enabled || !config.review.enabled) return;
     const hhmm = parseHHMM(config.review.time);
     const now = new Date();
     const target = new Date(now);
@@ -403,7 +417,6 @@ export function apply(ctx: Context, config: Config): void {
     target.setTime(target.getTime() + hhmm);
     let diff = target.getTime() - now.getTime();
     if (diff <= 0) diff += 24 * 3_600_000;
-    if (!config.review.enabled) return;
     reviewTimer = setTimeout(() => {
       void fullReview("nightly")
         .catch((e) => console.warn("[dsh-self-improved] nightly review error:", String(e)))
@@ -412,23 +425,35 @@ export function apply(ctx: Context, config: Config): void {
     reviewTimer.unref?.();
     log("nightly review armed at", config.review.time, "(in", Math.round(diff / 60_000), "min)");
   };
-  armNightlyReview();
 
-  // 启动补跑：~60s 后若有活跃记忆，做一次完整回顾（重启不丢数据、不用等夜间）
-  const startupTimer = setTimeout(() => {
-    if (store.newestMemoryTs() > 0) {
+  // 启动补跑：~60s 后若有活跃记忆，做一次完整回顾（重启不丢数据、不用等夜间）；只补跑一次
+  const armStartupReview = (): void => {
+    if (startupTimer) clearTimeout(startupTimer);
+    startupTimer = undefined;
+    if (startupReviewDone || !state.enabled) return;
+    if (store.newestMemoryTs() <= 0) return;
+    startupTimer = setTimeout(() => {
+      startupReviewDone = true;
       void fullReview("startup").catch((e) => console.warn("[dsh-self-improved] startup review error:", String(e)));
-    }
-  }, 60_000);
-  startupTimer.unref?.();
+    }, 60_000);
+    startupTimer.unref?.();
+  };
+
+  const syncSchedulers = (): void => {
+    armMaintenanceTimer();
+    armNightlyReview();
+    armStartupReview();
+  };
+  syncSchedulers();
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (ctx as any).on("dispose", () => {
-    clearInterval(timer);
-    clearTimeout(startupTimer);
+    if (timer) clearInterval(timer);
+    if (startupTimer) clearTimeout(startupTimer);
     if (reviewTimer) clearTimeout(reviewTimer);
     store.close();
   });
-  log("extract timer every", config.extract.intervalMinutes, "min (maintenance only); evolution via nightly/manual/startup");
+  log("schedulers armed (15min maintenance, nightly review, 60s startup backfill); disabling master switch stops all timers");
 
   // ④ 记忆工具（M1/M4）：可运行时开关（tools 模块）
   let toolsDispose: (() => void) | null = null;
@@ -477,9 +502,9 @@ export function apply(ctx: Context, config: Config): void {
     // 夜间回顾时间/开关热切换：重新武装定时器
     if (next.review.enabled !== config.review.enabled || next.review.time !== config.review.time) {
       config.review = { enabled: next.review.enabled, time: next.review.time };
-      if (reviewTimer) clearTimeout(reviewTimer);
-      armNightlyReview();
     }
+    // 任何运行时配置变化 → 统一重挂功能定时器（关闭总开关=全部定时器立即停止）
+    syncSchedulers();
     log("runtime config applied:", "enabled=", next.enabled, "modules=", JSON.stringify(next.modules));
   });
 

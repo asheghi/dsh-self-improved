@@ -137,6 +137,7 @@ window.__ModuleLoader__.load({
         "【注意事项】",
         "• 提取依赖可用的模型且输出稳定；长会话会分批消化（每次一批、一次调用，30 秒节流）",
         "• 画像（persona）与技能会在记忆积累到一定量后逐步生成",
+        "• 关闭总开关会停止全部后台定时任务（提取/维护/夜间回顾）；已存记忆保留，重新开启即自动恢复",
         "• 卸载插件不会自动删除本地记忆数据"
       ].join("\n"),
       groupMaster: "总开关",
@@ -279,6 +280,7 @@ window.__ModuleLoader__.load({
         "[Notes]",
         "• Extraction needs a working, stable model; long sessions are drained in batches (one LLM call per batch, 30s throttle)",
         "• Persona and skills appear once memories accumulate",
+        "• Disabling the master switch stops all background timers (extraction/maintenance/nightly review); stored memories are kept and everything resumes when re-enabled",
         "• Uninstalling the plugin does not delete local memory data"
       ].join("\n"),
       groupMaster: "Master",
