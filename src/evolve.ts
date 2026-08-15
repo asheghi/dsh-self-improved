@@ -84,10 +84,13 @@ export async function synthesizeSkills(
   const root = skillsRoot.trim() || defaultSkillsDir();
   mkdirSync(root, { recursive: true });
   const input = memories.map((m) => `- [${m.kind}] ${m.content}`).join("\n");
-  const signal = AbortSignal.timeout(60_000);
+  const signal = AbortSignal.timeout(180_000);
   const text = (await callLlm({ system: SKILL_SYSTEM_PROMPT, user: input, signal })).trim();
   const parsed = parseSkillMarkdown(text);
-  if (!parsed || !parsed.name) return 0;
+  if (!parsed || !parsed.name) {
+    console.warn("[dsh-self-improved] skill synthesis rejected model output:", text.slice(0, 200));
+    return 0;
+  }
   const dir = join(root, parsed.name);
   const file = join(dir, "SKILL.md");
   if (existsSync(file)) return 0; // 已存在不覆盖
@@ -100,13 +103,24 @@ export function defaultSkillsDir(): string {
   return join(resolveDshHome(undefined, process.env), "skills");
 }
 
-/** 解析技能 Markdown：校验 frontmatter 必须含 name/description */
+/** 解析技能 Markdown：优先 frontmatter；无 frontmatter 时容错提取标题作为技能名 */
 function parseSkillMarkdown(text: string): { name?: string } | null {
-  const m = text.match(/^---\s*\n([\s\S]*?)\n---/);
-  if (!m) return null;
-  const fm = m[1];
-  const name = fm.match(/^name:\s*([a-z0-9]+(?:-[a-z0-9]+)*)/m)?.[1];
-  const description = fm.match(/^description:\s*(.+)/m)?.[1];
-  if (!name || !description) return null;
-  return { name };
+  const fmMatch = text.match(/^---\s*\n([\s\S]*?)\n---/);
+  if (fmMatch) {
+    const fm = fmMatch[1];
+    const name = fm.match(/^name:\s*([a-z0-9]+(?:-[a-z0-9]+)*)/m)?.[1];
+    const description = fm.match(/^description:\s*(.+)/m)?.[1];
+    if (name && description) return { name };
+  }
+  // 容错：从一级标题提取技能名（转 kebab-case）
+  const heading = text.match(/^#\s+([^\n]+)/m)?.[1]?.trim();
+  if (heading && text.length > 80) {
+    const name = heading
+      .toLowerCase()
+      .replace(/[^a-z0-9\u4e00-\u9fff]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 40);
+    if (name) return { name };
+  }
+  return null;
 }

@@ -70,7 +70,7 @@ export class Consolidator {
     let count = 0;
     for (const batch of batches) {
       const input = batch.map((m) => `- [${m.kind}] ${m.content}`).join("\n");
-      const signal = AbortSignal.timeout(60_000);
+      const signal = AbortSignal.timeout(180_000);
       const text = await this.callLlm({ system: SCENE_SYSTEM_PROMPT, user: input, signal });
       const json = parseSceneJson(text);
       if (!json) continue;
@@ -97,9 +97,12 @@ export class Consolidator {
       prev ? `## 上一版画像（供增量参考）\n${prev.content}\n` : "",
       "## 新记忆\n" + memories.map((m) => `- [${m.kind}] ${m.content}`).join("\n"),
     ].join("\n");
-    const signal = AbortSignal.timeout(60_000);
+    const signal = AbortSignal.timeout(180_000);
     const content = (await this.callLlm({ system: PERSONA_SYSTEM_PROMPT, user: input, signal })).trim();
-    if (!content) return undefined;
+    if (!content) {
+      console.warn("[dsh-self-improved] persona synthesis returned empty output");
+      return undefined;
+    }
     const ver = this.store.savePersona(content);
     // 画像向量（供 recall 检索画像段落；失败不阻断）
     if (this.embedding) {
