@@ -3,6 +3,9 @@
  * 处理器为纯函数，便于单元测试；installMemoryCommands 仅在宿主提供 commands 服务时注册。
  */
 import type { Context } from "@deepseek-ai/cordis";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { defaultSkillsDir } from "./evolve.js";
 import type { MemoryStore } from "./storage.js";
 
 export interface CommandOutcome {
@@ -97,9 +100,59 @@ export function browserSnapshot(store: MemoryStore): Record<string, unknown> {
     memories,
     scenes,
     persona: persona ? { ver: persona.ver, content: persona.content, createdAt: persona.createdAt } : null,
+    skills: listSkills(),
     pending: store.pendingSessions().length,
     updatedAt: Date.now(),
   };
+}
+
+/** 列出技能仓库中的技能（名称 + 描述 + 适用场景 + 是否插件合成） */
+export function listSkills(limit = 100): Array<{
+  name: string;
+  description: string;
+  whenToUse: string;
+  excerpt: string;
+  synthesized: boolean;
+}> {
+  const root = defaultSkillsDir();
+  let dirNames: string[] = [];
+  try {
+    dirNames = readdirSync(root, { withFileTypes: true })
+      .filter((d) => d.isDirectory())
+      .map((d) => d.name);
+  } catch {
+    return [];
+  }
+  const out: Array<{ name: string; description: string; whenToUse: string; excerpt: string; synthesized: boolean }> = [];
+  for (const dirName of dirNames.slice(0, limit)) {
+    const file = join(root, dirName, "SKILL.md");
+    let raw: string;
+    try {
+      raw = readFileSync(file, "utf8");
+    } catch {
+      continue;
+    }
+    const fmMatch = raw.match(/^---\s*\n([\s\S]*?)\n---/);
+    let description = "";
+    let whenToUse = "";
+    let name = dirName;
+    if (fmMatch) {
+      const fm = fmMatch[1];
+      name = fm.match(/^name:\s*([^\n]+)/m)?.[1]?.trim() ?? dirName;
+      description = fm.match(/^description:\s*([^\n]+)/m)?.[1]?.trim() ?? "";
+      whenToUse = fm.match(/^whenToUse:\s*([^\n]+)/m)?.[1]?.trim() ?? "";
+    }
+    const body = fmMatch ? raw.slice(fmMatch[0].length) : raw;
+    const excerpt = body.replace(/\s+/g, " ").trim().slice(0, 120);
+    out.push({
+      name,
+      description,
+      whenToUse,
+      excerpt,
+      synthesized: name.startsWith("dsi-"),
+    });
+  }
+  return out;
 }
 
 /** 注册 /memory 命令（仅当宿主存在 commands 服务时；可选能力，不阻塞插件） */

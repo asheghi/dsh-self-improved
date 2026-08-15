@@ -165,9 +165,12 @@ window.__ModuleLoader__.load({
       browserHint: "加载中…（数据来自 /memory browser --json）",
       browserSearch: "筛选（关键词）",
       browserRefresh: "刷新",
-      browserSummary: "共 {n} 条活跃记忆 · 待提取 {p} · 场景 {s} · 画像 v{v}",
+      browserSummary: "共 {n} 条活跃记忆 · 待提取 {p} · 场景 {s} · 画像 v{v} · 技能 {k}",
       browserEmpty: "（没有活跃记忆）",
       browserScenes: "场景",
+      browserSkills: "已学习到的技能",
+      browserSkillsEmpty: "（还没有技能——继续积累记忆，自进化会逐步提炼 SOP）",
+      browserSynth: "已合成",
       browserCorrect: "纠正",
       browserForget: "遗忘",
       browserCorrectPrompt: "纠正为：",
@@ -272,9 +275,12 @@ window.__ModuleLoader__.load({
       browserHint: "Loading… (data from /memory browser --json)",
       browserSearch: "Filter",
       browserRefresh: "Refresh",
-      browserSummary: "{n} active memories · {p} pending · {s} scenes · persona v{v}",
+      browserSummary: "{n} active memories · {p} pending · {s} scenes · persona v{v} · {k} skills",
       browserEmpty: "(no active memories)",
       browserScenes: "Scenes",
+      browserSkills: "Learned skills",
+      browserSkillsEmpty: "(no skills yet — keep accumulating memories, self-evolution will distill SOPs)",
+      browserSynth: "synthesized",
       browserCorrect: "Fix",
       browserForget: "Forget",
       browserCorrectPrompt: "Correct to:",
@@ -614,19 +620,32 @@ window.__ModuleLoader__.load({
             h("span", { className: "__dsi_browserKind" }, "🗂️" + s.title)));
       });
 
+      var skills = data.skills || [];
+      var skillsNodes = skills.map(function (sk) {
+        return h("div", { key: sk.name, className: "__dsi_browserRow" },
+          h("div", { className: "__dsi_browserMain" },
+            h("span", { className: "__dsi_browserKind" }, "📘 " + sk.name + (sk.synthesized ? " (" + t("browserSynth") + ")" : "")),
+            sk.description ? h("span", { className: "__dsi_browserContent" }, sk.description) : null,
+            sk.whenToUse ? h("span", { className: "__dsi_browserMeta" }, sk.whenToUse) : null,
+            sk.excerpt ? h("span", { className: "__dsi_browserMeta" }, sk.excerpt) : null
+          ));
+      });
+
       return h("div", { className: "__dsi_root" },
         h("div", { className: "__dsi_row" },
           h("input", { className: "__dsi_input", style: { maxWidth: 260 }, placeholder: t("browserSearch"), value: query, onChange: function (e) { setQuery(e.target.value); } }),
           h("button", { type: "button", className: "__dsi_btn", onClick: refresh, disabled: busy }, t("browserRefresh"))
         ),
         h("p", { className: "__dsi_status" },
-          t("browserSummary").replace("{n}", String(memories.length)).replace("{p}", String(data.pending || 0)).replace("{s}", String((data.scenes || []).length)).replace("{v}", String(data.persona ? data.persona.ver : "-"))
+          t("browserSummary").replace("{n}", String(memories.length)).replace("{p}", String(data.pending || 0)).replace("{s}", String((data.scenes || []).length)).replace("{v}", String(data.persona ? data.persona.ver : "-")).replace("{k}", String(skills.length))
         ),
         notice ? h("p", { className: "__dsi_ok" }, notice) : null,
         error ? h("p", { className: "__dsi_error" }, error) : null,
         listNodes.length ? listNodes : h("p", { className: "__dsi_status" }, t("browserEmpty")),
         (data.scenes || []).length ? h("div", { className: "__dsi_group" }, t("browserScenes")) : null,
-        scenesNodes
+        scenesNodes,
+        skills.length ? h("div", { className: "__dsi_group" }, t("browserSkills")) : null,
+        skillsNodes.length ? skillsNodes : (skills.length ? h("p", { className: "__dsi_status" }, t("browserSkillsEmpty")) : null)
       );
     }
 
