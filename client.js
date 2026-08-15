@@ -49,7 +49,13 @@ window.__ModuleLoader__.load({
       ".__dsi_status{font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary)}" +
       ".__dsi_ok{font-size:12px;line-height:18px;color:var(--dsw-alias-state-success-primary)}" +
       ".__dsi_error{font-size:12px;line-height:18px;color:var(--dsw-alias-state-error-primary)}" +
-      ".__dsi_unavailable{font-size:13px;line-height:20px;color:var(--dsw-alias-label-tertiary)}";
+      ".__dsi_unavailable{font-size:13px;line-height:20px;color:var(--dsw-alias-label-tertiary)}" +
+      ".__dsi_browserRow{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;border:1px solid var(--dsw-alias-border-l2);border-radius:12px;padding:8px 10px;background:var(--dsw-alias-bg-layer-2)}" +
+      ".__dsi_browserMain{display:flex;flex-direction:column;gap:2px;min-width:0}" +
+      ".__dsi_browserKind{font-size:11px;font-weight:600;color:var(--dsw-alias-state-business-primary)}" +
+      ".__dsi_browserContent{font-size:13px;line-height:20px;color:var(--dsw-alias-label-primary);word-break:break-all}" +
+      ".__dsi_browserMeta{font-size:11px;color:var(--dsw-alias-label-tertiary)}" +
+      ".__dsi_browserOps{flex:none;display:flex;gap:6px}";
     var tagId = "dsh-self-improved/main.css";
     if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId) + "]") === null) {
       var tag = document.createElement("style");
@@ -152,7 +158,21 @@ window.__ModuleLoader__.load({
       fSkill: "技能合成（→ dsh-skill）",
       fSkillMin: "技能合成最低重要度",
       fSkillRoot: "技能根目录（留空 = $DSH_HOME/skills）",
-      secretHint: "留空保持当前密钥。"
+      secretHint: "留空保持当前密钥。",
+      browserNav: "记忆",
+      browserNoSession: "记忆浏览器需要在会话上下文中运行：请先打开/进入一个会话后再查看（聊天输入框敲 / 打开命令菜单也可管理记忆）。",
+      browserHint: "加载中…（数据来自 /memory browser --json）",
+      browserSearch: "筛选（关键词）",
+      browserRefresh: "刷新",
+      browserSummary: "共 {n} 条活跃记忆 · 待提取 {p} · 场景 {s} · 画像 v{v}",
+      browserEmpty: "（没有活跃记忆）",
+      browserScenes: "场景",
+      browserCorrect: "纠正",
+      browserForget: "遗忘",
+      browserCorrectPrompt: "纠正为：",
+      browserCorrected: "已纠正",
+      browserForgetConfirm: "确认遗忘这条记忆？",
+      browserForgotten: "已遗忘"
     };
     var en = {
       nav: "Evolving Memory",
@@ -244,7 +264,21 @@ window.__ModuleLoader__.load({
       fSkill: "Skill synthesis (→ dsh-skill)",
       fSkillMin: "Skill min importance",
       fSkillRoot: "Skills root (blank = $DSH_HOME/skills)",
-      secretHint: "Leave blank to keep the current key."
+      secretHint: "Leave blank to keep the current key.",
+      browserNav: "Memory",
+      browserNoSession: "The memory browser needs a session context: open/enter a session first (you can also type \"/\" in chat to open the command menu).",
+      browserHint: "Loading… (data from /memory browser --json)",
+      browserSearch: "Filter",
+      browserRefresh: "Refresh",
+      browserSummary: "{n} active memories · {p} pending · {s} scenes · persona v{v}",
+      browserEmpty: "(no active memories)",
+      browserScenes: "Scenes",
+      browserCorrect: "Fix",
+      browserForget: "Forget",
+      browserCorrectPrompt: "Correct to:",
+      browserCorrected: "Corrected",
+      browserForgetConfirm: "Forget this memory?",
+      browserForgotten: "Forgotten"
     };
 
     // ── field spec: dotted path + type + group ─────────────────────────────
@@ -485,6 +519,114 @@ window.__ModuleLoader__.load({
       return out;
     }
 
+    // ── 记忆浏览器（设置页第二个标签页）────────────────────────────────────
+    var KIND_LABEL = { fact: "📖事实", preference: "📌偏好", event: "🧭事件", instruction: "📋指令", persona: "👤画像" };
+
+    function resolveSessionId(props) {
+      var sid = props && (props.sessionId || (props.agent && props.agent.session && props.agent.session.id) || (props.session && props.session.id));
+      return typeof sid === "string" && sid ? sid : null;
+    }
+
+    function BrowserSection(props) {
+      var t = props.t;
+      var api = props.api;
+      var sessionId = resolveSessionId(props);
+      var [data, setData] = react.useState(null);
+      var [busy, setBusy] = react.useState(false);
+      var [error, setError] = react.useState(null);
+      var [query, setQuery] = react.useState("");
+      var [notice, setNotice] = react.useState(null);
+
+      function runCommand(line) {
+        if (!sessionId) return Promise.reject(new Error("no-session"));
+        return api.commands.execute(sessionId, line);
+      }
+      function unwrap(response) {
+        var r = response && (response.result && response.result.value !== void 0 ? response.result : response);
+        return r && r.ok === false ? null : (r && r.value !== void 0 ? r.value : r);
+      }
+
+      function refresh() {
+        if (!sessionId) return;
+        setBusy(true); setError(null);
+        runCommand("/memory browser --json").then(function (response) {
+          var v = unwrap(response);
+          var text = v && (v.text !== void 0 ? v.text : (v.value && v.value.text));
+          if (!text) throw new Error("empty browser response");
+          var parsed = JSON.parse(text);
+          setData(parsed);
+        }).catch(function (e) {
+          if (e && e.message === "no-session") setError("no-session");
+          else setError(String(e && e.message || e));
+        }).finally(function () { setBusy(false); });
+      }
+
+      react.useEffect(function () { refresh(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [sessionId]);
+
+      if (!sessionId) {
+        return h("p", { className: "__dsi_unavailable" }, t("browserNoSession"));
+      }
+      if (error === "no-session") {
+        return h("p", { className: "__dsi_unavailable" }, t("browserNoSession"));
+      }
+      if (!data) {
+        return h("div", { className: "__dsi_root" },
+          h("p", { className: "__dsi_status" }, busy ? t("loading") : t("browserHint")),
+          error ? h("p", { className: "__dsi_error" }, error) : null);
+      }
+
+      var memories = (data.memories || []).filter(function (m) { return m.status === "active"; });
+      var q = query.trim().toLowerCase();
+      var filtered = q ? memories.filter(function (m) { return m.content.toLowerCase().indexOf(q) >= 0 || m.kind.indexOf(q) >= 0; }) : memories;
+
+      function forget(m) {
+        if (!window.confirm(t("browserForgetConfirm") + "\n" + m.content.slice(0, 60))) return;
+        setBusy(true); setNotice(null); setError(null);
+        runCommand("/memory forget " + m.id).then(function () { setNotice(t("browserForgotten")); refresh(); }).catch(function (e) { setError(String(e && e.message || e)); }).finally(function () { setBusy(false); });
+      }
+      function correct(m) {
+        var next = window.prompt(t("browserCorrectPrompt"), m.content);
+        if (next === null || !next.trim()) return;
+        setBusy(true); setNotice(null); setError(null);
+        runCommand("/memory correct " + m.id + " " + next.trim()).then(function () { setNotice(t("browserCorrected")); refresh(); }).catch(function (e) { setError(String(e && e.message || e)); }).finally(function () { setBusy(false); });
+      }
+
+      var listNodes = filtered.slice(0, 200).map(function (m) {
+        return h("div", { key: m.id, className: "__dsi_browserRow" },
+          h("div", { className: "__dsi_browserMain" },
+            h("span", { className: "__dsi_browserKind" }, KIND_LABEL[m.kind] || m.kind),
+            h("span", { className: "__dsi_browserContent" }, m.content),
+            h("span", { className: "__dsi_browserMeta" }, "★" + m.importance + " · 命中" + m.accessCount + " · " + m.id.slice(0, 8))
+          ),
+          h("span", { className: "__dsi_browserOps" },
+            h("button", { type: "button", className: "__dsi_btn", onClick: function () { correct(m); }, disabled: busy }, t("browserCorrect")),
+            h("button", { type: "button", className: "__dsi_btn", onClick: function () { forget(m); }, disabled: busy }, t("browserForget"))
+          )
+        );
+      });
+
+      var scenesNodes = (data.scenes || []).slice(0, 20).map(function (s) {
+        return h("div", { key: s.id, className: "__dsi_browserRow" },
+          h("div", { className: "__dsi_browserMain" },
+            h("span", { className: "__dsi_browserKind" }, "🗂️" + s.title)));
+      });
+
+      return h("div", { className: "__dsi_root" },
+        h("div", { className: "__dsi_row" },
+          h("input", { className: "__dsi_input", style: { maxWidth: 260 }, placeholder: t("browserSearch"), value: query, onChange: function (e) { setQuery(e.target.value); } }),
+          h("button", { type: "button", className: "__dsi_btn", onClick: refresh, disabled: busy }, t("browserRefresh"))
+        ),
+        h("p", { className: "__dsi_status" },
+          t("browserSummary").replace("{n}", String(memories.length)).replace("{p}", String(data.pending || 0)).replace("{s}", String((data.scenes || []).length)).replace("{v}", String(data.persona ? data.persona.ver : "-"))
+        ),
+        notice ? h("p", { className: "__dsi_ok" }, notice) : null,
+        error ? h("p", { className: "__dsi_error" }, error) : null,
+        listNodes.length ? listNodes : h("p", { className: "__dsi_status" }, t("browserEmpty")),
+        (data.scenes || []).length ? h("div", { className: "__dsi_group" }, t("browserScenes")) : null,
+        scenesNodes
+      );
+    }
+
     // ── plugin ────────────────────────────────────────────────────────────
     function apply(ctx) {
       var t = ctx.locale.bind(NS);
@@ -500,6 +642,18 @@ window.__ModuleLoader__.load({
           locale: NS
         }, function (props) {
           return h(MemorySection, Object.assign({}, props, { scope: scope, api: api }));
+        });
+      });
+      // 记忆浏览器标签页（数据经 /memory browser --json 命令 RPC 获取）
+      ctx.slots.inject("settings.section", function () {
+        return ctx.slots.register({
+          name: "settings.section",
+          id: "dsh-self-improved-memories",
+          order: 28,
+          label: function () { return t("browserNav"); },
+          locale: NS
+        }, function (props) {
+          return h(BrowserSection, Object.assign({}, props, { api: api }));
         });
       });
     }

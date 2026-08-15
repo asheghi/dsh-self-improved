@@ -33,6 +33,8 @@ export interface ExtractSettings {
   dedup: boolean;
   /** 坏 JSON 时回退为"原文摘要"记忆，而不是静默丢弃 */
   fallbackOnBadJson: boolean;
+  /** 丢弃重要度低于该值的提取结果（降噪） */
+  minImportance: number;
   /** headless 一次性运行：flush 时同步排空（防 5s 关停超时） */
   flushDrain: boolean;
 }
@@ -121,6 +123,10 @@ export class Extractor {
     let skipped = 0;
     const inserted: Array<{ content: string; id: string }> = [];
     for (const draft of drafts) {
+      if (draft.importance < this.settings.minImportance) {
+        skipped++; // 低价值噪音直接丢弃（降噪）
+        continue;
+      }
       if (this.settings.dedup && this.isDuplicate(draft)) {
         skipped++;
         continue;

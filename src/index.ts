@@ -51,8 +51,10 @@ export interface ExtractConfig {
   timeoutMs: number;
   /** 去重 */
   dedup: boolean;
-  /** 坏 JSON 回退原文摘要 */
+  /** 坏 JSON 回退原文摘要（默认关闭，避免产生低价值摘要噪音） */
   fallbackOnBadJson: boolean;
+  /** 丢弃重要度低于该值的提取结果（降噪，默认 3） */
+  minImportance: number;
   /** headless：flush 时同步排空 */
   flushDrain: boolean;
   /** 提取模型（留空跟随 DSH 默认） */
@@ -120,7 +122,8 @@ export const Config = z.object({
     maxOutputTokens: z.number().min(128).default(2000),
     timeoutMs: z.number().min(5000).default(60000),
     dedup: z.boolean().default(true),
-    fallbackOnBadJson: z.boolean().default(true),
+    fallbackOnBadJson: z.boolean().default(false),
+    minImportance: z.number().min(1).max(10).default(3),
     flushDrain: z.boolean().default(false),
     model: z.string().default(""),
     provider: z.string().default(""),
@@ -187,6 +190,7 @@ export function apply(ctx: Context, config: Config): void {
     timeoutMs: config.extract.timeoutMs,
     dedup: config.extract.dedup,
     fallbackOnBadJson: config.extract.fallbackOnBadJson,
+    minImportance: config.extract.minImportance,
     flushDrain: config.extract.flushDrain,
   };
   const embeddingProvider = createOpenAiEmbedding(config.recall.embedding);

@@ -17,10 +17,14 @@ function err(text: string): CommandOutcome {
   return { kind: "error", text };
 }
 
-/** 记忆命令处理器（纯函数） */
+/** 记忆命令处理器（纯函数）。末尾带 `--json` 时 text 输出 JSON（供设置页记忆浏览器解析） */
 export function handleMemoryCommand(store: MemoryStore, rawInput: string): CommandOutcome {
   const args = rawInput.trim().split(/\s+/).filter(Boolean);
+  const json = args.includes("--json");
   const sub = (args[0] ?? "help").toLowerCase();
+  if (json && sub === "browser") {
+    return ok(JSON.stringify(browserSnapshot(store)));
+  }
   switch (sub) {
     case "search": {
       const q = args.slice(1).join(" ");
@@ -66,11 +70,36 @@ export function handleMemoryCommand(store: MemoryStore, rawInput: string): Comma
         "dsh-self-improved 记忆命令：\n" +
           "/memory search <关键词>\n" +
           "/memory list\n" +
+          "/memory browser --json\n" +
           "/memory forget <id>\n" +
           "/memory correct <id> <新内容>\n" +
           "/memory status",
       );
   }
+}
+
+/** 记忆浏览器快照（设置页前端用） */
+export function browserSnapshot(store: MemoryStore): Record<string, unknown> {
+  const memories = store.listMemories({ limit: 500 }).map((m) => ({
+    id: m.id,
+    kind: m.kind,
+    content: m.content,
+    importance: m.importance,
+    accessCount: m.accessCount,
+    status: m.status,
+    createdAt: m.createdAt,
+    updatedAt: m.updatedAt,
+    supersedes: m.supersedes ?? null,
+  }));
+  const scenes = store.listScenes(100).map((s) => ({ id: s.id, title: s.title, updatedAt: s.updatedAt }));
+  const persona = store.getPersona();
+  return {
+    memories,
+    scenes,
+    persona: persona ? { ver: persona.ver, content: persona.content, createdAt: persona.createdAt } : null,
+    pending: store.pendingSessions().length,
+    updatedAt: Date.now(),
+  };
 }
 
 /** 注册 /memory 命令（仅当宿主存在 commands 服务时；可选能力，不阻塞插件） */
