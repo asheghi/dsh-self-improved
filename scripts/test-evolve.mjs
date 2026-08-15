@@ -73,7 +73,9 @@ if (existsSync(join(skillsRoot, "bump-pnpm-deps", "SKILL.md"))) {
   check("技能含 frontmatter 与步骤", content.includes("name: bump-pnpm-deps") && content.includes("pnpm update"));
 }
 const synthesized2 = await synthesizeSkills(store, skillFakeLlm, { enabled: true, minImportance: 7, skillsRoot }, skillsRoot);
-check("已存在的技能不覆盖", synthesized2 === 0);
+check("撞名时生成后缀副本（-2）", synthesized2 === 1 && existsSync(join(skillsRoot, "bump-pnpm-deps-2", "SKILL.md")));
+const synthesized3 = await synthesizeSkills(store, skillFakeLlm, { enabled: true, minImportance: 7, skillsRoot }, skillsRoot);
+check("继续撞名生成 -3", synthesized3 === 1 && existsSync(join(skillsRoot, "bump-pnpm-deps-3", "SKILL.md")));
 
 store.close();
 console.log(failed === 0 ? "\nALL PASS ✅" : `\n${failed} FAILED ❌`);

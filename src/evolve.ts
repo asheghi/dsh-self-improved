@@ -96,9 +96,15 @@ export async function synthesizeSkills(
     console.warn("[dsh-self-improved] skill synthesis rejected model output (see skills-debug/rejected-latest.txt):", text.slice(0, 120));
     return 0;
   }
-  const dir = join(root, parsed.name);
+  // 撞名容错：已存在同目录时自动加数字后缀（-2, -3…），而不是放弃
+  let dir = join(root, parsed.name);
+  let suffix = 2;
+  while (existsSync(join(dir, "SKILL.md")) && suffix < 20) {
+    dir = join(root, `${parsed.name}-${suffix}`);
+    suffix += 1;
+  }
   const file = join(dir, "SKILL.md");
-  if (existsSync(file)) return 0; // 已存在不覆盖
+  if (existsSync(file)) return 0; // 20 个后缀都撞名，放弃
   mkdirSync(dir, { recursive: true });
   writeFileSync(file, text.endsWith("\n") ? text : text + "\n", { encoding: "utf8" });
   return 1;
