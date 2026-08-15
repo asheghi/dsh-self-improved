@@ -27,7 +27,17 @@ DeepSeek Harness 的**长期记忆与自进化插件**（纯本地）。
 
 ## 安装
 
-### 方式一：从 GitHub 安装（已实测）
+> **0.1.1 起**：包声明了 `dsh.bundle`，**`dsh plugin add` / 插件市场一键安装会自动装配**（dsh 自动注册为 profile layer），**无需再手动改 cordis.patch.yml**。装完重启 dsh 即可。
+
+### 方式一：npm（推荐，市场一键安装同此）
+
+```bash
+dsh plugin --profile web add dsh-self-improved
+# 或插件市场里搜到 dsh-self-improved 点一键安装
+# 装完重启 dsh 即生效（自动装配，无需手动挂载）
+```
+
+### 方式二：从 GitHub 安装（源码快照，含 prepare 自动构建）
 
 ```bash
 # 1) 一次性环境准备（若报 store 不一致 / 构建被拦截）：
@@ -40,10 +50,15 @@ DeepSeek Harness 的**长期记忆与自进化插件**（纯本地）。
 # 2) 安装（dsh plugin 转发给 profile 的 pnpm；github:owner/repo 拉取仓库快照并自动跑 prepare=tsc 构建 lib/）
 dsh plugin --profile web add github:madage/dsh-self-improved
 
-# 3) 激活：在 $DSH_HOME/profiles/web/cordis.patch.yml 的 insert 列表加：
-#    - insert:
-#        - id: dsh-self-improved
-#          name: dsh-self-improved
+# 3) 重启 dsh 生效（0.1.1 起自动装配；若仍不加载，按下方"手动挂载"补 insert）
+```
+
+> 手动挂载（仅旧版本或特殊布局需要）：在 `$DSH_HOME/profiles/web/cordis.patch.yml` 的 insert 列表加：
+> ```yaml
+> - insert:
+>     - id: dsh-self-improved
+>       name: dsh-self-improved
+> ```
 
 # 4) 重启 dsh 生效
 ```
