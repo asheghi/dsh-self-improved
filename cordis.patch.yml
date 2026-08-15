@@ -1,0 +1,10 @@
+# dsh-self-improved — bundle patch layer
+#
+# Declares the plugin as a Cordis loader entry. Shipping this file (and the
+# `dsh.bundle.patch` manifest field) makes the package a standard profile
+# bundle: `dsh plugin --profile <p> add dsh-self-improved` (or installing via
+# the plugin marketplace) mounts it automatically — no manual cordis.patch.yml
+# edits required.
+- insert:
+    - id: dsh-self-improved
+      name: dsh-self-improved
