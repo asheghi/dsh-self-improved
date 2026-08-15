@@ -88,7 +88,12 @@ export async function synthesizeSkills(
   const text = (await callLlm({ system: SKILL_SYSTEM_PROMPT, user: input, signal })).trim();
   const parsed = parseSkillMarkdown(text);
   if (!parsed || !parsed.name) {
-    console.warn("[dsh-self-improved] skill synthesis rejected model output:", text.slice(0, 200));
+    // 失败原因落盘，便于排查（web 控制台日志用户看不到）
+    try {
+      mkdirSync(join(store.dir, "skills-debug"), { recursive: true });
+      writeFileSync(join(store.dir, "skills-debug", "rejected-latest.txt"), text, { encoding: "utf8" });
+    } catch { /* noop */ }
+    console.warn("[dsh-self-improved] skill synthesis rejected model output (see skills-debug/rejected-latest.txt):", text.slice(0, 120));
     return 0;
   }
   const dir = join(root, parsed.name);
