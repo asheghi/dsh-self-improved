@@ -8,6 +8,7 @@
  */
 import type { MemoryStore, MemoryKind, ConversationSliceRecord } from "./storage.js";
 import { tokenize } from "./storage.js";
+import type { EmbeddingProvider } from "./recall.js";
 
 export interface ExtractedMemoryDraft {
   kind: MemoryKind;
@@ -61,6 +62,7 @@ export class Extractor {
     private readonly store: MemoryStore,
     private readonly settings: ExtractSettings,
     private readonly callLlm: ExtractCallLlm,
+    private readonly embedding: EmbeddingProvider | null = null,
   ) {}
 
   /** 处理所有有待处理切片的会话；返回汇总。防重入 + 节流。 */
@@ -117,13 +119,26 @@ export class Extractor {
 
     let memories = 0;
     let skipped = 0;
+    const inserted: Array<{ content: string; id: string }> = [];
     for (const draft of drafts) {
       if (this.settings.dedup && this.isDuplicate(draft)) {
         skipped++;
         continue;
       }
-      this.store.insertMemory(draft);
+      const record = this.store.insertMemory(draft);
+      inserted.push({ content: record.content, id: record.id });
       memories++;
+    }
+    // 向量回填（可选）：配置了 embedding 时写入，供混合检索
+    if (inserted.length > 0 && this.embedding) {
+      try {
+        const vectors = await this.embedding.embed(inserted.map((m) => m.content));
+        inserted.forEach((m, i) => {
+          if (vectors[i]?.length) this.store.upsertEmbedding(m.id, vectors[i]);
+        });
+      } catch (error) {
+        console.warn("[dsh-self-improved] embedding backfill skipped:", String(error));
+      }
     }
     this.store.advanceProcessed(sessionId, toSeq);
     return { memories, skipped };

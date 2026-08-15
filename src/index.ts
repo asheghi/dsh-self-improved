@@ -20,6 +20,8 @@ import { MemoryStore, defaultMemoryDir } from "./storage.js";
 import { installCapture } from "./capture.js";
 import { registerMemoryTools } from "./tools.js";
 import { Extractor, type ExtractSettings } from "./extract.js";
+import { RecallService, createOpenAiEmbedding, type RecallSettings } from "./recall.js";
+import { installRecallInjection } from "./inject.js";
 import { BlockAssembler, createUserMessage } from "@deepseek-ai/dsh-llm";
 
 export const name = "self-improved";
@@ -55,6 +57,23 @@ export interface ExtractConfig {
   provider: string;
 }
 
+export interface EmbeddingConfig {
+  /** OpenAI 兼容 embedding 端点；留空 = 纯关键词召回 */
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  dimensions: number;
+  timeoutMs: number;
+}
+
+export interface RecallConfig {
+  strategy: "keyword" | "hybrid";
+  maxResults: number;
+  scoreThreshold: number;
+  timeoutMs: number;
+  embedding: EmbeddingConfig;
+}
+
 export interface Config {
   /** L1 总开关：随时关闭/开启，热切换，不重启 */
   enabled: boolean;
@@ -68,6 +87,8 @@ export interface Config {
   modules: ModuleSwitches;
   /** L1 提取管线参数 */
   extract: ExtractConfig;
+  /** M3 召回参数 */
+  recall: RecallConfig;
 }
 
 export const Config = z.object({
@@ -93,6 +114,19 @@ export const Config = z.object({
     flushDrain: z.boolean().default(false),
     model: z.string().default(""),
     provider: z.string().default(""),
+  }),
+  recall: z.object({
+    strategy: z.string().default("keyword"),
+    maxResults: z.number().min(1).max(20).default(5),
+    scoreThreshold: z.number().min(0).default(0),
+    timeoutMs: z.number().min(1000).default(5000),
+    embedding: z.object({
+      baseUrl: z.string().default(""),
+      apiKey: z.string().default(""),
+      model: z.string().default(""),
+      dimensions: z.number().min(64).default(1024),
+      timeoutMs: z.number().min(1000).default(10000),
+    }),
   }),
 });
 
@@ -122,7 +156,11 @@ export function apply(ctx: Context, config: Config): void {
     fallbackOnBadJson: config.extract.fallbackOnBadJson,
     flushDrain: config.extract.flushDrain,
   };
-  const extractor = new Extractor(store, extractSettings, async ({ system, user, sessionId, signal }) => {
+  const embeddingProvider = createOpenAiEmbedding(config.recall.embedding);
+  const extractor = new Extractor(
+    store,
+    extractSettings,
+    async ({ system, user, sessionId, signal }) => {
     if (config.debug) {
       console.log("[dsh-self-improved] extract llm input:", typeof user, "len:", String(user).length, "session:", sessionId);
     }
@@ -152,7 +190,9 @@ export function apply(ctx: Context, config: Config): void {
       .filter((b) => b.type === "text")
       .map((b) => b.text)
       .join("");
-  });
+    },
+    embeddingProvider,
+  );
   const runExtract = (): void => {
     extractor.pump().catch((error) => console.warn("[dsh-self-improved] extract pump error:", String(error)));
   };
@@ -180,20 +220,20 @@ export function apply(ctx: Context, config: Config): void {
     log("tools registered (memory_search / conversation_search)");
   }
 
-  // ⑤ 召回注入探针（M3 起真实实现）：agent/pre-step 瀑布，prepend 抢占
-  ctx.on(
-    "agent/pre-step",
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    async (payload: any, next: any) => {
-      const decision = await next();
-      if (decision.kind === "reject" || payload.signal?.aborted) return decision;
-      if (!config.enabled || !config.modules.recall) return decision;
-      log("agent/pre-step", payload.agent?.id, "turn", payload.turn, "step", payload.step);
-      // TODO(M3): recall.search(当前用户消息) → 渲染一条 user 消息追加进 decision.messages
-      return decision;
-    },
-    { prepend: true },
-  );
+  // ⑤ 召回注入（M3）：agent/pre-step 自动注入相关记忆
+  const recallSettings: RecallSettings = {
+    strategy: config.recall.strategy === "hybrid" ? "hybrid" : "keyword",
+    maxResults: config.recall.maxResults,
+    scoreThreshold: config.recall.scoreThreshold,
+    timeoutMs: config.recall.timeoutMs,
+  };
+  const recall = new RecallService(store, recallSettings, embeddingProvider);
+  installRecallInjection(ctx, recall, {
+    enabled: () => config.enabled && config.modules.recall,
+    maxHits: config.recall.maxResults,
+    debug: config.debug,
+  });
+  log("recall injection installed (strategy:", recallSettings.strategy, ")");
 
   // ⑥ 后台管线（M2 起：extract/consolidate/evolve，dsh-schedule 驱动）
   // 注：M0 已确认 schedule 服务不在 headless base 装配中，引入时需按装配判断

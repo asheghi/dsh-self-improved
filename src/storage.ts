@@ -43,6 +43,8 @@ export interface MemorySearchHit {
 
 export interface MemorySearchOptions {
   limit?: number;
+  /** true = 任意词命中（OR，适合召回）；false = 全部词命中（AND，适合精确搜索） */
+  matchAny?: boolean;
 }
 
 export interface ConversationSliceRecord {
@@ -157,16 +159,16 @@ export class MemoryStore {
     return record;
   }
 
-  /** 关键词检索（jieba 分词 + FTS5 + BM25），M1 的主检索路径 */
+  /** 关键词检索（jieba 分词 + FTS5 + BM25）。matchAny=true 用 OR（召回），默认 AND（精确） */
   searchMemories(query: string, options: MemorySearchOptions = {}): MemorySearchHit[] {
     const limit = options.limit ?? 10;
     if (!query.trim()) return [];
-    const escaped = tokenize(query)
+    const terms = tokenize(query)
       .split(/\s+/)
       .filter(Boolean)
-      .map((term) => `"${term}"`)
-      .join(" AND ");
-    if (!escaped) return [];
+      .map((term) => `"${term}"`);
+    if (terms.length === 0) return [];
+    const escaped = terms.join(options.matchAny ? " OR " : " AND ");
     const stmt = this.db.prepare(`
       SELECT m.id, m.kind, m.content, m.importance, m.access_count,
              bm25(memories_fts) AS score
@@ -227,6 +229,36 @@ export class MemoryStore {
   forgetMemory(id: string): boolean {
     const res = this.db.prepare("UPDATE memories SET status = 'forgotten', updated_at = ? WHERE id = ?").run(Date.now(), id);
     return res.changes > 0;
+  }
+
+  // ---------- 向量（M3，sqlite-vec KNN） ----------
+
+  /** 写入/更新记忆向量（向量检索开启时由 recall 调用；vec0 虚拟表不支持 UPSERT，用 INSERT OR REPLACE） */
+  upsertEmbedding(memoryId: string, vector: number[]): boolean {
+    if (!this.vectors) return false;
+    try {
+      this.vectors
+        .prepare("INSERT OR REPLACE INTO memory_vec (memory_id, embedding) VALUES (?, ?)")
+        .run(memoryId, JSON.stringify(vector));
+      return true;
+    } catch (error) {
+      console.warn("[dsh-self-improved] upsertEmbedding failed:", String(error));
+      return false;
+    }
+  }
+
+  /** 向量近邻检索（KNN）；返回 [{memoryId, distance}] */
+  vectorSearch(vector: number[], limit: number): Array<{ memoryId: string; distance: number }> {
+    if (!this.vectors || vector.length === 0) return [];
+    try {
+      const rows = this.vectors
+        .prepare("SELECT memory_id, distance FROM memory_vec WHERE embedding MATCH ? ORDER BY distance LIMIT ?")
+        .all(JSON.stringify(vector), limit) as Array<Record<string, unknown>>;
+      return rows.map((r) => ({ memoryId: String(r.memory_id), distance: Number(r.distance) }));
+    } catch (error) {
+      console.warn("[dsh-self-improved] vectorSearch failed:", String(error));
+      return [];
+    }
   }
 
   deleteMemory(id: string): boolean {
