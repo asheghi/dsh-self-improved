@@ -67,7 +67,6 @@ dsh-self-improved:
 本项目在架构与设计上参考了以下开源项目，衷心感谢它们的作者与社区：
 
 - **[TencentDB Agent Memory](https://github.com/TencentCloud/TencentDB-Agent-Memory)**（腾讯云）—— 四层记忆金字塔（L0 对话捕获 → L1 记忆提取 → L2 场景归纳 → L3 用户画像）与记忆管理思想，是本插件记忆管线的直接启发来源；
-- **[OpenClaw](https://github.com/openclaw/openclaw)**（作者 **Peter Steinberger**）—— 开源个人 AI 助手框架，其「技能（Skill）」组织方式与本插件"技能合成 → dsh-skill"的产物形态一脉相承；
 - **[self-improving-agent](https://github.com/pskoett/self-improving-agent)**（作者 **pskoett**）—— OpenClaw 生态中的自我进化技能：从经验中提炼教训、纠正与可复用流程；本插件的自进化模块（记忆巩固 / 遗忘 / 纠正 + 技能合成）以此为设计灵感。
 
 再次感谢以上项目与作者的开源贡献。
@@ -81,4 +80,12 @@ dsh-self-improved:
 
 ## License
 
-MIT © 2026 mashao
+本项目采用 **MIT License**（MIT 系宽松许可证），完整条款见 [LICENSE](./LICENSE)。
+
+MIT 许可的核心内容：
+
+- **授权**：任何人可免费获得本软件及关联文档（"软件"）的副本，并被授予使用、复制、修改、合并、发布、分发、再许可和/或出售本软件的权利；
+- **条件**：软件的所有副本或实质性部分必须保留上述版权声明与本许可声明；
+- **免责**：软件按"现状"提供，不附带任何明示或暗示的担保（包括但不限于适销性、特定用途适用性及不侵权）；在任何情况下，作者或版权持有人均不对因使用软件产生的任何索赔、损害或其他责任负责。
+
+Copyright (c) 2026 mashao。`package.json` 中 `license` 字段为 `MIT`。
