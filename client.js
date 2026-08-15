@@ -158,6 +158,7 @@ window.__ModuleLoader__.load({
       fSkill: "技能合成（→ dsh-skill）",
       fSkillMin: "技能合成最低重要度",
       fSkillRoot: "技能根目录（留空 = $DSH_HOME/skills）",
+      fSkillPrefix: "合成技能名前缀（如 dsi-，留空=不加）",
       secretHint: "留空保持当前密钥。",
       browserNav: "记忆",
       browserNoSession: "记忆浏览器需要在会话上下文中运行：请先打开/进入一个会话后再查看（聊天输入框敲 / 打开命令菜单也可管理记忆）。",
@@ -264,6 +265,7 @@ window.__ModuleLoader__.load({
       fSkill: "Skill synthesis (→ dsh-skill)",
       fSkillMin: "Skill min importance",
       fSkillRoot: "Skills root (blank = $DSH_HOME/skills)",
+      fSkillPrefix: "Synthesized skill name prefix (e.g. dsi-; blank = none)",
       secretHint: "Leave blank to keep the current key.",
       browserNav: "Memory",
       browserNoSession: "The memory browser needs a session context: open/enter a session first (you can also type \"/\" in chat to open the command menu).",
@@ -320,7 +322,8 @@ window.__ModuleLoader__.load({
       { path: ["evolve", "decay", "retentionDays"], label: "fDecayRetention", type: "number", group: "groupEvolve" },
       { path: ["evolve", "skillSynthesis", "enabled"], label: "fSkill", type: "checkbox", group: "groupEvolve" },
       { path: ["evolve", "skillSynthesis", "minImportance"], label: "fSkillMin", type: "number", group: "groupEvolve" },
-      { path: ["evolve", "skillSynthesis", "skillsRoot"], label: "fSkillRoot", type: "text", group: "groupEvolve" }
+      { path: ["evolve", "skillSynthesis", "skillsRoot"], label: "fSkillRoot", type: "text", group: "groupEvolve" },
+      { path: ["evolve", "skillSynthesis", "prefix"], label: "fSkillPrefix", type: "text", group: "groupEvolve" }
     ];
     FIELDS.forEach(function (f) { f.key = f.path.join("."); });
 

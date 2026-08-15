@@ -77,6 +77,19 @@ check("撞名时生成后缀副本（-2）", synthesized2 === 1 && existsSync(jo
 const synthesized3 = await synthesizeSkills(store, skillFakeLlm, { enabled: true, minImportance: 7, skillsRoot }, skillsRoot);
 check("继续撞名生成 -3", synthesized3 === 1 && existsSync(join(skillsRoot, "bump-pnpm-deps-3", "SKILL.md")));
 
+// 前缀：合成技能名加 dsi- 前缀，撞名时后缀作用于带前缀名
+const pfxRoot = join(dir, "skills-pfx");
+rmSync(pfxRoot, { recursive: true, force: true });
+const pfx1 = await synthesizeSkills(store, skillFakeLlm, { enabled: true, minImportance: 7, skillsRoot: pfxRoot, prefix: "dsi-" }, pfxRoot);
+check("带前缀合成（dsi-bump-pnpm-deps）", pfx1 === 1 && existsSync(join(pfxRoot, "dsi-bump-pnpm-deps", "SKILL.md")));
+const pfxFile = join(pfxRoot, "dsi-bump-pnpm-deps", "SKILL.md");
+if (existsSync(pfxFile)) {
+  const content = readFileSync(pfxFile, "utf8");
+  check("frontmatter name 同步为带前缀名", content.includes("name: dsi-bump-pnpm-deps"));
+}
+const pfx2 = await synthesizeSkills(store, skillFakeLlm, { enabled: true, minImportance: 7, skillsRoot: pfxRoot, prefix: "dsi-" }, pfxRoot);
+check("带前缀撞名生成 dsi-bump-pnpm-deps-2", pfx2 === 1 && existsSync(join(pfxRoot, "dsi-bump-pnpm-deps-2", "SKILL.md")));
+
 store.close();
 console.log(failed === 0 ? "\nALL PASS ✅" : `\n${failed} FAILED ❌`);
 process.exit(failed === 0 ? 0 : 1);

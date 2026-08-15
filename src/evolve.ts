@@ -25,6 +25,8 @@ export interface SkillSynthesisSettings {
   minImportance: number;
   /** 技能根目录；留空 = $DSH_HOME/skills */
   skillsRoot: string;
+  /** 合成技能的名称前缀（标识来源、避免与系统技能撞名）；留空 = 不加前缀 */
+  prefix: string;
 }
 
 export interface EvolveCallLlm {
@@ -96,17 +98,24 @@ export async function synthesizeSkills(
     console.warn("[dsh-self-improved] skill synthesis rejected model output (see skills-debug/rejected-latest.txt):", text.slice(0, 120));
     return 0;
   }
+  // 名称加前缀（标识来源 / 避免与系统技能撞名），并同步改写 frontmatter 的 name
+  const prefix = (settings.prefix ?? "").trim();
+  const baseName = prefix && !parsed.name.startsWith(prefix) ? `${prefix}${parsed.name}` : parsed.name;
+  let finalText = text;
+  if (baseName !== parsed.name) {
+    finalText = text.replace(/^(name:\s*).*$/m, `name: ${baseName}`);
+  }
   // 撞名容错：已存在同目录时自动加数字后缀（-2, -3…），而不是放弃
-  let dir = join(root, parsed.name);
+  let dir = join(root, baseName);
   let suffix = 2;
   while (existsSync(join(dir, "SKILL.md")) && suffix < 20) {
-    dir = join(root, `${parsed.name}-${suffix}`);
+    dir = join(root, `${baseName}-${suffix}`);
     suffix += 1;
   }
   const file = join(dir, "SKILL.md");
   if (existsSync(file)) return 0; // 20 个后缀都撞名，放弃
   mkdirSync(dir, { recursive: true });
-  writeFileSync(file, text.endsWith("\n") ? text : text + "\n", { encoding: "utf8" });
+  writeFileSync(file, finalText.endsWith("\n") ? finalText : finalText + "\n", { encoding: "utf8" });
   return 1;
 }
 

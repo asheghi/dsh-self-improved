@@ -99,7 +99,7 @@ export interface Config {
   /** M4 自进化参数 */
   evolve: {
     decay: { enabled: boolean; minAgeDays: number; threshold: number; retentionDays: number };
-    skillSynthesis: { enabled: boolean; minImportance: number; skillsRoot: string };
+    skillSynthesis: { enabled: boolean; minImportance: number; skillsRoot: string; prefix: string };
   };
 }
 
@@ -157,6 +157,7 @@ export const Config = z.object({
       enabled: z.boolean().default(true),
       minImportance: z.number().min(1).max(10).default(7),
       skillsRoot: z.string().default(""),
+      prefix: z.string().default("dsi-"),
     }),
   }),
 });
@@ -299,6 +300,7 @@ export function apply(ctx: Context, config: Config): void {
             enabled: config.evolve.skillSynthesis.enabled,
             minImportance: config.evolve.skillSynthesis.minImportance,
             skillsRoot: config.evolve.skillSynthesis.skillsRoot,
+            prefix: config.evolve.skillSynthesis.prefix,
           },
           config.evolve.skillSynthesis.skillsRoot,
         )
