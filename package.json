@@ -19,7 +19,10 @@
   ],
   "license": "MIT",
   "dependencies": {
-    "@deepseek-ai/schemastery": "^3.18.1"
+    "@deepseek-ai/dsh-home-paths": "^0.1.0-rc.6",
+    "@deepseek-ai/schemastery": "^3.18.1",
+    "@node-rs/jieba": "^2.0.1",
+    "sqlite-vec": "0.1.7-alpha.2"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
