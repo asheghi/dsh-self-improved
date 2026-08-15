@@ -24,6 +24,7 @@ import { RecallService, createOpenAiEmbedding, type RecallSettings } from "./rec
 import { installRecallInjection } from "./inject.js";
 import { Consolidator } from "./consolidate.js";
 import { applyDecay, synthesizeSkills } from "./evolve.js";
+import { installMemoryCommands } from "./commands.js";
 import { BlockAssembler, createUserMessage } from "@deepseek-ai/dsh-llm";
 
 export const name = "self-improved";
@@ -162,9 +163,14 @@ export function apply(ctx: Context, config: Config): void {
     if (config.debug) console.log("[dsh-self-improved]", ...args);
   };
 
-  // ① 设置命名空间：Web UI 设置页自动渲染表单（随时开关的地基）
-  ctx.settings.register(settingsNamespace("dsh-self-improved"), Config, { base: config });
+  // ① 设置命名空间：Web UI 设置页自动渲染表单 + settings/updated 热应用（随时开关的核心）
+  const ns = settingsNamespace("dsh-self-improved");
+  const scope = ctx.settings.register(ns, Config, { base: config });
   log("settings namespace registered");
+
+  // 运行时可变状态（M5：总开关/模块开关随时切换，无需重启）
+  const state = { enabled: config.enabled, modules: { ...config.modules } };
+  const readModule = (m: keyof ModuleSwitches): boolean => state.enabled && state.modules[m];
 
   // ② 记忆库（M1）：SQLite + FTS5 + sqlite-vec 骨架
   const dir = config.storageRoot.trim() || defaultMemoryDir();
@@ -174,7 +180,7 @@ export function apply(ctx: Context, config: Config): void {
   // ③ L0 捕获 + L1 提取：session/flush 屏障内落盘切片并标记队列；
   //    headless（flushDrain）时同步排空提取，防止 5s 关停超时杀掉管线。
   const extractSettings: ExtractSettings = {
-    enabled: config.enabled && config.modules.extract,
+    enabled: readModule("extract"),
     intervalMinutes: config.extract.intervalMinutes,
     batchMaxChars: config.extract.batchMaxChars,
     maxOutputTokens: config.extract.maxOutputTokens,
@@ -223,7 +229,7 @@ export function apply(ctx: Context, config: Config): void {
     }
     return extractLlm({ system, user, sessionId, signal });
   }, embeddingProvider);
-  installCapture(ctx, store, { enabled: () => config.enabled && config.modules.capture }, () => {
+  installCapture(ctx, store, { enabled: () => readModule("capture") }, () => {
     if (!extractSettings.enabled) return;
     const result = extractor.pump();
     if (extractSettings.flushDrain) return result;
@@ -246,10 +252,10 @@ export function apply(ctx: Context, config: Config): void {
   const skillLlm = makeLlmCall("memory-skill", 3000);
   const runEvolution = (): void => {
     const jobs: Array<Promise<unknown>> = [];
-    if (config.enabled && config.modules.consolidate) {
+    if (readModule("consolidate")) {
       jobs.push(consolidator.consolidate().catch((e) => console.warn("[dsh-self-improved] consolidate error:", String(e))));
     }
-    if (config.enabled && config.modules.evolve) {
+    if (readModule("evolve")) {
       jobs.push(
         Promise.resolve()
           .then(() =>
@@ -298,11 +304,20 @@ export function apply(ctx: Context, config: Config): void {
   });
   log("evolution timer scheduled (every", config.extract.intervalMinutes, "min)");
 
-  // ④ 记忆工具（M1）：memory_search / conversation_search
-  if (config.enabled && config.modules.tools) {
-    registerMemoryTools(ctx, store, config.searchLimit);
-    log("tools registered (memory_search / conversation_search)");
-  }
+  // ④ 记忆工具（M1/M4）：可运行时开关（tools 模块）
+  let toolsDispose: (() => void) | null = null;
+  const syncTools = (): void => {
+    const want = readModule("tools");
+    if (want && !toolsDispose) {
+      toolsDispose = registerMemoryTools(ctx, store, config.searchLimit);
+      log("tools enabled");
+    } else if (!want && toolsDispose) {
+      toolsDispose();
+      toolsDispose = null;
+      log("tools disabled");
+    }
+  };
+  syncTools();
 
   // ⑤ 召回注入（M3）：agent/pre-step 自动注入相关记忆
   const recallSettings: RecallSettings = {
@@ -313,14 +328,30 @@ export function apply(ctx: Context, config: Config): void {
   };
   const recall = new RecallService(store, recallSettings, embeddingProvider);
   installRecallInjection(ctx, recall, {
-    enabled: () => config.enabled && config.modules.recall,
+    enabled: () => readModule("recall"),
     maxHits: config.recall.maxResults,
     debug: config.debug,
   });
   log("recall injection installed (strategy:", recallSettings.strategy, ")");
 
+  // ⑥ CLI 命令（M5）：/memory（宿主提供 commands 服务时生效）
+  if (installMemoryCommands(ctx, store)) {
+    log("memory command installed (/memory)");
+  } else {
+    log("commands service unavailable in this host — skip /memory command");
+  }
+
+  // ⑦ 热应用：settings/updated → 更新运行时状态（随时开关，无需重启）
+  scope.watch((next) => {
+    state.enabled = next.enabled;
+    state.modules = { ...next.modules };
+    extractSettings.enabled = readModule("extract");
+    syncTools();
+    log("runtime config applied:", "enabled=", next.enabled, "modules=", JSON.stringify(next.modules));
+  });
+
   // ⑥ 后台管线（M2 起：extract/consolidate/evolve，dsh-schedule 驱动）
   // 注：M0 已确认 schedule 服务不在 headless base 装配中，引入时需按装配判断
 
-  log("dsh-self-improved 已加载（M4 自进化）");
+  log("dsh-self-improved 已加载（M5 完整版）");
 }

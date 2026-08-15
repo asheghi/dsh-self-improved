@@ -1,12 +1,14 @@
 /**
- * 记忆工具模块（M1）：memory_search（L1 结构化记忆）+ conversation_search（L0 对话全文，复用 ctx.sessionQuery）。
+ * 记忆工具模块（M1/M4）：memory_search / conversation_search / memory_correct / memory_forget。
+ * 返回注销函数（运行时开关工具组用）。
  */
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import type { Context } from "@deepseek-ai/cordis";
 import type { MemoryStore } from "./storage.js";
 
-export function registerMemoryTools(ctx: Context, store: MemoryStore, defaultLimit: number): void {
-  ctx.tools.register(defineTool({
+export function registerMemoryTools(ctx: Context, store: MemoryStore, defaultLimit: number): () => void {
+  const disposers: Array<() => void> = [];
+  disposers.push(ctx.tools.register(defineTool({
     name: "memory_search",
     description:
       "在长期记忆库中搜索结构化记忆（事实/偏好/事件/指令）。当你需要回忆跨会话的历史信息、用户偏好、过往决策时使用。",
@@ -44,9 +46,9 @@ export function registerMemoryTools(ctx: Context, store: MemoryStore, defaultLim
       }
       return { hits: hits.map((h) => ({ id: h.id, kind: h.kind, content: h.content, importance: h.importance })) };
     },
-  }));
+  })));
 
-  ctx.tools.register(defineTool({
+  disposers.push(ctx.tools.register(defineTool({
     name: "conversation_search",
     description:
       "在全部历史会话原文中全文搜索（复用 DSH 会话全文索引）。当你需要找到某次对话的原始表述或细节时使用。",
@@ -93,9 +95,9 @@ export function registerMemoryTools(ctx: Context, store: MemoryStore, defaultLim
         return { hits: [], error: String(error) };
       }
     },
-  }));
+  })));
 
-  ctx.tools.register(defineTool({
+  disposers.push(ctx.tools.register(defineTool({
     name: "memory_correct",
     description:
       "纠正一条记忆：把新内容写入（supersedes 指向旧记忆），旧记忆标记为 corrected。用户明确纠正你记住的内容时使用。",
@@ -126,9 +128,9 @@ export function registerMemoryTools(ctx: Context, store: MemoryStore, defaultLim
       store.setMemoryStatus(old.id, "corrected");
       return { new_id: record.id };
     },
-  }));
+  })));
 
-  ctx.tools.register(defineTool({
+  disposers.push(ctx.tools.register(defineTool({
     name: "memory_forget",
     description: "遗忘一条记忆（标记 forgotten，不再参与检索与注入）。",
     parameters: {
@@ -145,7 +147,8 @@ export function registerMemoryTools(ctx: Context, store: MemoryStore, defaultLim
     async execute(args) {
       return { ok: store.forgetMemory(String(args.memory_id)) };
     },
-  }));
+  })));
+  return () => { for (const d of disposers) d(); };
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
