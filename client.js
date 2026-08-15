@@ -77,7 +77,16 @@ window.__ModuleLoader__.load({
       ".__dsi_collapseChevron{font-size:12px;color:var(--dsw-alias-label-tertiary);transition:transform .15s}" +
       ".__dsi_collapseOpen .__dsi_collapseChevron{transform:rotate(90deg)}" +
       ".__dsi_collapseBody{padding:2px 4px;display:flex;flex-direction:column;gap:8px}" +
-      ".__dsi_persona{white-space:pre-wrap;font-size:13px;line-height:21px;color:var(--dsw-alias-label-secondary);max-height:260px;overflow:auto;border:1px solid var(--dsw-alias-border-l2);border-radius:12px;padding:10px 12px;background:var(--dsw-alias-bg-layer-2)}";
+      ".__dsi_persona{white-space:pre-wrap;font-size:13px;line-height:21px;color:var(--dsw-alias-label-secondary);max-height:260px;overflow:auto;border:1px solid var(--dsw-alias-border-l2);border-radius:12px;padding:10px 12px;background:var(--dsw-alias-bg-layer-2)}" +
+      // 详情弹出框
+      ".__dsi_modalBackdrop{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:1000;padding:24px}" +
+      ".__dsi_modal{background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l2);border-radius:16px;max-width:640px;width:100%;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 8px 40px rgba(0,0,0,.25)}" +
+      ".__dsi_modalHeader{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 18px;border-bottom:1px solid var(--dsw-alias-border-l2)}" +
+      ".__dsi_modalTitle{font-size:15px;font-weight:600;color:var(--dsw-alias-label-primary)}" +
+      ".__dsi_modalBody{padding:16px 18px;overflow:auto;display:flex;flex-direction:column;gap:12px}" +
+      ".__dsi_modalContent{white-space:pre-wrap;word-break:break-all;font-size:14px;line-height:22px;color:var(--dsw-alias-label-primary);border:1px solid var(--dsw-alias-border-l2);border-radius:12px;padding:12px 14px;background:var(--dsw-alias-bg-layer-2)}" +
+      ".__dsi_modalMeta{display:grid;grid-template-columns:auto 1fr;gap:6px 16px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary)}" +
+      ".__dsi_modalMeta b{font-weight:600;color:var(--dsw-alias-label-primary)}";
     var tagId = "dsh-self-improved/main.css";
     if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId) + "]") === null) {
       var tag = document.createElement("style");
@@ -211,6 +220,16 @@ window.__ModuleLoader__.load({
       browserSkillDelete: "删除",
       browserSkillDeleteConfirm: "确认删除这个合成技能？（系统技能不可删）",
       browserSkillDeleted: "已删除",
+      browserDetail: "详情",
+      browserDetailClose: "关闭",
+      browserMetaKind: "类型",
+      browserMetaImportance: "重要度",
+      browserMetaAccess: "命中次数",
+      browserMetaStatus: "状态",
+      browserMetaCreated: "创建时间",
+      browserMetaUpdated: "更新时间",
+      browserMetaId: "ID",
+      browserMetaSupersedes: "替代（纠正链）",
       browserCorrect: "纠正",
       browserForget: "遗忘",
       browserCorrectPrompt: "纠正为：",
@@ -339,6 +358,16 @@ window.__ModuleLoader__.load({
       browserSkillDelete: "Delete",
       browserSkillDeleteConfirm: "Delete this synthesized skill? (system skills are protected)",
       browserSkillDeleted: "Deleted",
+      browserDetail: "Detail",
+      browserDetailClose: "Close",
+      browserMetaKind: "Kind",
+      browserMetaImportance: "Importance",
+      browserMetaAccess: "Access count",
+      browserMetaStatus: "Status",
+      browserMetaCreated: "Created",
+      browserMetaUpdated: "Updated",
+      browserMetaId: "ID",
+      browserMetaSupersedes: "Supersedes",
       browserCorrect: "Fix",
       browserForget: "Forget",
       browserCorrectPrompt: "Correct to:",
@@ -630,6 +659,7 @@ window.__ModuleLoader__.load({
       var [error, setError] = react.useState(null);
       var [query, setQuery] = react.useState("");
       var [notice, setNotice] = react.useState(null);
+      var [closedDetailId, setClosedDetailId] = react.useState(null);
 
       react.useEffect(function () {
         scope.load();
@@ -650,6 +680,12 @@ window.__ModuleLoader__.load({
       if (snapshot.status === "ready" && snapshot.value && typeof snapshot.value.snapshot === "string") {
         try { data = JSON.parse(snapshot.value.snapshot); } catch (e) { data = null; }
       }
+      // 详情弹出框数据（服务端按需返回完整记忆）
+      var detailObj = null;
+      if (snapshot.status === "ready" && snapshot.value && typeof snapshot.value.detail === "string" && snapshot.value.detail) {
+        try { detailObj = JSON.parse(snapshot.value.detail); } catch (e) { detailObj = null; }
+      }
+      var showDetail = detailObj && detailObj.id !== closedDetailId;
 
       if (snapshot.status === "unavailable") {
         return h("p", { className: "__dsi_unavailable" }, t("unavailable"));
@@ -669,6 +705,11 @@ window.__ModuleLoader__.load({
           ns: "dsh-self-improved-browser",
           ops: [{ op: "set", path: ["action"], value: JSON.stringify(action) }]
         });
+      }
+      function viewDetail(m) {
+        setBusy(true); setNotice(null); setError(null);
+        setClosedDetailId(null);
+        sendAction({ op: "detail", id: m.id }).then(function () { setBusy(false); }).catch(function (e) { setBusy(false); setError(String(e && e.message || e)); });
       }
       function refresh() {
         setBusy(true); setNotice(null); setError(null);
@@ -695,6 +736,7 @@ window.__ModuleLoader__.load({
             h("span", { className: "__dsi_browserMeta" }, "★" + m.importance + " · 命中" + m.accessCount + " · " + m.id.slice(0, 8))
           ),
           h("span", { className: "__dsi_browserOps" },
+            h("button", { type: "button", className: "__dsi_btn", onClick: function () { viewDetail(m); }, disabled: busy }, t("browserDetail")),
             h("button", { type: "button", className: "__dsi_btn", onClick: function () { correct(m); }, disabled: busy }, t("browserCorrect")),
             h("button", { type: "button", className: "__dsi_btn", onClick: function () { forget(m); }, disabled: busy }, t("browserForget"))
           )
@@ -765,6 +807,33 @@ window.__ModuleLoader__.load({
         ? (skillsNodes.length ? h("div", { className: "__dsi_collapse" }, skillsNodes) : h("p", { className: "__dsi_status" }, t("browserSkillsEmpty")))
         : h("p", { className: "__dsi_status" }, t("browserSkillsEmpty"));
 
+      var STATUS_LABEL = { active: "活跃", decayed: "已衰减", forgotten: "已遗忘", corrected: "已纠正" };
+      function fmtTime(ts) {
+        try { return new Date(ts).toLocaleString(); } catch (e) { return String(ts); }
+      }
+      var modal = showDetail ? h("div", { className: "__dsi_modalBackdrop", onClick: function () { setClosedDetailId(detailObj.id); } },
+        h("div", { className: "__dsi_modal", onClick: function (e) { e.stopPropagation(); } },
+          h("div", { className: "__dsi_modalHeader" },
+            h("span", { className: "__dsi_modalTitle" }, (KIND_LABEL[detailObj.kind] || detailObj.kind) + " · " + t("browserDetail")),
+            h("button", { type: "button", className: "__dsi_btn", onClick: function () { setClosedDetailId(detailObj.id); } }, t("browserDetailClose"))
+          ),
+          h("div", { className: "__dsi_modalBody" },
+            h("div", { className: "__dsi_modalContent" }, detailObj.content),
+            h("div", { className: "__dsi_modalMeta" },
+              h("b", null, t("browserMetaKind")), h("span", null, detailObj.kind),
+              h("b", null, t("browserMetaImportance")), h("span", null, "★ " + detailObj.importance + " / 10"),
+              h("b", null, t("browserMetaAccess")), h("span", null, String(detailObj.accessCount)),
+              h("b", null, t("browserMetaStatus")), h("span", null, STATUS_LABEL[detailObj.status] || detailObj.status),
+              h("b", null, t("browserMetaCreated")), h("span", null, fmtTime(detailObj.createdAt)),
+              h("b", null, t("browserMetaUpdated")), h("span", null, fmtTime(detailObj.updatedAt)),
+              h("b", null, t("browserMetaId")), h("span", null, detailObj.id),
+              detailObj.supersedes ? h("b", null, t("browserMetaSupersedes")) : null,
+              detailObj.supersedes ? h("span", null, detailObj.supersedes) : null
+            )
+          )
+        )
+      ) : null;
+
       return h("div", { className: "__dsi_root" },
         h("p", { className: "__dsi_status" },
           t("browserSummary").replace("{n}", String(memories.length)).replace("{p}", String(data.pending || 0)).replace("{s}", String(scenesArr.length)).replace("{v}", String(persona ? persona.ver : "-")).replace("{k}", String(skills.length))
@@ -774,7 +843,8 @@ window.__ModuleLoader__.load({
         collapse("persona", t("browserPersona") + (persona ? " v" + persona.ver : ""), persona ? "" : "", personaBody),
         collapse("memories", t("browserMemories"), String(memories.length), memoryBody),
         collapse("scenes", t("browserScenes"), String(scenesArr.length), scenesBody),
-        collapse("skills", t("browserSkills"), String(skills.length), skillsBody)
+        collapse("skills", t("browserSkills"), String(skills.length), skillsBody),
+        modal
       );
     }
 

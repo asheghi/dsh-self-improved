@@ -415,6 +415,7 @@ export function apply(ctx: Context, config: Config): void {
   const BrowserSchema = z.object({
     snapshot: z.string().default("{}"),
     action: z.string().default(""),
+    detail: z.string().default(""),
   });
   const browserScope = ctx.settings.register(browserNs, BrowserSchema);
   let lastSnapshotJson = "";
@@ -437,6 +438,16 @@ export function apply(ctx: Context, config: Config): void {
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const action = JSON.parse(raw) as any;
+      // 详情：按需返回完整记忆（快照里内容是截断的）
+      if (action.op === "detail" && typeof action.id === "string") {
+        const m = store.getMemory(action.id);
+        if (m) {
+          browserScope
+            .replace({ snapshot: lastSnapshotJson, action: "", detail: JSON.stringify(m) })
+            .catch(() => { /* noop */ });
+        }
+        return; // 详情不需要刷新快照
+      }
       if (action.op === "forget" && typeof action.id === "string") {
         store.forgetMemory(action.id);
         log("browser action: forget", action.id.slice(0, 8));
