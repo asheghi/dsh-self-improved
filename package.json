@@ -26,7 +26,8 @@
     "client.js",
     "cordis.patch.yml",
     "LICENSE",
-    "README.md"
+    "README.md",
+    "README.zh.md"
   ],
   "license": "MIT",
   "dependencies": {
