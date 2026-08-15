@@ -16,6 +16,8 @@ import { renderRecallBlock } from "./recall.js";
 export interface InjectController {
   enabled(): boolean;
   maxHits: number;
+  /** 注入块字符上限（防单次注入撑爆上下文） */
+  maxChars?: number;
   debug?: boolean;
 }
 
@@ -44,7 +46,10 @@ export function installRecallInjection(ctx: Context, recall: RecallService, cont
 
       const hits = await recall.search(query, { maxResults: controller.maxHits });
       if (controller.debug) console.log("[dsh-self-improved] recall hits:", hits.length, hits.map((h) => h.kind).join(","));
-      const block = renderRecallBlock(hits, controller.maxHits);
+      let block = renderRecallBlock(hits, controller.maxHits);
+      if (controller.maxChars && block.length > controller.maxChars) {
+        block = block.slice(0, controller.maxChars) + "\n…（已截断）";
+      }
       if (!block) return decision;
 
       // 缓存并注入

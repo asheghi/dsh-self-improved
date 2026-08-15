@@ -23,7 +23,7 @@ import { Extractor, type ExtractSettings } from "./extract.js";
 import { RecallService, createOpenAiEmbedding, type RecallSettings } from "./recall.js";
 import { installRecallInjection } from "./inject.js";
 import { Consolidator } from "./consolidate.js";
-import { applyDecay, synthesizeSkills } from "./evolve.js";
+import { applyDecay, synthesizeSkills, deleteSkill } from "./evolve.js";
 import { installMemoryCommands, browserSnapshot } from "./commands.js";
 import { BlockAssembler, createUserMessage } from "@deepseek-ai/dsh-llm";
 
@@ -76,6 +76,8 @@ export interface RecallConfig {
   maxResults: number;
   scoreThreshold: number;
   timeoutMs: number;
+  /** 注入块字符上限（防单次注入撑爆上下文） */
+  maxInjectChars: number;
   embedding: EmbeddingConfig;
 }
 
@@ -98,8 +100,8 @@ export interface Config {
   consolidate: { sceneMaxMemories: number; personaMaxMemories: number; sceneBatchSize: number };
   /** M4 自进化参数 */
   evolve: {
-    decay: { enabled: boolean; minAgeDays: number; threshold: number; retentionDays: number };
-    skillSynthesis: { enabled: boolean; minImportance: number; skillsRoot: string; prefix: string };
+    decay: { enabled: boolean; minAgeDays: number; threshold: number; retentionDays: number; maxActiveMemories: number };
+    skillSynthesis: { enabled: boolean; minImportance: number; skillsRoot: string; prefix: string; maxSkills: number };
   };
 }
 
@@ -133,6 +135,7 @@ export const Config = z.object({
     maxResults: z.number().min(1).max(20).default(5),
     scoreThreshold: z.number().min(0).default(0),
     timeoutMs: z.number().min(1000).default(5000),
+    maxInjectChars: z.number().min(100).default(800),
     embedding: z.object({
       baseUrl: z.string().default(""),
       apiKey: z.string().default(""),
@@ -149,15 +152,17 @@ export const Config = z.object({
   evolve: z.object({
     decay: z.object({
       enabled: z.boolean().default(true),
-      minAgeDays: z.number().min(1).default(30),
+      minAgeDays: z.number().min(1).default(7),
       threshold: z.number().min(0).default(2),
       retentionDays: z.number().min(0).default(180),
+      maxActiveMemories: z.number().min(0).default(500),
     }),
     skillSynthesis: z.object({
       enabled: z.boolean().default(true),
       minImportance: z.number().min(1).max(10).default(7),
       skillsRoot: z.string().default(""),
       prefix: z.string().default("dsi-"),
+      maxSkills: z.number().min(0).default(100),
     }),
   }),
 });
@@ -285,6 +290,7 @@ export function apply(ctx: Context, config: Config): void {
               minAgeDays: config.evolve.decay.minAgeDays,
               threshold: config.evolve.decay.threshold,
               retentionDays: config.evolve.decay.retentionDays,
+              maxActiveMemories: config.evolve.decay.maxActiveMemories,
             }),
           )
           .then((r) => {
@@ -301,6 +307,7 @@ export function apply(ctx: Context, config: Config): void {
             minImportance: config.evolve.skillSynthesis.minImportance,
             skillsRoot: config.evolve.skillSynthesis.skillsRoot,
             prefix: config.evolve.skillSynthesis.prefix,
+            maxSkills: config.evolve.skillSynthesis.maxSkills,
           },
           config.evolve.skillSynthesis.skillsRoot,
         )
@@ -352,6 +359,7 @@ export function apply(ctx: Context, config: Config): void {
   installRecallInjection(ctx, recall, {
     enabled: () => readModule("recall"),
     maxHits: config.recall.maxResults,
+    maxChars: config.recall.maxInjectChars,
     debug: config.debug,
   });
   log("recall injection installed (strategy:", recallSettings.strategy, ")");
@@ -409,6 +417,10 @@ export function apply(ctx: Context, config: Config): void {
           store.insertMemory({ kind: old.kind, content: action.content, importance: old.importance, supersedes: old.id });
           store.setMemoryStatus(old.id, "corrected");
           log("browser action: correct", action.id.slice(0, 8));
+        }
+      } else if (action.op === "deleteSkill" && typeof action.name === "string") {
+        if (deleteSkill(action.name, config.evolve.skillSynthesis.skillsRoot)) {
+          log("browser action: deleteSkill", action.name);
         }
       }
     } catch {

@@ -6,7 +6,7 @@ import { rmSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { MemoryStore } from "../lib/storage.js";
 import { Consolidator } from "../lib/consolidate.js";
-import { applyDecay, memoryScore, synthesizeSkills } from "../lib/evolve.js";
+import { applyDecay, memoryScore, synthesizeSkills, deleteSkill } from "../lib/evolve.js";
 
 const dir = join(process.env.TEST_DIR ?? "E:\\dshPro\\.dsh-test", "m4-unit");
 rmSync(dir, { recursive: true, force: true });
@@ -89,6 +89,30 @@ if (existsSync(pfxFile)) {
 }
 const pfx2 = await synthesizeSkills(store, skillFakeLlm, { enabled: true, minImportance: 7, skillsRoot: pfxRoot, prefix: "dsi-" }, pfxRoot);
 check("带前缀撞名生成 dsi-bump-pnpm-deps-2", pfx2 === 1 && existsSync(join(pfxRoot, "dsi-bump-pnpm-deps-2", "SKILL.md")));
+
+// 删除技能：仅允许删 dsi- 前缀、格式合法的技能目录
+const d1 = deleteSkill("dsi-bump-pnpm-deps", pfxRoot);
+check("删除带前缀技能", d1 === true && !existsSync(join(pfxRoot, "dsi-bump-pnpm-deps")));
+const d2 = deleteSkill("bump-pnpm-deps", pfxRoot);
+check("无前缀技能拒绝删除", d2 === false);
+const d3 = deleteSkill("../evil", pfxRoot);
+check("非法名拒绝删除", d3 === false);
+
+// 技能上限：达到 maxSkills 后停止合成
+const capRoot = join(dir, "skills-cap");
+rmSync(capRoot, { recursive: true, force: true });
+const cap1 = await synthesizeSkills(store, skillFakeLlm, { enabled: true, minImportance: 7, skillsRoot: capRoot, prefix: "dsi-", maxSkills: 1 }, capRoot);
+check("上限内可合成（1/1）", cap1 === 1 && existsSync(join(capRoot, "dsi-bump-pnpm-deps", "SKILL.md")));
+const cap2 = await synthesizeSkills(store, skillFakeLlm, { enabled: true, minImportance: 7, skillsRoot: capRoot, prefix: "dsi-", maxSkills: 1 }, capRoot);
+check("达到上限停止合成", cap2 === 0);
+
+// 记忆总量上限：超限时自动降级最低分记忆
+const capMem = await import("../lib/storage.js").then((m) => new m.MemoryStore(join(dir, "cap-mem")));
+for (let i = 0; i < 5; i++) capMem.insertMemory({ kind: "fact", content: `第 ${i} 条测试记忆`, importance: 5 });
+const dc = applyDecay(capMem, { enabled: true, minAgeDays: 9999, threshold: 0, retentionDays: 0, maxActiveMemories: 3 });
+check("记忆上限降级最低分（5→3）", dc.decayed === 2, "decayed=" + dc.decayed);
+check("降级后活跃数=3", capMem.getActiveMemories(100).length === 3);
+capMem.close();
 
 store.close();
 console.log(failed === 0 ? "\nALL PASS ✅" : `\n${failed} FAILED ❌`);

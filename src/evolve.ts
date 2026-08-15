@@ -4,7 +4,7 @@
  * 2) 技能合成：把高价值记忆（指令/事件）提炼为可复用 SOP，写入 dsh-skill 文件系统仓库
  *    （$DSH_HOME/skills/<name>/SKILL.md，YAML frontmatter；dsh-skill-filesystem watch 自动加载）。
  */
-import { mkdirSync, writeFileSync, existsSync } from "node:fs";
+import { mkdirSync, writeFileSync, existsSync, rmSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { resolveDshHome } from "@deepseek-ai/dsh-home-paths";
 import type { MemoryStore } from "./storage.js";
@@ -17,6 +17,8 @@ export interface DecaySettings {
   threshold: number;
   /** forgotten 记忆超过多少天被物理清理（0 = 不清理） */
   retentionDays: number;
+  /** 活跃记忆总量上限（0 = 不限）；超限时自动把最低分记忆降级 */
+  maxActiveMemories: number;
 }
 
 export interface SkillSynthesisSettings {
@@ -27,6 +29,8 @@ export interface SkillSynthesisSettings {
   skillsRoot: string;
   /** 合成技能的名称前缀（标识来源、避免与系统技能撞名）；留空 = 不加前缀 */
   prefix: string;
+  /** 合成技能总数上限（0 = 不限）；达到后停止新合成 */
+  maxSkills: number;
 }
 
 export interface EvolveCallLlm {
@@ -70,7 +74,48 @@ export function applyDecay(store: MemoryStore, settings: DecaySettings, now = Da
   if (settings.retentionDays > 0) {
     deleted = store.deleteForgottenOlderThan(now - settings.retentionDays * 86_400_000);
   }
+  // 总量上限：超出时把最低分活跃记忆降级，直到回到上限内
+  if (settings.maxActiveMemories > 0) {
+    const active = store.getActiveMemories(100_000);
+    const overflow = active.length - settings.maxActiveMemories;
+    if (overflow > 0) {
+      const sorted = [...active].sort((a, b) => memoryScore(a, now) - memoryScore(b, now));
+      for (let i = 0; i < overflow; i++) {
+        if (store.setMemoryStatus(sorted[i].id, "decayed")) decayed++;
+      }
+    }
+  }
   return { decayed, deleted };
+}
+
+/** 删除一个合成的技能目录（仅允许 dsi- 前缀或显式授权名，防路径穿越） */
+export function deleteSkill(name: string, skillsRoot = ""): boolean {
+  const trimmed = name.trim();
+  // 只允许删除带前缀的合成技能（本插件产物）
+  const prefix = "dsi-";
+  if (!trimmed.startsWith(prefix)) return false;
+  if (!/^dsi-[a-z0-9-]+$/.test(trimmed)) return false;
+  const root = skillsRoot.trim() || defaultSkillsDir();
+  const dir = join(root, trimmed);
+  if (!existsSync(join(dir, "SKILL.md"))) return false;
+  try {
+    rmSync(dir, { recursive: true, force: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** 统计已合成的技能数（带前缀的目录） */
+export function countSynthesizedSkills(prefix: string, skillsRoot = ""): number {
+  const root = skillsRoot.trim() || defaultSkillsDir();
+  try {
+    return readdirSync(root, { withFileTypes: true })
+      .filter((d) => d.isDirectory() && d.name.startsWith(prefix))
+      .length;
+  } catch {
+    return 0;
+  }
 }
 
 /** 技能合成：一次调用生成一条 SOP 并写入 dsh-skill 仓库；返回写入的技能数 */
@@ -81,6 +126,15 @@ export async function synthesizeSkills(
   skillsRoot: string,
 ): Promise<number> {
   if (!settings.enabled) return 0;
+  // 技能上限：已合成的 dsi-* 技能达到上限则跳过
+  const prefix = (settings.prefix ?? "").trim();
+  if (settings.maxSkills > 0 && prefix) {
+    const root0 = skillsRoot.trim() || defaultSkillsDir();
+    if (countSynthesizedSkills(prefix, root0) >= settings.maxSkills) {
+      console.warn(`[dsh-self-improved] skill synthesis skipped: reached maxSkills=${settings.maxSkills}`);
+      return 0;
+    }
+  }
   const memories = store.getActiveMemories(50, settings.minImportance);
   if (memories.length === 0) return 0;
   const root = skillsRoot.trim() || defaultSkillsDir();
@@ -99,7 +153,6 @@ export async function synthesizeSkills(
     return 0;
   }
   // 名称加前缀（标识来源 / 避免与系统技能撞名），并同步改写 frontmatter 的 name
-  const prefix = (settings.prefix ?? "").trim();
   const baseName = prefix && !parsed.name.startsWith(prefix) ? `${prefix}${parsed.name}` : parsed.name;
   let finalText = text;
   if (baseName !== parsed.name) {

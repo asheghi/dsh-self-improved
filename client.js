@@ -155,10 +155,13 @@ window.__ModuleLoader__.load({
       fDecayAge: "最小存在天数（天）",
       fDecayThreshold: "衰减评分阈值",
       fDecayRetention: "遗忘清理保留期（天，0=不清理）",
+      fDecayMaxActive: "活跃记忆上限（0=不限，超限自动降级最低分）",
       fSkill: "技能合成（→ dsh-skill）",
       fSkillMin: "技能合成最低重要度",
       fSkillRoot: "技能根目录（留空 = $DSH_HOME/skills）",
       fSkillPrefix: "合成技能名前缀（如 dsi-，留空=不加）",
+      fSkillMax: "合成技能数量上限（0=不限）",
+      fRecallInjectChars: "注入块字符上限",
       secretHint: "留空保持当前密钥。",
       browserNav: "记忆",
       browserNoSession: "记忆浏览器需要在会话上下文中运行：请先打开/进入一个会话后再查看（聊天输入框敲 / 打开命令菜单也可管理记忆）。",
@@ -171,6 +174,9 @@ window.__ModuleLoader__.load({
       browserSkills: "已学习到的技能",
       browserSkillsEmpty: "（还没有技能——继续积累记忆，自进化会逐步提炼 SOP）",
       browserSynth: "已合成",
+      browserSkillDelete: "删除",
+      browserSkillDeleteConfirm: "确认删除这个合成技能？（系统技能不可删）",
+      browserSkillDeleted: "已删除",
       browserCorrect: "纠正",
       browserForget: "遗忘",
       browserCorrectPrompt: "纠正为：",
@@ -265,10 +271,13 @@ window.__ModuleLoader__.load({
       fDecayAge: "Min age (days)",
       fDecayThreshold: "Decay score threshold",
       fDecayRetention: "Forgotten retention (days, 0=keep)",
+      fDecayMaxActive: "Max active memories (0=unlimited; overflow auto-decays lowest)",
       fSkill: "Skill synthesis (→ dsh-skill)",
       fSkillMin: "Skill min importance",
       fSkillRoot: "Skills root (blank = $DSH_HOME/skills)",
       fSkillPrefix: "Synthesized skill name prefix (e.g. dsi-; blank = none)",
+      fSkillMax: "Max synthesized skills (0=unlimited)",
+      fRecallInjectChars: "Max injected block chars",
       secretHint: "Leave blank to keep the current key.",
       browserNav: "Memory",
       browserNoSession: "The memory browser needs a session context: open/enter a session first (you can also type \"/\" in chat to open the command menu).",
@@ -281,6 +290,9 @@ window.__ModuleLoader__.load({
       browserSkills: "Learned skills",
       browserSkillsEmpty: "(no skills yet — keep accumulating memories, self-evolution will distill SOPs)",
       browserSynth: "synthesized",
+      browserSkillDelete: "Delete",
+      browserSkillDeleteConfirm: "Delete this synthesized skill? (system skills are protected)",
+      browserSkillDeleted: "Deleted",
       browserCorrect: "Fix",
       browserForget: "Forget",
       browserCorrectPrompt: "Correct to:",
@@ -326,10 +338,12 @@ window.__ModuleLoader__.load({
       { path: ["evolve", "decay", "minAgeDays"], label: "fDecayAge", type: "number", group: "groupEvolve" },
       { path: ["evolve", "decay", "threshold"], label: "fDecayThreshold", type: "number", group: "groupEvolve" },
       { path: ["evolve", "decay", "retentionDays"], label: "fDecayRetention", type: "number", group: "groupEvolve" },
+      { path: ["evolve", "decay", "maxActiveMemories"], label: "fDecayMaxActive", type: "number", group: "groupEvolve" },
       { path: ["evolve", "skillSynthesis", "enabled"], label: "fSkill", type: "checkbox", group: "groupEvolve" },
       { path: ["evolve", "skillSynthesis", "minImportance"], label: "fSkillMin", type: "number", group: "groupEvolve" },
       { path: ["evolve", "skillSynthesis", "skillsRoot"], label: "fSkillRoot", type: "text", group: "groupEvolve" },
-      { path: ["evolve", "skillSynthesis", "prefix"], label: "fSkillPrefix", type: "text", group: "groupEvolve" }
+      { path: ["evolve", "skillSynthesis", "prefix"], label: "fSkillPrefix", type: "text", group: "groupEvolve" },
+      { path: ["evolve", "skillSynthesis", "maxSkills"], label: "fSkillMax", type: "number", group: "groupEvolve" }
     ];
     FIELDS.forEach(function (f) { f.key = f.path.join("."); });
 
@@ -618,6 +632,11 @@ window.__ModuleLoader__.load({
       });
 
       var skills = data.skills || [];
+      function deleteSkill(sk) {
+        if (!window.confirm(t("browserSkillDeleteConfirm") + "\n" + sk.name)) return;
+        setBusy(true); setNotice(null); setError(null);
+        sendAction({ op: "deleteSkill", name: sk.name }).then(function () { setNotice(t("browserSkillDeleted")); }).catch(function (e) { setError(String(e && e.message || e)); }).finally(function () { setBusy(false); });
+      }
       var skillsNodes = skills.map(function (sk) {
         return h("div", { key: sk.name, className: "__dsi_browserRow" },
           h("div", { className: "__dsi_browserMain" },
@@ -625,7 +644,10 @@ window.__ModuleLoader__.load({
             sk.description ? h("span", { className: "__dsi_browserContent" }, sk.description) : null,
             sk.whenToUse ? h("span", { className: "__dsi_browserMeta" }, sk.whenToUse) : null,
             sk.excerpt ? h("span", { className: "__dsi_browserMeta" }, sk.excerpt) : null
-          ));
+          ),
+          sk.synthesized ? h("span", { className: "__dsi_browserOps" },
+            h("button", { type: "button", className: "__dsi_btn", onClick: function () { deleteSkill(sk); }, disabled: busy }, t("browserSkillDelete"))
+          ) : null);
       });
 
       return h("div", { className: "__dsi_root" },
