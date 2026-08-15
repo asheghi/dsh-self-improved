@@ -50,6 +50,19 @@ dsh plugin --profile web add github:madage/dsh-self-improved
 
 > 注意：GitHub 安装拿到的是**仓库快照**，本地改代码需 push 后重装才生效；日常开发建议用下面的方式二（本地 link）。指定分支/标签：`github:madage/dsh-self-improved#main` 或 `#<tag>`。卸载：从 `cordis.patch.yml` 移除 insert + `pnpm remove dsh-self-improved` + 重启。
 
+### ⚠️ 安装须知：peerDependencies 双实例坑（已定位并实测修复）
+
+**症状**：安装后**新建会话正常，但 resume 旧会话报错**——`deployment:persona already registered`，并提示 "register through that agent's agent.ctx instead"。
+
+**根因（不是插件代码问题）**：pnpm 默认 `autoInstallPeers` 会把插件的 `@deepseek-ai/*` peerDependencies 在 profile 的 `node_modules` 里装成**物理副本**，与 dsh 主程序内嵌的同名包（如 `E:\npm-global\node_modules\@deepseek-ai\dsh\node_modules\@deepseek-ai\dsh-scope`）成为**两个独立模块实例**。dsh 的作用域（preset / persona 分层）依赖 `Symbol("dsh.scope")` 做身份绑定，双实例导致 persona 注册掉进全局层，撞上 host 层已注册的 `deployment:persona` → resume 失败；新建会话时全局层尚未被占位、第一次注册恰好成功，所以不报错。
+
+**修复（已实测）**：
+1. 把 profile 里多余的 `@deepseek-ai/*` 物理副本替换为指向 dsh 主程序内嵌包的 **symlink**（dsh 官方自愈布局 `$DSH_HOME/profiles/node_modules`）；
+2. profile 的 `.npmrc` 设 `auto-install-peers=false`（或在 `pnpm-workspace.yaml` 关掉 `autoInstallPeers`），避免 pnpm 再装物理副本。
+
+**给插件使用者的提醒（发布时保留）**：
+> dsh-self-improved 的 peerDependencies 会在 profile 下自动安装物理副本，需配合 dsh 自愈 symlink 布局使用，或将 profile 的 `.npmrc` 设 `auto-install-peers=false`。
+
 ### 方式二：本地开发（file: link）
 
 ```bash
