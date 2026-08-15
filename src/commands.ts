@@ -165,25 +165,25 @@ export function listSkills(limit = 100): Array<{
   return out;
 }
 
-/** 注册 /memory 命令（仅当宿主存在 commands 服务时；可选能力，不阻塞插件） */
+/** 注册 /memory 命令（仅当宿主存在 commands 服务时；可选能力，不阻塞插件）。
+ *  返回 register 的 disposer（调用即注销），供插件跟随总开关热切换注册/注销。 */
 export function installMemoryCommands(
   ctx: Context,
   store: MemoryStore,
-  opts?: { evolve?: () => Promise<Record<string, unknown>> },
-): boolean {
+  opts?: { evolve?: () => Promise<Record<string, unknown>>; isEnabled?: () => boolean },
+): (() => void) | null {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const commands = (ctx as any).get?.("commands");
-  if (!commands) return false;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (ctx as any).effect(function* () {
-    yield async () => {
-      /* cleanup 占位：register 返回的 disposer 由 effect 自动管理 */
-    };
-    yield commands.register({
-      name: "memory",
-      description: "管理 dsh-self-improved 记忆库（search/list/forget/correct/status/evolve）",
-      handler: async (invocation: { rawInput?: string }) => handleMemoryCommand(store, invocation.rawInput ?? "", opts),
-    });
-  }, "dsh-self-improved commands");
-  return true;
+  if (!commands) return null;
+  return commands.register({
+    name: "memory",
+    description: "管理 dsh-self-improved 记忆库（search/list/forget/correct/status/evolve）",
+    handler: async (invocation: { rawInput?: string }) => {
+      // 兜底：即使注销存在时序窗口，关闭状态下也拒绝执行
+      if (opts?.isEnabled && !opts.isEnabled()) {
+        return { kind: "error" as const, text: "插件已关闭（dsh-self-improved enabled=false），/memory 命令不可用" };
+      }
+      return handleMemoryCommand(store, invocation.rawInput ?? "", opts);
+    },
+  });
 }

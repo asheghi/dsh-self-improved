@@ -451,6 +451,7 @@ export function apply(ctx: Context, config: Config): void {
     if (timer) clearInterval(timer);
     if (startupTimer) clearTimeout(startupTimer);
     if (reviewTimer) clearTimeout(reviewTimer);
+    if (commandsDispose) commandsDispose();
     store.close();
   });
   log("schedulers armed (15min maintenance, nightly review, 60s startup backfill); disabling master switch stops all timers");
@@ -486,12 +487,26 @@ export function apply(ctx: Context, config: Config): void {
   });
   log("recall injection installed (strategy:", recallSettings.strategy, ")");
 
-  // ⑥ CLI 命令（M5）：/memory（宿主提供 commands 服务时生效）
-  if (installMemoryCommands(ctx, store, { evolve: () => fullReview("manual") })) {
-    log("memory command installed (/memory)");
-  } else {
-    log("commands service unavailable in this host — skip /memory command");
-  }
+  // ⑥ CLI 命令（M5）：/memory（宿主提供 commands 服务时生效）；跟随总开关热切换注册/注销
+  let commandsDispose: (() => void) | null = null;
+  const syncCommands = (): void => {
+    if (!state.enabled) {
+      if (commandsDispose) {
+        commandsDispose();
+        commandsDispose = null;
+        log("/memory command disabled");
+      }
+      return;
+    }
+    if (commandsDispose) return;
+    commandsDispose = installMemoryCommands(ctx, store, { evolve: () => fullReview("manual"), isEnabled: () => state.enabled });
+    if (commandsDispose) {
+      log("memory command installed (/memory)");
+    } else {
+      log("commands service unavailable in this host — skip /memory command");
+    }
+  };
+  syncCommands();
 
   // ⑦ 热应用：settings/updated → 更新运行时状态（随时开关，无需重启）
   scope.watch((next) => {
@@ -499,6 +514,7 @@ export function apply(ctx: Context, config: Config): void {
     state.modules = { ...next.modules };
     extractSettings.enabled = readModule("extract");
     syncTools();
+    syncCommands(); // 总开关关闭 → 注销 /memory 命令；打开 → 重新注册
     // 夜间回顾时间/开关热切换：重新武装定时器
     if (next.review.enabled !== config.review.enabled || next.review.time !== config.review.time) {
       config.review = { enabled: next.review.enabled, time: next.review.time };
