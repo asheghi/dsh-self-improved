@@ -7,6 +7,9 @@
  * settings scope transport plus nested `settings.mutate` ops. Changes are
  * hot-applied server-side (settings/updated watch) — no restart needed.
  *
+ * Style aligned with the DSH settings UI (14px base, 34px controls, 12px
+ * radius, theme tokens); a "?" help toggle provides a detailed plugin guide.
+ *
  * Hand-written ModuleLoader bundle — no build step required.
  * Pattern reference: dsh-tdai-memory client.js (MIT).
  */
@@ -19,26 +22,34 @@ window.__ModuleLoader__.load({
     var react = require("react");
     var h = react.createElement;
 
-    // ── CSS (theme tokens) ────────────────────────────────────────────────
+    // ── CSS (DSH theme tokens + system sizes) ─────────────────────────────
     var CSS =
-      ".__dsi_root{max-width:680px;display:flex;flex-direction:column;gap:10px}" +
-      ".__dsi_group{font-size:13px;font-weight:700;color:var(--dsw-alias-label-primary);border-bottom:1px solid var(--dsw-alias-border-l2);padding-bottom:4px;margin:8px 0 2px}" +
+      ".__dsi_root{max-width:720px;display:flex;flex-direction:column;gap:10px}" +
+      ".__dsi_header{display:flex;align-items:center;gap:8px;margin-bottom:2px}" +
+      ".__dsi_intro{font-size:13px;line-height:20px;color:var(--dsw-alias-label-secondary);margin:0}" +
+      ".__dsi_helpBtn{flex:none;width:24px;height:24px;border-radius:50%;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);color:var(--dsw-alias-label-primary);font-size:13px;line-height:1;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;padding:0}" +
+      ".__dsi_helpBtn:hover{border-color:var(--dsw-alias-state-business-primary);color:var(--dsw-alias-state-business-primary)}" +
+      ".__dsi_help{background:var(--dsw-alias-bg-layer-2);border:1px solid var(--dsw-alias-border-l2);border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:8px}" +
+      ".__dsi_help h4{margin:0;font-size:14px;line-height:22px;color:var(--dsw-alias-label-primary)}" +
+      ".__dsi_help p{margin:0;font-size:13px;line-height:21px;color:var(--dsw-alias-label-secondary);white-space:pre-wrap}" +
+      ".__dsi_group{font-size:14px;font-weight:600;line-height:22px;color:var(--dsw-alias-label-primary);border-bottom:1px solid var(--dsw-alias-border-l2);padding-bottom:4px;margin:10px 0 4px}" +
       ".__dsi_field{display:flex;flex-direction:column;gap:4px}" +
-      ".__dsi_label{font-size:12px;font-weight:600;color:var(--dsw-alias-label-primary);display:flex;align-items:center;gap:6px}" +
-      ".__dsi_override{font-size:10px;color:var(--dsw-alias-state-business-primary);border:1px solid var(--dsw-alias-border-l2);border-radius:4px;padding:0 4px}" +
-      ".__dsi_hint{font-size:11px;color:var(--dsw-alias-label-tertiary)}" +
-      ".__dsi_input{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);font:inherit;color:var(--dsw-alias-label-primary);border-radius:8px;padding:6px 10px;font-size:13px;box-sizing:border-box;width:100%}" +
+      ".__dsi_label{font-size:13px;line-height:20px;font-weight:500;color:var(--dsw-alias-label-primary);display:flex;align-items:center;gap:6px}" +
+      ".__dsi_override{font-size:11px;color:var(--dsw-alias-state-business-primary);border:1px solid var(--dsw-alias-border-l2);border-radius:4px;padding:0 4px}" +
+      ".__dsi_hint{font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary)}" +
+      ".__dsi_input{box-sizing:border-box;width:100%;height:34px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);color:var(--dsw-alias-label-primary);border-radius:12px;padding:6px 12px;font-family:inherit;font-size:14px;line-height:22px}" +
+      ".__dsi_input:focus{outline:none;border-color:var(--dsw-alias-state-business-primary)}" +
       ".__dsi_row{display:flex;align-items:center;gap:8px}" +
-      ".__dsi_check{accent-color:var(--dsw-alias-state-business-primary)}" +
+      ".__dsi_check{accent-color:var(--dsw-alias-state-business-primary);width:16px;height:16px}" +
       ".__dsi_actions{display:flex;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap}" +
-      ".__dsi_btn{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);color:var(--dsw-alias-label-primary);border-radius:8px;padding:6px 14px;font:inherit;font-size:13px;cursor:pointer}" +
+      ".__dsi_btn{height:34px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);color:var(--dsw-alias-label-primary);border-radius:12px;padding:6px 14px;font:inherit;font-size:14px;line-height:22px;cursor:pointer}" +
       ".__dsi_btn:hover:not(:disabled){border-color:var(--dsw-alias-state-business-primary)}" +
       ".__dsi_btn:disabled{opacity:.5;cursor:default}" +
       ".__dsi_btnPrimary{border-color:var(--dsw-alias-state-business-primary);background:var(--dsw-alias-state-business-primary);color:var(--dsw-alias-label-on-accent)}" +
-      ".__dsi_status{font-size:12px;color:var(--dsw-alias-label-tertiary)}" +
-      ".__dsi_ok{font-size:12px;color:var(--dsw-alias-state-success-primary)}" +
-      ".__dsi_error{font-size:12px;color:var(--dsw-alias-state-error-primary)}" +
-      ".__dsi_unavailable{font-size:13px;color:var(--dsw-alias-label-tertiary)}";
+      ".__dsi_status{font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary)}" +
+      ".__dsi_ok{font-size:12px;line-height:18px;color:var(--dsw-alias-state-success-primary)}" +
+      ".__dsi_error{font-size:12px;line-height:18px;color:var(--dsw-alias-state-error-primary)}" +
+      ".__dsi_unavailable{font-size:13px;line-height:20px;color:var(--dsw-alias-label-tertiary)}";
     var tagId = "dsh-self-improved/main.css";
     if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId) + "]") === null) {
       var tag = document.createElement("style");
@@ -53,7 +64,41 @@ window.__ModuleLoader__.load({
     var inject = ["slots", "locale", "settingsScope", "connection"];
     var zh = {
       nav: "自进化记忆",
-      intro: "dsh-self-improved 配置：L0 捕获 → L1 提取 → L2 场景/L3 画像 → 召回注入与自进化。修改保存后立即生效（无需重启）。",
+      intro: "长期记忆与自进化插件：自动捕获对话、提炼记忆、回合前召回注入，并随时间巩固、遗忘与进化。",
+      helpTitle: "插件说明",
+      help: [
+        "dsh-self-improved 为 DSH 补充跨会话的长期记忆与自进化能力，所有数据默认保存在本地（$DSH_HOME/memory），不上传。",
+        "",
+        "【工作流程】",
+        "L0 对话捕获：每个会话结束时自动把对话写入本地切片，供提取管线使用。",
+        "L1 记忆提取：后台用大模型从对话中提炼「原子记忆」（事实 / 偏好 / 事件 / 指令），带 JSON 校验、去重与敏感信息过滤。",
+        "L2 场景归纳 / L3 用户画像：定期把记忆归纳为场景块，并增量合成用户画像（版本化，可回滚）。",
+        "自动召回注入：新回合开始前，按当前问题检索相关记忆，以「【相关记忆】」块注入给模型——AI 从此记得你。",
+        "自进化：记忆按「重要度 × 新鲜度 × 被引用次数」衰减遗忘；用户可纠正记忆；成功经验可提炼为可复用技能写入 dsh-skill。",
+        "",
+        "【模块开关】",
+        "• 记录对话：捕获 L0（关闭后不再产生新记忆素材）",
+        "• 提炼记忆：L1 提取（关闭后召回仍可用旧记忆）",
+        "• 归纳场景/画像：L2/L3（关闭后画像不更新）",
+        "• 自进化：衰减/技能合成（关闭后记忆只增不减）",
+        "• 自动召回注入：回合前注入（关闭后仍可用工具主动搜索）",
+        "• 记忆工具：memory_search / memory_correct / memory_forget 等模型可见工具",
+        "",
+        "【怎么用】",
+        "• 聊天输入框敲「/」打开命令菜单：/memory status、/memory list、/memory search <词>、/memory forget <id>、/memory correct <id> <新内容>",
+        "• 模型会自动使用记忆工具（memory_search 等），无需手动操作",
+        "• 本页修改保存后立即生效，无需重启",
+        "",
+        "【模型与隐私】",
+        "• 提取/画像/技能默认使用 DSH 默认模型，可在「提取」分组单独指定",
+        "• 敏感凭据（API key / 密码等）会被过滤，不会写入记忆",
+        "• 记忆库纯本地；向量召回需配置 embedding 端点，未配置时自动降级为关键词召回",
+        "",
+        "【注意事项】",
+        "• 提取依赖可用的模型且输出稳定；长会话会分批消化（每次一批、一次调用，30 秒节流）",
+        "• 画像（persona）与技能会在记忆积累到一定量后逐步生成",
+        "• 卸载插件不会自动删除本地记忆数据"
+      ].join("\n"),
       groupMaster: "总开关",
       groupModules: "模块开关",
       groupStorage: "存储",
@@ -111,7 +156,41 @@ window.__ModuleLoader__.load({
     };
     var en = {
       nav: "Evolving Memory",
-      intro: "dsh-self-improved config: L0 capture → L1 extraction → L2 scenes/L3 persona → recall injection & self-evolution. Saves apply immediately (no restart).",
+      intro: "Long-term memory & self-evolution: captures conversations, extracts memories, injects recall before turns, and consolidates/forgets/evolves over time.",
+      helpTitle: "About this plugin",
+      help: [
+        "dsh-self-improved adds cross-session long-term memory and self-evolution to DSH. All data is stored locally by default ($DSH_HOME/memory) — nothing is uploaded.",
+        "",
+        "[Pipeline]",
+        "L0 capture: each session's conversation is saved locally for the extraction pipeline.",
+        "L1 extraction: a background LLM distills atomic memories (fact / preference / event / instruction) with JSON validation, dedup and sensitive-info filtering.",
+        "L2 scenes / L3 persona: memories are grouped into scene blocks; a versioned user persona is synthesized incrementally.",
+        "Auto recall injection: before each turn, relevant memories are retrieved by the current question and injected to the model as a memory block.",
+        "Self-evolution: memories decay by importance × recency × access; users can correct memories; successful patterns can become reusable skills in dsh-skill.",
+        "",
+        "[Module switches]",
+        "• Capture (L0): records conversations (off = no new memory material)",
+        "• Extract (L1): distillation (off = recall still uses old memories)",
+        "• Consolidate (L2/L3): scenes/persona (off = persona not updated)",
+        "• Evolve: decay & skill synthesis (off = memory only grows)",
+        "• Recall injection: pre-turn injection (off = tools still allow manual search)",
+        "• Tools: memory_search / memory_correct / memory_forget model-visible tools",
+        "",
+        "[Usage]",
+        "• Type \"/\" in the chat input to open the command menu: /memory status, /memory list, /memory search <q>, /memory forget <id>, /memory correct <id> <text>",
+        "• The model auto-uses memory tools (memory_search etc.) — no manual action needed",
+        "• Changes here apply immediately after saving — no restart",
+        "",
+        "[Models & privacy]",
+        "• Extraction/persona/skills use DSH's default model; you can set a dedicated one under Extraction",
+        "• Secrets (API keys / passwords) are filtered out of memories",
+        "• Fully local; vector recall needs an embedding endpoint, otherwise keyword-only",
+        "",
+        "[Notes]",
+        "• Extraction needs a working, stable model; long sessions are drained in batches (one LLM call per batch, 30s throttle)",
+        "• Persona and skills appear once memories accumulate",
+        "• Uninstalling the plugin does not delete local memory data"
+      ].join("\n"),
       groupMaster: "Master",
       groupModules: "Modules",
       groupStorage: "Storage",
@@ -230,6 +309,7 @@ window.__ModuleLoader__.load({
       var [busy, setBusy] = react.useState(false);
       var [notice, setNotice] = react.useState(null);
       var [error, setError] = react.useState(null);
+      var [showHelp, setShowHelp] = react.useState(false);
 
       react.useEffect(function () {
         scope.load();
@@ -372,7 +452,19 @@ window.__ModuleLoader__.load({
       });
 
       return h("div", { className: "__dsi_root" },
-        h("p", { className: "__dsi_hint", style: { margin: "0 0 4px" } }, t("intro")),
+        h("div", { className: "__dsi_header" },
+          h("p", { className: "__dsi_intro" }, t("intro")),
+          h("button", {
+            type: "button",
+            className: "__dsi_helpBtn",
+            title: t("helpTitle"),
+            onClick: function () { setShowHelp(!showHelp); }
+          }, "?")
+        ),
+        showHelp ? h("div", { className: "__dsi_help" },
+          h("h4", null, t("helpTitle")),
+          h("p", null, t("help"))
+        ) : null,
         nodes,
         h("div", { className: "__dsi_actions" },
           h("button", { type: "button", className: "__dsi_btn __dsi_btnPrimary", onClick: onSave, disabled: busy || !snapshot.writable }, t("save")),
