@@ -11,6 +11,15 @@
 import z from "@deepseek-ai/schemastery";
 import type { Context } from "@deepseek-ai/cordis";
 import { defineTool } from "@deepseek-ai/dsh-tools";
+import { settingsNamespace } from "@deepseek-ai/dsh-settings";
+
+// 服务类型增强：以下 import 把各 dsh-* 包的 `declare module '@deepseek-ai/cordis'`
+// 类型增强（ctx.settings / ctx.sessions / agent 事件等）引入本次编译。
+import "@deepseek-ai/dsh-session";
+import "@deepseek-ai/dsh-agent";
+import "@deepseek-ai/dsh-system-prompt";
+import "@deepseek-ai/dsh-llm";
+import "@deepseek-ai/dsh-schedule";
 
 export const name = "self-improved";
 
@@ -25,24 +34,37 @@ export const inject = [
   "skills",
 ] as const;
 
-export const Config = z.object({
+/** 模块开关（联动规则见 docs/design/dsh-memory-detailed-design.md §2.5） */
+export interface ModuleSwitches {
+  capture: boolean;
+  extract: boolean;
+  consolidate: boolean;
+  evolve: boolean;
+  recall: boolean;
+  tools: boolean;
+}
+
+export interface Config {
   /** L1 总开关：随时关闭/开启，热切换，不重启 */
-  enabled: z.boolean().default(true),
+  enabled: boolean;
   /** 探针日志（M0 用） */
+  debug: boolean;
+  /** L2 模块开关 */
+  modules: ModuleSwitches;
+}
+
+export const Config = z.object({
+  enabled: z.boolean().default(true),
   debug: z.boolean().default(false),
-  /** L2 模块开关（联动规则见 docs/design/dsh-memory-detailed-design.md §2.5） */
-  modules: z
-    .object({
-      capture: z.boolean().default(true),
-      extract: z.boolean().default(true),
-      consolidate: z.boolean().default(true),
-      evolve: z.boolean().default(true),
-      recall: z.boolean().default(true),
-      tools: z.boolean().default(true),
-    })
-    .default({}),
+  modules: z.object({
+    capture: z.boolean().default(true),
+    extract: z.boolean().default(true),
+    consolidate: z.boolean().default(true),
+    evolve: z.boolean().default(true),
+    recall: z.boolean().default(true),
+    tools: z.boolean().default(true),
+  }),
 });
-export type Config = z.infer<typeof Config>;
 
 export function apply(ctx: Context, config: Config): void {
   const log = (...args: unknown[]): void => {
@@ -52,8 +74,7 @@ export function apply(ctx: Context, config: Config): void {
   // ============ M0 探针接线（逐点验证，随后里程碑替换为真实实现） ============
 
   // ① 设置命名空间：Web UI 设置页自动渲染表单；settings/updated 热应用（随时开关的地基）
-  //    注：register 返回 owner scope；配置变更监听在 M1 实现热应用。
-  ctx.settings.register("dsh-self-improved", Config, { base: config });
+  ctx.settings.register(settingsNamespace("dsh-self-improved"), Config, { base: config });
   log("probe: settings namespace registered");
 
   // ② 会话事件捕获（L0 地基）：session/flush 是持久化屏障，监听器必须 await；
