@@ -110,6 +110,8 @@ export interface Config {
     sceneActiveRatio: number;
     conversationRetentionDays: number;
   };
+  /** M6 夜间回顾计划：每天固定时刻做一次完整进化（提取排空+巩固+技能+治理） */
+  review: { enabled: boolean; time: string };
 }
 
 export const Config = z.object({
@@ -177,6 +179,10 @@ export const Config = z.object({
     maxScenes: z.number().min(1).default(50),
     sceneActiveRatio: z.number().min(0).max(1).default(0.3),
     conversationRetentionDays: z.number().min(0).default(90),
+  }),
+  review: z.object({
+    enabled: z.boolean().default(true),
+    time: z.string().default("22:00"),
   }),
 });
 
@@ -291,15 +297,17 @@ export function apply(ctx: Context, config: Config): void {
   const skillLlm = makeLlmCall("memory-skill", 3000);
   let lastEvolveTs = 0;
   /**
-   * 自进化一轮。force=true（有新记忆/手动/启动）时执行巩固+技能（LLM 重活）；
-   * 否则只做免费维护（衰减+治理）。返回摘要。
+   * 进化一轮。
+   * heavy=true：执行巩固+技能（LLM 重活）——夜间回顾 / 手动 / 启动补跑用；
+   * heavy=false：只做免费维护（衰减+治理）——15 分钟定时轮用。
+   * force=true：忽略"无新记忆"跳过条件（手动/夜间/启动）。
    */
-  const runEvolution = async (force: boolean): Promise<Record<string, unknown>> => {
-    const summary: Record<string, unknown> = { forced: force };
+  const runEvolution = async (force: boolean, heavy = true): Promise<Record<string, unknown>> => {
+    const summary: Record<string, unknown> = { forced: force, heavy };
     const jobs: Array<Promise<unknown>> = [];
     const newest = store.newestMemoryTs();
     const hasNew = newest > lastEvolveTs;
-    const doHeavy = force || (hasNew && (readModule("consolidate") || readModule("evolve")));
+    const doHeavy = heavy && (force || hasNew) && (readModule("consolidate") || readModule("evolve"));
     if (doHeavy && readModule("consolidate")) {
       jobs.push(
         consolidator.consolidate().then((r) => { summary.consolidate = r; }).catch((e) => console.warn("[dsh-self-improved] consolidate error:", String(e))),
@@ -323,7 +331,7 @@ export function apply(ctx: Context, config: Config): void {
           .catch((e) => console.warn("[dsh-self-improved] skill synthesis error:", String(e))),
       );
     }
-    if (!doHeavy) summary.skipped = "no new memories";
+    if (heavy && !doHeavy) summary.skipped = "no new memories";
     // 免费维护：衰减 + 成长治理（无 LLM，每轮都做）
     jobs.push(
       Promise.resolve()
@@ -357,20 +365,59 @@ export function apply(ctx: Context, config: Config): void {
     if (newest > 0) lastEvolveTs = newest;
     return summary;
   };
-  // 定时轮：先提取，若有新记忆立刻接一轮进化；空轮只做维护
+  // 定时轮（15 分钟）：只做"提取 + 免费维护"，不碰 LLM 重活（进化交给夜间回顾/手动/启动补跑）
   const timer = setInterval(() => {
     void extractor
       .pump()
-      .then((r) => {
-        void runEvolution(r.memories > 0);
+      .then(() => runEvolution(false, false))
+      .then((s) => {
+        if (s.skipped) log("maintenance round (no heavy work)");
       })
       .catch((e) => console.warn("[dsh-self-improved] extract pump error:", String(e)));
   }, config.extract.intervalMinutes * 60_000);
   timer.unref?.();
-  // 启动后 ~60s 强制跑一次（若有活跃记忆），让重启后不用干等 15 分钟
+
+  // 完整回顾：排空待提取 + 完整进化（巩固/技能/衰减/治理）
+  const fullReview = async (reason: string): Promise<Record<string, unknown>> => {
+    const pumped = await extractor.pump().catch((e) => {
+      console.warn("[dsh-self-improved] review pump error:", String(e));
+      return { sessions: 0, memories: 0, skipped: 0, errors: 1 };
+    });
+    const summary = await runEvolution(true, true);
+    log(`review(${reason}) done:`, JSON.stringify({ pumped, ...summary }));
+    return { pumped, ...summary };
+  };
+
+  // 夜间回顾：每天 config.review.time（默认 22:00）做一次；完成后重新武装下一天
+  const parseHHMM = (s: string): number => {
+    const m = /^(\d{1,2}):(\d{2})$/.exec(s.trim());
+    if (!m) return 22 * 3_600_000; // 非法配置回退 22:00
+    return Number(m[1]) * 3_600_000 + Number(m[2]) * 60_000;
+  };
+  let reviewTimer: NodeJS.Timeout | undefined;
+  const armNightlyReview = (): void => {
+    const hhmm = parseHHMM(config.review.time);
+    const now = new Date();
+    const target = new Date(now);
+    target.setHours(0, 0, 0, 0);
+    target.setTime(target.getTime() + hhmm);
+    let diff = target.getTime() - now.getTime();
+    if (diff <= 0) diff += 24 * 3_600_000;
+    if (!config.review.enabled) return;
+    reviewTimer = setTimeout(() => {
+      void fullReview("nightly")
+        .catch((e) => console.warn("[dsh-self-improved] nightly review error:", String(e)))
+        .finally(() => armNightlyReview());
+    }, diff);
+    reviewTimer.unref?.();
+    log("nightly review armed at", config.review.time, "(in", Math.round(diff / 60_000), "min)");
+  };
+  armNightlyReview();
+
+  // 启动补跑：~60s 后若有活跃记忆，做一次完整回顾（重启不丢数据、不用等夜间）
   const startupTimer = setTimeout(() => {
     if (store.newestMemoryTs() > 0) {
-      void runEvolution(true).then((s) => log("startup evolution:", JSON.stringify(s)));
+      void fullReview("startup").catch((e) => console.warn("[dsh-self-improved] startup review error:", String(e)));
     }
   }, 60_000);
   startupTimer.unref?.();
@@ -378,9 +425,10 @@ export function apply(ctx: Context, config: Config): void {
   (ctx as any).on("dispose", () => {
     clearInterval(timer);
     clearTimeout(startupTimer);
+    if (reviewTimer) clearTimeout(reviewTimer);
     store.close();
   });
-  log("evolution timer scheduled (every", config.extract.intervalMinutes, "min; change-driven)");
+  log("extract timer every", config.extract.intervalMinutes, "min (maintenance only); evolution via nightly/manual/startup");
 
   // ④ 记忆工具（M1/M4）：可运行时开关（tools 模块）
   let toolsDispose: (() => void) | null = null;
@@ -414,7 +462,7 @@ export function apply(ctx: Context, config: Config): void {
   log("recall injection installed (strategy:", recallSettings.strategy, ")");
 
   // ⑥ CLI 命令（M5）：/memory（宿主提供 commands 服务时生效）
-  if (installMemoryCommands(ctx, store, { evolve: () => runEvolution(true) })) {
+  if (installMemoryCommands(ctx, store, { evolve: () => fullReview("manual") })) {
     log("memory command installed (/memory)");
   } else {
     log("commands service unavailable in this host — skip /memory command");
@@ -426,6 +474,12 @@ export function apply(ctx: Context, config: Config): void {
     state.modules = { ...next.modules };
     extractSettings.enabled = readModule("extract");
     syncTools();
+    // 夜间回顾时间/开关热切换：重新武装定时器
+    if (next.review.enabled !== config.review.enabled || next.review.time !== config.review.time) {
+      config.review = { enabled: next.review.enabled, time: next.review.time };
+      if (reviewTimer) clearTimeout(reviewTimer);
+      armNightlyReview();
+    }
     log("runtime config applied:", "enabled=", next.enabled, "modules=", JSON.stringify(next.modules));
   });
 

@@ -114,6 +114,7 @@ window.__ModuleLoader__.load({
         "L2 场景归纳 / L3 用户画像：定期把记忆归纳为场景块，并增量合成用户画像（版本化，可回滚）。",
         "自动召回注入：新回合开始前，按当前问题检索相关记忆，以「【相关记忆】」块注入给模型——AI 从此记得你。",
         "自进化：记忆按「重要度 × 新鲜度 × 被引用次数」衰减遗忘；用户可纠正记忆；成功经验可提炼为可复用技能写入 dsh-skill。",
+        "调度：每 15 分钟只做「提取 + 免费维护（衰减/清理）」，不耗模型；每天固定时刻（默认 22:00，可改）做一次完整回顾（排空提取 + 场景/画像 + 技能合成 + 治理）；启动后约 60 秒也会补跑一次；也可用 /memory evolve 手动触发。",
         "",
         "【模块开关】",
         "• 记录对话：捕获 L0（关闭后不再产生新记忆素材）",
@@ -146,6 +147,7 @@ window.__ModuleLoader__.load({
       groupConsolidate: "巩固（L2/L3）",
       groupEvolve: "自进化",
       groupHousekeeping: "成长治理（清理策略）",
+      groupReview: "夜间回顾（每日完整进化）",
       save: "保存",
       reset: "恢复默认",
       saved: "已保存并立即生效",
@@ -201,6 +203,8 @@ window.__ModuleLoader__.load({
       fHkSceneRatio: "场景清理：来源记忆活跃比例阈值（0-1）",
       fHkConvDays: "对话切片保留天数（0=不清理）",
       fRecallInjectChars: "注入块字符上限",
+      fReviewEnabled: "启用夜间回顾（每天做一次完整进化）",
+      fReviewTime: "回顾时间（HH:MM，24 小时制）",
       secretHint: "留空保持当前密钥。",
       browserNav: "记忆",
       browserNoSession: "记忆浏览器需要在会话上下文中运行：请先打开/进入一个会话后再查看（聊天输入框敲 / 打开命令菜单也可管理记忆）。",
@@ -252,6 +256,7 @@ window.__ModuleLoader__.load({
         "L2 scenes / L3 persona: memories are grouped into scene blocks; a versioned user persona is synthesized incrementally.",
         "Auto recall injection: before each turn, relevant memories are retrieved by the current question and injected to the model as a memory block.",
         "Self-evolution: memories decay by importance × recency × access; users can correct memories; successful patterns can become reusable skills in dsh-skill.",
+        "Schedule: every 15 min only extraction + free maintenance (decay/cleanup) runs — no LLM cost; a full review (drain extraction + scenes/persona + skills + governance) runs daily at a fixed time (default 22:00, configurable) and ~60s after startup; trigger manually via /memory evolve.",
         "",
         "[Module switches]",
         "• Capture (L0): records conversations (off = no new memory material)",
@@ -284,6 +289,7 @@ window.__ModuleLoader__.load({
       groupConsolidate: "Consolidation (L2/L3)",
       groupEvolve: "Self-evolution",
       groupHousekeeping: "Growth governance",
+      groupReview: "Nightly review (daily full evolution)",
       save: "Save",
       reset: "Reset",
       saved: "Saved — applied immediately",
@@ -339,6 +345,8 @@ window.__ModuleLoader__.load({
       fHkSceneRatio: "Scene GC: source-memory active ratio threshold (0-1)",
       fHkConvDays: "Conversation slice retention days (0=keep all)",
       fRecallInjectChars: "Max injected block chars",
+      fReviewEnabled: "Enable nightly review (one full evolution per day)",
+      fReviewTime: "Review time (HH:MM, 24h)",
       secretHint: "Leave blank to keep the current key.",
       browserNav: "Memory",
       browserNoSession: "The memory browser needs a session context: open/enter a session first (you can also type \"/\" in chat to open the command menu).",
@@ -422,7 +430,9 @@ window.__ModuleLoader__.load({
       { path: ["housekeeping", "personaVersions"], label: "fHkPersona", type: "number", group: "groupHousekeeping" },
       { path: ["housekeeping", "maxScenes"], label: "fHkScenes", type: "number", group: "groupHousekeeping" },
       { path: ["housekeeping", "sceneActiveRatio"], label: "fHkSceneRatio", type: "number", group: "groupHousekeeping" },
-      { path: ["housekeeping", "conversationRetentionDays"], label: "fHkConvDays", type: "number", group: "groupHousekeeping" }
+      { path: ["housekeeping", "conversationRetentionDays"], label: "fHkConvDays", type: "number", group: "groupHousekeeping" },
+      { path: ["review", "enabled"], label: "fReviewEnabled", type: "checkbox", group: "groupReview" },
+      { path: ["review", "time"], label: "fReviewTime", type: "text", group: "groupReview" }
     ];
     FIELDS.forEach(function (f) { f.key = f.path.join("."); });
 
