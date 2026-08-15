@@ -359,6 +359,14 @@ export class MemoryStore {
 
   // ---------- M4：场景 / 画像 / 衰减 ----------
 
+  /** 最新一条活跃记忆的创建时间（0 = 无）；用于"有新记忆才进化"判断 */
+  newestMemoryTs(): number {
+    const row = this.db.prepare("SELECT MAX(created_at) m FROM memories WHERE status = 'active'").get() as
+      | { m: number | null }
+      | undefined;
+    return row && row.m !== null ? row.m : 0;
+  }
+
   /** 当前活跃记忆（供 consolidate / evolve 使用） */
   getActiveMemories(limit: number, minImportance = 0): MemoryRecord[] {
     const rows = minImportance > 0

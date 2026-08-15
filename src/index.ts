@@ -289,44 +289,23 @@ export function apply(ctx: Context, config: Config): void {
     embeddingProvider,
   );
   const skillLlm = makeLlmCall("memory-skill", 3000);
-  const runEvolution = (): void => {
+  let lastEvolveTs = 0;
+  /**
+   * 自进化一轮。force=true（有新记忆/手动/启动）时执行巩固+技能（LLM 重活）；
+   * 否则只做免费维护（衰减+治理）。返回摘要。
+   */
+  const runEvolution = async (force: boolean): Promise<Record<string, unknown>> => {
+    const summary: Record<string, unknown> = { forced: force };
     const jobs: Array<Promise<unknown>> = [];
-    if (readModule("consolidate")) {
-      jobs.push(consolidator.consolidate().catch((e) => console.warn("[dsh-self-improved] consolidate error:", String(e))));
+    const newest = store.newestMemoryTs();
+    const hasNew = newest > lastEvolveTs;
+    const doHeavy = force || (hasNew && (readModule("consolidate") || readModule("evolve")));
+    if (doHeavy && readModule("consolidate")) {
+      jobs.push(
+        consolidator.consolidate().then((r) => { summary.consolidate = r; }).catch((e) => console.warn("[dsh-self-improved] consolidate error:", String(e))),
+      );
     }
-    if (readModule("evolve")) {
-      jobs.push(
-        Promise.resolve()
-          .then(() =>
-            applyDecay(store, {
-              enabled: config.evolve.decay.enabled,
-              minAgeDays: config.evolve.decay.minAgeDays,
-              threshold: config.evolve.decay.threshold,
-              retentionDays: config.evolve.decay.retentionDays,
-              maxActiveMemories: config.evolve.decay.maxActiveMemories,
-            }),
-          )
-          .then((r) => {
-            if (r.decayed > 0 || r.deleted > 0) log("decay applied:", JSON.stringify(r));
-          })
-          .catch((e) => console.warn("[dsh-self-improved] decay error:", String(e))),
-      );
-      // M6 成长治理：画像版本 / 场景 / 对话切片
-      jobs.push(
-        Promise.resolve()
-          .then(() => {
-            const g = {
-              personaVersions: store.prunePersonaVersions(config.housekeeping.personaVersions),
-              scenes: store.pruneScenes(config.housekeeping.maxScenes, config.housekeeping.sceneActiveRatio),
-              slices: store.pruneConversationSlices(
-                Date.now() - config.housekeeping.conversationRetentionDays * 86_400_000,
-              ),
-            };
-            if (g.personaVersions > 0 || g.scenes > 0 || g.slices > 0) log("housekeeping:", JSON.stringify(g));
-            return g;
-          })
-          .catch((e) => console.warn("[dsh-self-improved] housekeeping error:", String(e))),
-      );
+    if (doHeavy && readModule("evolve")) {
       jobs.push(
         synthesizeSkills(
           store,
@@ -340,27 +319,68 @@ export function apply(ctx: Context, config: Config): void {
           },
           config.evolve.skillSynthesis.skillsRoot,
         )
-          .then((n) => {
-            if (n > 0) log("skills synthesized:", n);
-          })
+          .then((n) => { summary.skills = n; if (n > 0) log("skills synthesized:", n); })
           .catch((e) => console.warn("[dsh-self-improved] skill synthesis error:", String(e))),
       );
     }
-    void Promise.allSettled(jobs);
+    if (!doHeavy) summary.skipped = "no new memories";
+    // 免费维护：衰减 + 成长治理（无 LLM，每轮都做）
+    jobs.push(
+      Promise.resolve()
+        .then(() =>
+          applyDecay(store, {
+            enabled: config.evolve.decay.enabled,
+            minAgeDays: config.evolve.decay.minAgeDays,
+            threshold: config.evolve.decay.threshold,
+            retentionDays: config.evolve.decay.retentionDays,
+            maxActiveMemories: config.evolve.decay.maxActiveMemories,
+          }),
+        )
+        .then((r) => { summary.decay = r; if (r.decayed > 0 || r.deleted > 0) log("decay applied:", JSON.stringify(r)); })
+        .catch((e) => console.warn("[dsh-self-improved] decay error:", String(e))),
+    );
+    jobs.push(
+      Promise.resolve()
+        .then(() => {
+          const g = {
+            personaVersions: store.prunePersonaVersions(config.housekeeping.personaVersions),
+            scenes: store.pruneScenes(config.housekeeping.maxScenes, config.housekeeping.sceneActiveRatio),
+            slices: store.pruneConversationSlices(Date.now() - config.housekeeping.conversationRetentionDays * 86_400_000),
+          };
+          if (g.personaVersions > 0 || g.scenes > 0 || g.slices > 0) log("housekeeping:", JSON.stringify(g));
+          return g;
+        })
+        .then((g) => { summary.housekeeping = g; })
+        .catch((e) => console.warn("[dsh-self-improved] housekeeping error:", String(e))),
+    );
+    await Promise.allSettled(jobs);
+    if (newest > 0) lastEvolveTs = newest;
+    return summary;
   };
+  // 定时轮：先提取，若有新记忆立刻接一轮进化；空轮只做维护
   const timer = setInterval(() => {
-    const jobs: Array<Promise<unknown>> = [];
-    jobs.push(extractor.pump().catch((e) => console.warn("[dsh-self-improved] extract pump error:", String(e))));
-    jobs.push(Promise.resolve().then(runEvolution));
-    void Promise.allSettled(jobs);
+    void extractor
+      .pump()
+      .then((r) => {
+        void runEvolution(r.memories > 0);
+      })
+      .catch((e) => console.warn("[dsh-self-improved] extract pump error:", String(e)));
   }, config.extract.intervalMinutes * 60_000);
   timer.unref?.();
+  // 启动后 ~60s 强制跑一次（若有活跃记忆），让重启后不用干等 15 分钟
+  const startupTimer = setTimeout(() => {
+    if (store.newestMemoryTs() > 0) {
+      void runEvolution(true).then((s) => log("startup evolution:", JSON.stringify(s)));
+    }
+  }, 60_000);
+  startupTimer.unref?.();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (ctx as any).on("dispose", () => {
     clearInterval(timer);
+    clearTimeout(startupTimer);
     store.close();
   });
-  log("evolution timer scheduled (every", config.extract.intervalMinutes, "min)");
+  log("evolution timer scheduled (every", config.extract.intervalMinutes, "min; change-driven)");
 
   // ④ 记忆工具（M1/M4）：可运行时开关（tools 模块）
   let toolsDispose: (() => void) | null = null;
@@ -394,7 +414,7 @@ export function apply(ctx: Context, config: Config): void {
   log("recall injection installed (strategy:", recallSettings.strategy, ")");
 
   // ⑥ CLI 命令（M5）：/memory（宿主提供 commands 服务时生效）
-  if (installMemoryCommands(ctx, store)) {
+  if (installMemoryCommands(ctx, store, { evolve: () => runEvolution(true) })) {
     log("memory command installed (/memory)");
   } else {
     log("commands service unavailable in this host — skip /memory command");

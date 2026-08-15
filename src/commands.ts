@@ -21,7 +21,11 @@ function err(text: string): CommandOutcome {
 }
 
 /** 记忆命令处理器（纯函数）。末尾带 `--json` 时 text 输出 JSON（供设置页记忆浏览器解析） */
-export function handleMemoryCommand(store: MemoryStore, rawInput: string): CommandOutcome {
+export function handleMemoryCommand(
+  store: MemoryStore,
+  rawInput: string,
+  opts?: { evolve?: () => Promise<Record<string, unknown>> },
+): CommandOutcome {
   const args = rawInput.trim().split(/\s+/).filter(Boolean);
   const json = args.includes("--json");
   const sub = (args[0] ?? "help").toLowerCase();
@@ -29,6 +33,12 @@ export function handleMemoryCommand(store: MemoryStore, rawInput: string): Comma
     return ok(JSON.stringify(browserSnapshot(store)));
   }
   switch (sub) {
+    case "evolve": {
+      if (!opts?.evolve) return err("进化功能未安装（仅定时运行）");
+      const p = opts.evolve();
+      if (json) return ok(JSON.stringify({ kind: "success", text: "进化已触发", value: {} }));
+      return ok("进化已触发，后台执行中（巩固/衰减/技能/治理）…");
+    }
     case "search": {
       const q = args.slice(1).join(" ");
       if (!q) return err("用法：/memory search <关键词>");
@@ -156,7 +166,11 @@ export function listSkills(limit = 100): Array<{
 }
 
 /** 注册 /memory 命令（仅当宿主存在 commands 服务时；可选能力，不阻塞插件） */
-export function installMemoryCommands(ctx: Context, store: MemoryStore): boolean {
+export function installMemoryCommands(
+  ctx: Context,
+  store: MemoryStore,
+  opts?: { evolve?: () => Promise<Record<string, unknown>> },
+): boolean {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const commands = (ctx as any).get?.("commands");
   if (!commands) return false;
@@ -167,8 +181,8 @@ export function installMemoryCommands(ctx: Context, store: MemoryStore): boolean
     };
     yield commands.register({
       name: "memory",
-      description: "管理 dsh-self-improved 记忆库（search/list/forget/correct/status）",
-      handler: async (invocation: { rawInput?: string }) => handleMemoryCommand(store, invocation.rawInput ?? ""),
+      description: "管理 dsh-self-improved 记忆库（search/list/forget/correct/status/evolve）",
+      handler: async (invocation: { rawInput?: string }) => handleMemoryCommand(store, invocation.rawInput ?? "", opts),
     });
   }, "dsh-self-improved commands");
   return true;
