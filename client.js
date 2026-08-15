@@ -488,7 +488,7 @@ window.__ModuleLoader__.load({
             return;
           }
           setNotice(t("saved"));
-          if (response.result.value) setDraft(Object.assign({}, valueToDraft(response.result.value)));
+          // 注意：不要用响应值重建 draft——响应可能是部分数据，缺字段会被渲染成 false（导致开关全关）
           scope.load();
         }).catch(function (e) {
           setBusy(false); setError(t("error") + ": " + String(e && e.message || e));
@@ -505,7 +505,6 @@ window.__ModuleLoader__.load({
           setBusy(false);
           if (!response.result.ok) { setError(t("error")); return; }
           setNotice(t("saved"));
-          if (response.result.value) setDraft(Object.assign({}, valueToDraft(response.result.value)));
           scope.load();
         }).catch(function (e) {
           setBusy(false); setError(t("error") + ": " + String(e && e.message || e));
