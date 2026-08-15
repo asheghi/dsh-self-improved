@@ -6,7 +6,7 @@
  *
  * 设计对齐：docs/design/dsh-memory-plugin-design.md §4.2 / §5.3
  */
-import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync, existsSync, copyFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
@@ -107,6 +107,21 @@ export class MemoryStore {
         processed_seq INTEGER NOT NULL DEFAULT 0,
         pending_seq   INTEGER NOT NULL DEFAULT 0,
         updated_at    INTEGER NOT NULL
+      ) STRICT;
+      -- L2 场景块（M4）
+      CREATE TABLE IF NOT EXISTS scenes (
+        id           TEXT PRIMARY KEY,
+        title        TEXT NOT NULL,
+        markdown     TEXT NOT NULL,
+        memory_ids   TEXT NOT NULL DEFAULT '[]',
+        created_at   INTEGER NOT NULL,
+        updated_at   INTEGER NOT NULL
+      ) STRICT;
+      -- L3 用户画像版本（M4，append-only 便于回滚）
+      CREATE TABLE IF NOT EXISTS persona_versions (
+        ver        INTEGER PRIMARY KEY AUTOINCREMENT,
+        content    TEXT NOT NULL,
+        created_at INTEGER NOT NULL
       ) STRICT;
     `);
   }
@@ -341,6 +356,91 @@ export class MemoryStore {
       .prepare("UPDATE extract_state SET processed_seq = ?, updated_at = ? WHERE session_id = ?")
       .run(seq, Date.now(), sessionId);
   }
+
+  // ---------- M4：场景 / 画像 / 衰减 ----------
+
+  /** 当前活跃记忆（供 consolidate / evolve 使用） */
+  getActiveMemories(limit: number, minImportance = 0): MemoryRecord[] {
+    const rows = minImportance > 0
+      ? this.db.prepare("SELECT * FROM memories WHERE status = 'active' AND importance >= ? ORDER BY importance DESC, updated_at DESC LIMIT ?").all(minImportance, limit)
+      : this.db.prepare("SELECT * FROM memories WHERE status = 'active' ORDER BY importance DESC, updated_at DESC LIMIT ?").all(limit);
+    return (rows as Array<Record<string, unknown>>).map((r) => ({
+      id: String(r.id),
+      kind: r.kind as MemoryKind,
+      content: String(r.content),
+      importance: Number(r.importance),
+      accessCount: Number(r.access_count),
+      createdAt: Number(r.created_at),
+      updatedAt: Number(r.updated_at),
+      status: r.status as MemoryStatus,
+      supersedes: r.supersedes == null ? undefined : String(r.supersedes),
+    }));
+  }
+
+  /** 设置记忆状态（corrected / decayed / forgotten / active） */
+  setMemoryStatus(id: string, status: MemoryStatus): boolean {
+    const res = this.db.prepare("UPDATE memories SET status = ?, updated_at = ? WHERE id = ?").run(status, Date.now(), id);
+    return res.changes > 0;
+  }
+
+  /** 保存画像（版本 +1，写 persona.md 镜像） */
+  savePersona(content: string): number {
+    const now = Date.now();
+    const res = this.db.prepare("INSERT INTO persona_versions (content, created_at) VALUES (?, ?)").run(content, now);
+    const ver = Number(res.lastInsertRowid);
+    const dir = join(this.dir, "persona");
+    mkdirSync(dir, { recursive: true });
+    // 滚动备份：保留 persona.md.bak1 / .bak2
+    const main = join(dir, "persona.md");
+    if (existsSyncSafe(main)) {
+      const bak2 = join(dir, "persona.md.bak2");
+      const bak1 = join(dir, "persona.md.bak1");
+      if (existsSyncSafe(bak1)) copyFileSyncSafe(bak1, bak2);
+      copyFileSyncSafe(main, bak1);
+    }
+    writeFileSync(main, content, { encoding: "utf8" });
+    return ver;
+  }
+
+  /** 读取最新画像（无则 undefined） */
+  getPersona(): { ver: number; content: string; createdAt: number } | undefined {
+    const row = this.db.prepare("SELECT ver, content, created_at FROM persona_versions ORDER BY ver DESC LIMIT 1").get() as
+      | Record<string, unknown>
+      | undefined;
+    if (!row) return undefined;
+    return { ver: Number(row.ver), content: String(row.content), createdAt: Number(row.created_at) };
+  }
+
+  /** 保存场景块 */
+  saveScene(input: { id: string; title: string; markdown: string; memoryIds: string[] }): void {
+    const now = Date.now();
+    this.db
+      .prepare(
+        `INSERT INTO scenes (id, title, markdown, memory_ids, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET title = excluded.title, markdown = excluded.markdown, memory_ids = excluded.memory_ids, updated_at = excluded.updated_at`,
+      )
+      .run(input.id, input.title, input.markdown, JSON.stringify(input.memoryIds), now, now);
+  }
+
+  listScenes(limit = 20): Array<{ id: string; title: string; markdown: string; memoryIds: string[]; updatedAt: number }> {
+    const rows = this.db.prepare("SELECT * FROM scenes ORDER BY updated_at DESC LIMIT ?").all(limit) as Array<Record<string, unknown>>;
+    return rows.map((r) => ({
+      id: String(r.id),
+      title: String(r.title),
+      markdown: String(r.markdown),
+      memoryIds: JSON.parse(String(r.memory_ids)) as string[],
+      updatedAt: Number(r.updated_at),
+    }));
+  }
+
+  /** 删除超过保留期的 forgotten 记忆（清理） */
+  deleteForgottenOlderThan(ts: number): number {
+    const res = this.db
+      .prepare("DELETE FROM memories WHERE status = 'forgotten' AND updated_at < ?")
+      .run(ts);
+    return Number(res.changes);
+  }
 }
 
 /**
@@ -370,6 +470,22 @@ export function tokenize(text: string): string {
 
 function safeSegment(id: string): string {
   return id.replace(/[^a-zA-Z0-9_-]/g, "_");
+}
+
+function existsSyncSafe(path: string): boolean {
+  try {
+    return existsSync(path);
+  } catch {
+    return false;
+  }
+}
+
+function copyFileSyncSafe(from: string, to: string): void {
+  try {
+    copyFileSync(from, to);
+  } catch {
+    /* 备份失败不阻断画像保存 */
+  }
 }
 
 export function defaultMemoryDir(): string {

@@ -22,6 +22,8 @@ import { registerMemoryTools } from "./tools.js";
 import { Extractor, type ExtractSettings } from "./extract.js";
 import { RecallService, createOpenAiEmbedding, type RecallSettings } from "./recall.js";
 import { installRecallInjection } from "./inject.js";
+import { Consolidator } from "./consolidate.js";
+import { applyDecay, synthesizeSkills } from "./evolve.js";
 import { BlockAssembler, createUserMessage } from "@deepseek-ai/dsh-llm";
 
 export const name = "self-improved";
@@ -89,6 +91,13 @@ export interface Config {
   extract: ExtractConfig;
   /** M3 召回参数 */
   recall: RecallConfig;
+  /** M4 巩固（L2/L3）参数 */
+  consolidate: { sceneMaxMemories: number; personaMaxMemories: number; sceneBatchSize: number };
+  /** M4 自进化参数 */
+  evolve: {
+    decay: { enabled: boolean; minAgeDays: number; threshold: number; retentionDays: number };
+    skillSynthesis: { enabled: boolean; minImportance: number; skillsRoot: string };
+  };
 }
 
 export const Config = z.object({
@@ -128,6 +137,24 @@ export const Config = z.object({
       timeoutMs: z.number().min(1000).default(10000),
     }),
   }),
+  consolidate: z.object({
+    sceneMaxMemories: z.number().min(1).default(50),
+    personaMaxMemories: z.number().min(1).default(30),
+    sceneBatchSize: z.number().min(1).max(20).default(8),
+  }),
+  evolve: z.object({
+    decay: z.object({
+      enabled: z.boolean().default(true),
+      minAgeDays: z.number().min(1).default(30),
+      threshold: z.number().min(0).default(2),
+      retentionDays: z.number().min(0).default(180),
+    }),
+    skillSynthesis: z.object({
+      enabled: z.boolean().default(true),
+      minImportance: z.number().min(1).max(10).default(7),
+      skillsRoot: z.string().default(""),
+    }),
+  }),
 });
 
 export function apply(ctx: Context, config: Config): void {
@@ -157,45 +184,45 @@ export function apply(ctx: Context, config: Config): void {
     flushDrain: config.extract.flushDrain,
   };
   const embeddingProvider = createOpenAiEmbedding(config.recall.embedding);
-  const extractor = new Extractor(
-    store,
-    extractSettings,
-    async ({ system, user, sessionId, signal }) => {
+
+  // 通用 LLM 调用器（提取/巩固/技能合成共用；复用 DSH 模型栈）
+  const makeLlmCall = (purpose: string, maxTokens: number) =>
+    async (input: { system: string; user: string; sessionId?: string; signal: AbortSignal }): Promise<string> => {
+      const assembler = new BlockAssembler();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const options: any = {
+        messages: [
+          createUserMessage({
+            content: [{ type: "text", text: input.user }],
+            source: { kind: "plugin", plugin: "dsh-self-improved" },
+          }),
+        ],
+        system: input.system,
+        maxTokens,
+        purpose,
+        signal: input.signal,
+      };
+      if (input.sessionId) options.sessionId = input.sessionId;
+      if (config.extract.provider) options.provider = config.extract.provider;
+      if (config.extract.model) options.model = config.extract.model;
+      for await (const chunk of ctx.llm.stream(options)) {
+        input.signal.throwIfAborted();
+        assembler.push(chunk);
+      }
+      return assembler
+        .blocks()
+        .filter((b) => b.type === "text")
+        .map((b) => b.text)
+        .join("");
+    };
+  const extractLlm = makeLlmCall("memory-extract", extractSettings.maxOutputTokens);
+
+  const extractor = new Extractor(store, extractSettings, async ({ system, user, sessionId, signal }) => {
     if (config.debug) {
       console.log("[dsh-self-improved] extract llm input:", typeof user, "len:", String(user).length, "session:", sessionId);
     }
-    const assembler = new BlockAssembler();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const options: any = {
-      messages: [
-        createUserMessage({
-          content: [{ type: "text", text: user }],
-          source: { kind: "plugin", plugin: "dsh-self-improved" },
-        }),
-      ],
-      system,
-      maxTokens: extractSettings.maxOutputTokens,
-      sessionId,
-      purpose: "memory-extract",
-      signal,
-    };
-    if (config.extract.provider) options.provider = config.extract.provider;
-    if (config.extract.model) options.model = config.extract.model;
-    for await (const chunk of ctx.llm.stream(options)) {
-      signal.throwIfAborted();
-      assembler.push(chunk);
-    }
-    return assembler
-      .blocks()
-      .filter((b) => b.type === "text")
-      .map((b) => b.text)
-      .join("");
-    },
-    embeddingProvider,
-  );
-  const runExtract = (): void => {
-    extractor.pump().catch((error) => console.warn("[dsh-self-improved] extract pump error:", String(error)));
-  };
+    return extractLlm({ system, user, sessionId, signal });
+  }, embeddingProvider);
   installCapture(ctx, store, { enabled: () => config.enabled && config.modules.capture }, () => {
     if (!extractSettings.enabled) return;
     const result = extractor.pump();
@@ -204,15 +231,72 @@ export function apply(ctx: Context, config: Config): void {
   });
   log("capture + extract installed");
 
-  // 定时泵（dsh-schedule 不在 headless base 装配中，M2 用进程内定时器）
-  const timer = setInterval(runExtract, config.extract.intervalMinutes * 60_000);
+  // 定时进化管线（dsh-schedule 不在 headless base 装配中，用进程内定时器）
+  const consolidateLlm = makeLlmCall("memory-consolidate", 2000);
+  const consolidator = new Consolidator(
+    store,
+    {
+      sceneMaxMemories: config.consolidate.sceneMaxMemories,
+      personaMaxMemories: config.consolidate.personaMaxMemories,
+      sceneBatchSize: config.consolidate.sceneBatchSize,
+    },
+    async ({ system, user, signal }) => consolidateLlm({ system, user, signal }),
+    embeddingProvider,
+  );
+  const skillLlm = makeLlmCall("memory-skill", 3000);
+  const runEvolution = (): void => {
+    const jobs: Array<Promise<unknown>> = [];
+    if (config.enabled && config.modules.consolidate) {
+      jobs.push(consolidator.consolidate().catch((e) => console.warn("[dsh-self-improved] consolidate error:", String(e))));
+    }
+    if (config.enabled && config.modules.evolve) {
+      jobs.push(
+        Promise.resolve()
+          .then(() =>
+            applyDecay(store, {
+              enabled: config.evolve.decay.enabled,
+              minAgeDays: config.evolve.decay.minAgeDays,
+              threshold: config.evolve.decay.threshold,
+              retentionDays: config.evolve.decay.retentionDays,
+            }),
+          )
+          .then((r) => {
+            if (r.decayed > 0 || r.deleted > 0) log("decay applied:", JSON.stringify(r));
+          })
+          .catch((e) => console.warn("[dsh-self-improved] decay error:", String(e))),
+      );
+      jobs.push(
+        synthesizeSkills(
+          store,
+          async ({ system, user, signal }) => skillLlm({ system, user, signal }),
+          {
+            enabled: config.evolve.skillSynthesis.enabled,
+            minImportance: config.evolve.skillSynthesis.minImportance,
+            skillsRoot: config.evolve.skillSynthesis.skillsRoot,
+          },
+          config.evolve.skillSynthesis.skillsRoot,
+        )
+          .then((n) => {
+            if (n > 0) log("skills synthesized:", n);
+          })
+          .catch((e) => console.warn("[dsh-self-improved] skill synthesis error:", String(e))),
+      );
+    }
+    void Promise.allSettled(jobs);
+  };
+  const timer = setInterval(() => {
+    const jobs: Array<Promise<unknown>> = [];
+    jobs.push(extractor.pump().catch((e) => console.warn("[dsh-self-improved] extract pump error:", String(e))));
+    jobs.push(Promise.resolve().then(runEvolution));
+    void Promise.allSettled(jobs);
+  }, config.extract.intervalMinutes * 60_000);
   timer.unref?.();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (ctx as any).on("dispose", () => {
     clearInterval(timer);
     store.close();
   });
-  log("extract timer scheduled (every", config.extract.intervalMinutes, "min)");
+  log("evolution timer scheduled (every", config.extract.intervalMinutes, "min)");
 
   // ④ 记忆工具（M1）：memory_search / conversation_search
   if (config.enabled && config.modules.tools) {
@@ -238,5 +322,5 @@ export function apply(ctx: Context, config: Config): void {
   // ⑥ 后台管线（M2 起：extract/consolidate/evolve，dsh-schedule 驱动）
   // 注：M0 已确认 schedule 服务不在 headless base 装配中，引入时需按装配判断
 
-  log("dsh-self-improved 已加载（M1 记忆库）");
+  log("dsh-self-improved 已加载（M4 自进化）");
 }

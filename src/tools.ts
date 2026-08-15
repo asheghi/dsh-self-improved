@@ -94,6 +94,58 @@ export function registerMemoryTools(ctx: Context, store: MemoryStore, defaultLim
       }
     },
   }));
+
+  ctx.tools.register(defineTool({
+    name: "memory_correct",
+    description:
+      "纠正一条记忆：把新内容写入（supersedes 指向旧记忆），旧记忆标记为 corrected。用户明确纠正你记住的内容时使用。",
+    parameters: {
+      memory_id: { type: "string", description: "要纠正的旧记忆 id", required: true },
+      new_content: { type: "string", description: "纠正后的内容（一句话）", required: true },
+      kind: { type: "string", description: "新记忆类型（可选，默认沿用旧记忆类型）" },
+    },
+    output: {
+      schema: {
+        type: "object",
+        additionalProperties: false,
+        properties: { new_id: { type: "string" }, error: { type: "string" } },
+      },
+      render: (_args, value) => [{ type: "text", text: value.new_id ? `已纠正记忆，新 id: ${value.new_id}` : `纠正失败：${value.error}` }],
+    },
+    async execute(args) {
+      const old = store.getMemory(String(args.memory_id));
+      if (!old) return { error: "未找到该记忆" };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const kind = (args.kind as any) || old.kind;
+      const record = store.insertMemory({
+        kind,
+        content: String(args.new_content),
+        importance: old.importance,
+        supersedes: old.id,
+      });
+      store.setMemoryStatus(old.id, "corrected");
+      return { new_id: record.id };
+    },
+  }));
+
+  ctx.tools.register(defineTool({
+    name: "memory_forget",
+    description: "遗忘一条记忆（标记 forgotten，不再参与检索与注入）。",
+    parameters: {
+      memory_id: { type: "string", description: "要遗忘的记忆 id", required: true },
+    },
+    output: {
+      schema: {
+        type: "object",
+        additionalProperties: false,
+        properties: { ok: { type: "boolean" } },
+      },
+      render: (_args, value) => [{ type: "text", text: value.ok ? "已遗忘该记忆" : "未找到该记忆" }],
+    },
+    async execute(args) {
+      return { ok: store.forgetMemory(String(args.memory_id)) };
+    },
+  }));
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
