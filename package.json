@@ -10,10 +10,17 @@
       "types": "./lib/index.d.ts",
       "default": "./lib/index.js"
     },
+    "./client": "./client.js",
     "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "platform": "web"
+    }
   },
   "files": [
     "lib",
+    "client.js",
     "LICENSE",
     "README.md"
   ],
