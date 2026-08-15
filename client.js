@@ -504,7 +504,8 @@ window.__ModuleLoader__.load({
           }
           if (f.type === "checkbox") {
             if (Boolean(d) === Boolean(current)) continue;
-            ops.push(Boolean(d) ? { op: "set", path: f.path, value: true } : { op: "unset", path: f.path });
+            // 注意：关闭必须 set false——unset 会让解析值回落 schema 默认值（多为 true），开关等于没关
+            ops.push({ op: "set", path: f.path, value: Boolean(d) });
             continue;
           }
           if (f.type === "select") {
