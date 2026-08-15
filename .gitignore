@@ -5,6 +5,5 @@ dist/
 .DS_Store
 *.tsbuildinfo
 
-# 本地设计/调研文档（仅本地保留，不进版本库）
-docs/design/
-docs/research/
+# 本地文档（设计/调研/运维笔记，仅本地保留，不进版本库）
+docs/

@@ -73,10 +73,10 @@ dsh-self-improved:
 
 ## 文档
 
-- `README.md` —— 功能与用法总览（本文件）
-- `docs/NEXT-STEPS.md` —— 真实环境安装/验证清单与已知限制
-- `docs/TESTING.md` —— 测试指南
-- 设计文档（`docs/design/`）与 DSH 源码调研（`docs/research/`）**仅本地保留**（`.gitignore` 排除，不进版本库）
+- `README.md` —— 功能、用法与许可（本文件，随仓库维护）
+- `docs/` 目录（安装/验证清单、测试指南、设计文档、DSH 源码调研）**仅本地保留**，`.gitignore` 已排除，不进版本库
+
+单元测试：`node scripts/test-storage.mjs` / `test-extract.mjs` / `test-recall.mjs` / `test-evolve.mjs` / `test-commands.mjs`（全部 PASS）。
 
 ## License
 
