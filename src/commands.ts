@@ -81,12 +81,12 @@ export function handleMemoryCommand(store: MemoryStore, rawInput: string): Comma
   }
 }
 
-/** 记忆浏览器快照（设置页前端用） */
+/** 记忆浏览器快照（设置页前端用；content 截断控制体积） */
 export function browserSnapshot(store: MemoryStore): Record<string, unknown> {
   const memories = store.listMemories({ limit: 500 }).map((m) => ({
     id: m.id,
     kind: m.kind,
-    content: m.content,
+    content: m.content.slice(0, 120),
     importance: m.importance,
     accessCount: m.accessCount,
     status: m.status,
@@ -99,7 +99,7 @@ export function browserSnapshot(store: MemoryStore): Record<string, unknown> {
   return {
     memories,
     scenes,
-    persona: persona ? { ver: persona.ver, content: persona.content, createdAt: persona.createdAt } : null,
+    persona: persona ? { ver: persona.ver, content: persona.content.slice(0, 500), createdAt: persona.createdAt } : null,
     skills: listSkills(),
     pending: store.pendingSessions().length,
     updatedAt: Date.now(),

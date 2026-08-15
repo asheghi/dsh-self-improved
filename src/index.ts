@@ -24,7 +24,7 @@ import { RecallService, createOpenAiEmbedding, type RecallSettings } from "./rec
 import { installRecallInjection } from "./inject.js";
 import { Consolidator } from "./consolidate.js";
 import { applyDecay, synthesizeSkills } from "./evolve.js";
-import { installMemoryCommands } from "./commands.js";
+import { installMemoryCommands, browserSnapshot } from "./commands.js";
 import { BlockAssembler, createUserMessage } from "@deepseek-ai/dsh-llm";
 
 export const name = "self-improved";
@@ -371,6 +371,62 @@ export function apply(ctx: Context, config: Config): void {
     syncTools();
     log("runtime config applied:", "enabled=", next.enabled, "modules=", JSON.stringify(next.modules));
   });
+
+  // ⑧ 记忆浏览器数据通道（设置页前端无需 session 即可读取/操作记忆）：
+  //    专用命名空间 dsh-self-improved-browser：snapshot=快照 JSON，action=前端发来的操作
+  const browserNs = settingsNamespace("dsh-self-improved-browser");
+  const BrowserSchema = z.object({
+    snapshot: z.string().default("{}"),
+    action: z.string().default(""),
+  });
+  const browserScope = ctx.settings.register(browserNs, BrowserSchema);
+  let lastSnapshotJson = "";
+  let lastHandledAction = "";
+  const refreshBrowserSnapshot = (): void => {
+    try {
+      const json = JSON.stringify(browserSnapshot(store));
+      if (json === lastSnapshotJson) return;
+      lastSnapshotJson = json;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const cur = (browserScope.get() ?? {}) as any;
+      browserScope.replace({ snapshot: json, action: cur.action ?? "" }).catch(() => { /* 尽力而为 */ });
+    } catch {
+      /* noop */
+    }
+  };
+  const handleBrowserAction = (raw: string): void => {
+    if (!raw || raw === lastHandledAction) return;
+    lastHandledAction = raw;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const action = JSON.parse(raw) as any;
+      if (action.op === "forget" && typeof action.id === "string") {
+        store.forgetMemory(action.id);
+        log("browser action: forget", action.id.slice(0, 8));
+      } else if (action.op === "correct" && typeof action.id === "string" && typeof action.content === "string") {
+        const old = store.getMemory(action.id);
+        if (old) {
+          store.insertMemory({ kind: old.kind, content: action.content, importance: old.importance, supersedes: old.id });
+          store.setMemoryStatus(old.id, "corrected");
+          log("browser action: correct", action.id.slice(0, 8));
+        }
+      }
+    } catch {
+      /* noop */
+    }
+    lastSnapshotJson = ""; // 强制下次刷新
+    refreshBrowserSnapshot();
+    browserScope.replace({ snapshot: lastSnapshotJson, action: "" }).catch(() => { /* noop */ });
+  };
+  browserScope.watch((next, _prev) => {
+    if (next.action) handleBrowserAction(next.action);
+  });
+  refreshBrowserSnapshot();
+  const browserTimer = setInterval(refreshBrowserSnapshot, 60_000);
+  browserTimer.unref?.();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (ctx as any).on("dispose", () => clearInterval(browserTimer));
+  log("memory browser channel ready (dsh-self-improved-browser)");
 
   // ⑥ 后台管线（M2 起：extract/consolidate/evolve，dsh-schedule 驱动）
   // 注：M0 已确认 schedule 服务不在 headless base 装配中，引入时需按装配判断

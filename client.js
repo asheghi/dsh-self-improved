@@ -528,59 +528,38 @@ window.__ModuleLoader__.load({
       return out;
     }
 
-    // ── 记忆浏览器（设置页第二个标签页）────────────────────────────────────
+    // ── 记忆浏览器（设置页第二个标签页；经 dsh-self-improved-browser 命名空间数据通道，无需 session）─────
     var KIND_LABEL = { fact: "📖事实", preference: "📌偏好", event: "🧭事件", instruction: "📋指令", persona: "👤画像" };
-
-    function resolveSessionId(props) {
-      var sid = props && (props.sessionId || (props.agent && props.agent.session && props.agent.session.id) || (props.session && props.session.id));
-      return typeof sid === "string" && sid ? sid : null;
-    }
 
     function BrowserSection(props) {
       var t = props.t;
       var api = props.api;
-      var sessionId = resolveSessionId(props);
-      var [data, setData] = react.useState(null);
+      var scope = props.browserScope;
+      var [snapshot, setSnapshot] = react.useState(function () { return scope.getSnapshot(); });
       var [busy, setBusy] = react.useState(false);
       var [error, setError] = react.useState(null);
       var [query, setQuery] = react.useState("");
       var [notice, setNotice] = react.useState(null);
 
-      function runCommand(line) {
-        if (!sessionId) return Promise.reject(new Error("no-session"));
-        return api.commands.execute(sessionId, line);
-      }
-      function unwrap(response) {
-        var r = response && (response.result && response.result.value !== void 0 ? response.result : response);
-        return r && r.ok === false ? null : (r && r.value !== void 0 ? r.value : r);
+      react.useEffect(function () {
+        scope.load();
+        var alive = true;
+        var sync = function () { if (alive) setSnapshot(scope.getSnapshot()); };
+        var un = typeof scope.subscribe === "function" ? scope.subscribe(sync) : null;
+        return function () { alive = false; if (un) un(); if (scope.dispose) scope.dispose(); };
+      }, [scope]);
+
+      var data = null;
+      if (snapshot.status === "ready" && snapshot.value && typeof snapshot.value.snapshot === "string") {
+        try { data = JSON.parse(snapshot.value.snapshot); } catch (e) { data = null; }
       }
 
-      function refresh() {
-        if (!sessionId) return;
-        setBusy(true); setError(null);
-        runCommand("/memory browser --json").then(function (response) {
-          var v = unwrap(response);
-          var text = v && (v.text !== void 0 ? v.text : (v.value && v.value.text));
-          if (!text) throw new Error("empty browser response");
-          var parsed = JSON.parse(text);
-          setData(parsed);
-        }).catch(function (e) {
-          if (e && e.message === "no-session") setError("no-session");
-          else setError(String(e && e.message || e));
-        }).finally(function () { setBusy(false); });
-      }
-
-      react.useEffect(function () { refresh(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [sessionId]);
-
-      if (!sessionId) {
-        return h("p", { className: "__dsi_unavailable" }, t("browserNoSession"));
-      }
-      if (error === "no-session") {
-        return h("p", { className: "__dsi_unavailable" }, t("browserNoSession"));
+      if (snapshot.status === "unavailable") {
+        return h("p", { className: "__dsi_unavailable" }, t("unavailable"));
       }
       if (!data) {
         return h("div", { className: "__dsi_root" },
-          h("p", { className: "__dsi_status" }, busy ? t("loading") : t("browserHint")),
+          h("p", { className: "__dsi_status" }, t("browserHint")),
           error ? h("p", { className: "__dsi_error" }, error) : null);
       }
 
@@ -588,16 +567,27 @@ window.__ModuleLoader__.load({
       var q = query.trim().toLowerCase();
       var filtered = q ? memories.filter(function (m) { return m.content.toLowerCase().indexOf(q) >= 0 || m.kind.indexOf(q) >= 0; }) : memories;
 
+      function sendAction(action) {
+        return api.settings.mutate({
+          ns: "dsh-self-improved-browser",
+          ops: [{ op: "set", path: ["action"], value: JSON.stringify(action) }]
+        });
+      }
+      function refresh() {
+        setBusy(true); setNotice(null); setError(null);
+        scope.load();
+        setTimeout(function () { setBusy(false); }, 400);
+      }
       function forget(m) {
         if (!window.confirm(t("browserForgetConfirm") + "\n" + m.content.slice(0, 60))) return;
         setBusy(true); setNotice(null); setError(null);
-        runCommand("/memory forget " + m.id).then(function () { setNotice(t("browserForgotten")); refresh(); }).catch(function (e) { setError(String(e && e.message || e)); }).finally(function () { setBusy(false); });
+        sendAction({ op: "forget", id: m.id }).then(function () { setNotice(t("browserForgotten")); }).catch(function (e) { setError(String(e && e.message || e)); }).finally(function () { setBusy(false); });
       }
       function correct(m) {
         var next = window.prompt(t("browserCorrectPrompt"), m.content);
         if (next === null || !next.trim()) return;
         setBusy(true); setNotice(null); setError(null);
-        runCommand("/memory correct " + m.id + " " + next.trim()).then(function () { setNotice(t("browserCorrected")); refresh(); }).catch(function (e) { setError(String(e && e.message || e)); }).finally(function () { setBusy(false); });
+        sendAction({ op: "correct", id: m.id, content: next.trim() }).then(function () { setNotice(t("browserCorrected")); }).catch(function (e) { setError(String(e && e.message || e)); }).finally(function () { setBusy(false); });
       }
 
       var listNodes = filtered.slice(0, 200).map(function (m) {
@@ -666,7 +656,8 @@ window.__ModuleLoader__.load({
           return h(MemorySection, Object.assign({}, props, { scope: scope, api: api }));
         });
       });
-      // 记忆浏览器标签页（数据经 /memory browser --json 命令 RPC 获取）
+      // 记忆浏览器标签页（数据经 dsh-self-improved-browser 命名空间通道，无需会话上下文）
+      var browserScope = ctx.settingsScope.bind({ namespace: "dsh-self-improved-browser" });
       ctx.slots.inject("settings.section", function () {
         return ctx.slots.register({
           name: "settings.section",
@@ -675,7 +666,7 @@ window.__ModuleLoader__.load({
           label: function () { return t("browserNav"); },
           locale: NS
         }, function (props) {
-          return h(BrowserSection, Object.assign({}, props, { api: api }));
+          return h(BrowserSection, Object.assign({}, props, { api: api, browserScope: browserScope }));
         });
       });
     }
