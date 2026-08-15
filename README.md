@@ -25,12 +25,45 @@ DeepSeek Harness 的**长期记忆与自进化插件**（纯本地）。
 | M5 | UI/运维：设置面板（自动渲染）+ 随时开关热应用 + `/memory` 命令 + 记忆浏览器 | ✅ 完成并部署真实 Web 环境 |
 | M6 | 成长治理（上限/清理）+ 调度模型（夜间回顾/免费维护/启动补跑） | ✅ 完成：治理上限、夜间回顾（默认 22:00）、15 分钟轮仅免费维护、总开关关闭即停全部定时器 |
 
-## 安装（占位，M0 验证后补充正式步骤）
+## 安装
+
+### 方式一：从 GitHub 安装（已实测）
 
 ```bash
-# 在你的 DSH profile 目录安装
+# 1) 一次性环境准备（若报 store 不一致 / 构建被拦截）：
+#    - store 指回与 node_modules 一致的目录：
+#      pnpm config set store-dir E:\dshPro\.pnpm-store --global   # 或 profile 下 .npmrc 写 store-dir=...
+#    - 允许 git 安装的包运行 prepare 构建（pnpm >= 10 默认禁止），在 pnpm-workspace.yaml 加：
+#      allowBuilds:
+#        dsh-self-improved: true
+
+# 2) 安装（dsh plugin 转发给 profile 的 pnpm；github:owner/repo 拉取仓库快照并自动跑 prepare=tsc 构建 lib/）
+dsh plugin --profile web add github:madage/dsh-self-improved
+
+# 3) 激活：在 $DSH_HOME/profiles/web/cordis.patch.yml 的 insert 列表加：
+#    - insert:
+#        - id: dsh-self-improved
+#          name: dsh-self-improved
+
+# 4) 重启 dsh 生效
+```
+
+> 注意：GitHub 安装拿到的是**仓库快照**，本地改代码需 push 后重装才生效；日常开发建议用下面的方式二（本地 link）。指定分支/标签：`github:madage/dsh-self-improved#main` 或 `#<tag>`。卸载：从 `cordis.patch.yml` 移除 insert + `pnpm remove dsh-self-improved` + 重启。
+
+### 方式二：本地开发（file: link）
+
+```bash
+# 构建后复制 lib/ + client.js + package.json 到
+# $DSH_HOME/profiles/web/node_modules/dsh-self-improved/
+# package.json dependencies 加 "dsh-self-improved": "file:node_modules/dsh-self-improved"
+# cordis.patch.yml 加 insert（同上）→ 重启
+```
+
+### 方式三：npm 发布后安装（推荐，待发布）
+
+```bash
+npm publish   # 仓库已配置 files: [lib, client.js, LICENSE, README.md] 与 prepare 脚本
 dsh plugin --profile web add dsh-self-improved
-# 或本地开发：在 profile 的 node_modules 里 link 本仓库
 ```
 
 ## 配置（占位，完整见设置页）
