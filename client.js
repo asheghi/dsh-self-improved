@@ -55,7 +55,12 @@ window.__ModuleLoader__.load({
       ".__dsi_browserKind{font-size:11px;font-weight:600;color:var(--dsw-alias-state-business-primary)}" +
       ".__dsi_browserContent{font-size:13px;line-height:20px;color:var(--dsw-alias-label-primary);word-break:break-all}" +
       ".__dsi_browserMeta{font-size:11px;color:var(--dsw-alias-label-tertiary)}" +
-      ".__dsi_browserOps{flex:none;display:flex;gap:6px}";
+      ".__dsi_browserOps{flex:none;display:flex;gap:6px}" +
+      ".__dsi_tabs{display:flex;flex-direction:column;gap:10px}" +
+      ".__dsi_tabBar{display:flex;gap:4px;border-bottom:1px solid var(--dsw-alias-border-l2);padding-bottom:8px}" +
+      ".__dsi_tab{height:32px;border:1px solid transparent;background:transparent;color:var(--dsw-alias-label-secondary);border-radius:8px;padding:0 14px;font:inherit;font-size:14px;line-height:32px;cursor:pointer}" +
+      ".__dsi_tab:hover{color:var(--dsw-alias-label-primary)}" +
+      ".__dsi_tabActive{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-3);border-color:var(--dsw-alias-border-l2)}";
     var tagId = "dsh-self-improved/main.css";
     if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId) + "]") === null) {
       var tag = document.createElement("style");
@@ -70,6 +75,8 @@ window.__ModuleLoader__.load({
     var inject = ["slots", "locale", "settingsScope", "connection"];
     var zh = {
       nav: "自进化记忆",
+      tabConfig: "配置",
+      tabMemories: "记忆",
       intro: "长期记忆与自进化插件：自动捕获对话、提炼记忆、回合前召回注入，并随时间巩固、遗忘与进化。",
       helpTitle: "插件说明",
       help: [
@@ -186,6 +193,8 @@ window.__ModuleLoader__.load({
     };
     var en = {
       nav: "Evolving Memory",
+      tabConfig: "Config",
+      tabMemories: "Memory",
       intro: "Long-term memory & self-evolution: captures conversations, extracts memories, injects recall before turns, and consolidates/forgets/evolves over time.",
       helpTitle: "About this plugin",
       help: [
@@ -668,12 +677,27 @@ window.__ModuleLoader__.load({
       );
     }
 
+    // ── 主设置区：一个 section，内部"配置 / 记忆"两个 Tab ──────────────────
+    function MainSection(props) {
+      var t = props.t;
+      var [tab, setTab] = react.useState("config");
+      return h("div", { className: "__dsi_tabs" },
+        h("div", { className: "__dsi_tabBar" },
+          h("button", { type: "button", className: "__dsi_tab" + (tab === "config" ? " __dsi_tabActive" : ""), onClick: function () { setTab("config"); } }, t("tabConfig")),
+          h("button", { type: "button", className: "__dsi_tab" + (tab === "memories" ? " __dsi_tabActive" : ""), onClick: function () { setTab("memories"); } }, t("tabMemories"))
+        ),
+        tab === "config" ? h(MemorySection, props) : h(BrowserSection, props)
+      );
+    }
+
     // ── plugin ────────────────────────────────────────────────────────────
     function apply(ctx) {
       var t = ctx.locale.bind(NS);
       ctx.effect(function () { return ctx.locale.register(NS, { zh: zh, en: en }); }, "dsh-self-improved: dictionaries");
       var scope = ctx.settingsScope.bind({ namespace: "dsh-self-improved" });
+      var browserScope = ctx.settingsScope.bind({ namespace: "dsh-self-improved-browser" });
       var api = ctx.connection.api;
+      // 单个设置区，内部两个 Tab：配置 / 记忆
       ctx.slots.inject("settings.section", function () {
         return ctx.slots.register({
           name: "settings.section",
@@ -682,20 +706,7 @@ window.__ModuleLoader__.load({
           label: function () { return t("nav"); },
           locale: NS
         }, function (props) {
-          return h(MemorySection, Object.assign({}, props, { scope: scope, api: api }));
-        });
-      });
-      // 记忆浏览器标签页（数据经 dsh-self-improved-browser 命名空间通道，无需会话上下文）
-      var browserScope = ctx.settingsScope.bind({ namespace: "dsh-self-improved-browser" });
-      ctx.slots.inject("settings.section", function () {
-        return ctx.slots.register({
-          name: "settings.section",
-          id: "dsh-self-improved-memories",
-          order: 28,
-          label: function () { return t("browserNav"); },
-          locale: NS
-        }, function (props) {
-          return h(BrowserSection, Object.assign({}, props, { api: api, browserScope: browserScope }));
+          return h(MainSection, Object.assign({}, props, { scope: scope, api: api, browserScope: browserScope }));
         });
       });
     }
