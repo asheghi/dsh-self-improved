@@ -99,6 +99,13 @@ export class MemoryStore {
       );
       CREATE INDEX IF NOT EXISTS idx_memories_kind ON memories(kind);
       CREATE INDEX IF NOT EXISTS idx_memories_status ON memories(status);
+      -- 提取管线状态：每会话已处理/待处理的 L0 seq 游标（持久化，重启不丢）
+      CREATE TABLE IF NOT EXISTS extract_state (
+        session_id    TEXT PRIMARY KEY,
+        processed_seq INTEGER NOT NULL DEFAULT 0,
+        pending_seq   INTEGER NOT NULL DEFAULT 0,
+        updated_at    INTEGER NOT NULL
+      ) STRICT;
     `);
   }
 
@@ -244,6 +251,64 @@ export class MemoryStore {
     const lines = records.map((r) => JSON.stringify(r)).join("\n") + "\n";
     writeFileSync(path, lines, { encoding: "utf8", flag: "a" });
   }
+
+  // ---------- 提取管线状态（M2） ----------
+
+  /** 标记某会话的切片已捕获到 seq（提取队列的待处理水位） */
+  markPending(sessionId: string, seq: number): void {
+    this.db
+      .prepare(
+        `INSERT INTO extract_state (session_id, processed_seq, pending_seq, updated_at)
+         VALUES (?, 0, ?, ?)
+         ON CONFLICT(session_id) DO UPDATE SET
+           pending_seq = MAX(pending_seq, excluded.pending_seq),
+           updated_at = excluded.updated_at`,
+      )
+      .run(sessionId, seq, Date.now());
+  }
+
+  /** 有待处理切片的会话列表 */
+  pendingSessions(): Array<{ sessionId: string; processedSeq: number; pendingSeq: number }> {
+    const rows = this.db
+      .prepare("SELECT session_id, processed_seq, pending_seq FROM extract_state WHERE pending_seq > processed_seq")
+      .all() as Array<Record<string, unknown>>;
+    return rows.map((r) => ({
+      sessionId: String(r.session_id),
+      processedSeq: Number(r.processed_seq),
+      pendingSeq: Number(r.pending_seq),
+    }));
+  }
+
+  /** 读取某会话 [fromSeq, toSeq] 区间内的切片（从 JSONL） */
+  readSlices(sessionId: string, fromSeq: number, toSeq: number): ConversationSliceRecord[] {
+    if (toSeq <= fromSeq) return [];
+    const path = join(this.dir, "conversations", `${safeSegment(sessionId)}.jsonl`);
+    let raw: string;
+    try {
+      raw = readFileSync(path, "utf8");
+    } catch {
+      return [];
+    }
+    const out: ConversationSliceRecord[] = [];
+    for (const line of raw.split("\n")) {
+      if (!line.trim()) continue;
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const rec = JSON.parse(line) as any;
+        if (typeof rec.seq === "number" && rec.seq > fromSeq && rec.seq <= toSeq) out.push(rec);
+      } catch {
+        // 忽略坏行
+      }
+    }
+    return out;
+  }
+
+  /** 推进已处理水位 */
+  advanceProcessed(sessionId: string, seq: number): void {
+    this.db
+      .prepare("UPDATE extract_state SET processed_seq = ?, updated_at = ? WHERE session_id = ?")
+      .run(seq, Date.now(), sessionId);
+  }
 }
 
 /**
@@ -261,11 +326,10 @@ export function tokenize(text: string): string {
     }
   }
   try {
-    if (!jieba) return text;
-    return jieba
-      .cut(text, false)
-      .map((t) => t.trim())
-      .filter(Boolean)
+    const words = jieba ? jieba.cut(text, false) : text.split(/\s+/);
+    return words
+      .map((t) => t.replace(/[^\p{L}\p{N}_]/gu, "")) // 清洗标点（FTS5 unicode61 不索引标点）
+      .filter((t) => t.length > 0)
       .join(" ");
   } catch {
     return text;

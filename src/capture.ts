@@ -1,6 +1,6 @@
 /**
- * L0 捕获模块（M1）：把会话事件流归一化为提取管线输入切片（JSONL），
- * 在 session/flush 持久化屏障内落盘（与 DSH 日志持久化对齐，不领先/落后）。
+ * L0 捕获模块（M1/M2）：把会话事件流归一化为提取管线输入切片（JSONL），
+ * 在 session/flush 持久化屏障内落盘并标记提取队列水位。
  *
  * 设计对齐：docs/design/dsh-memory-plugin-design.md §4.3
  */
@@ -12,7 +12,16 @@ export interface CaptureController {
   enabled(): boolean;
 }
 
-export function installCapture(ctx: Context, store: MemoryStore, controller: CaptureController): void {
+/**
+ * 安装捕获监听器。
+ * @param onCaptured 落盘并标记队列后调用；若返回 Promise 且被 await，会阻塞 flush（headless 收尾用）
+ */
+export function installCapture(
+  ctx: Context,
+  store: MemoryStore,
+  controller: CaptureController,
+  onCaptured?: () => void | Promise<unknown>,
+): void {
   // 每会话已写到的最大 seq（进程内游标；权威防重由 DSH 事件 seq 保证）
   const lastWritten = new Map<string, number>();
 
@@ -27,7 +36,13 @@ export function installCapture(ctx: Context, store: MemoryStore, controller: Cap
     }
     if (records.length > 0) {
       store.appendConversationSlice(session.id, records);
-      lastWritten.set(session.id, records[records.length - 1].seq);
+      const maxSeq = records[records.length - 1].seq;
+      store.markPending(session.id, maxSeq);
+      lastWritten.set(session.id, maxSeq);
+    }
+    if (onCaptured) {
+      const result = onCaptured();
+      if (result instanceof Promise) await result;
     }
   });
 }
@@ -50,16 +65,7 @@ function toSlice(sessionId: string, event: SessionEventLike): ConversationSliceR
       const message = data?.message as Record<string, unknown> | undefined;
       const text = textOfContent(message?.content);
       if (!text) return null;
-      const meta = message?.meta as Record<string, unknown> | undefined;
-      return {
-        type: "tool",
-        seq: event.seq,
-        ts,
-        text,
-        sessionId,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        ...((meta && { toolName: String((meta as any).name ?? "") }) as object),
-      } as ConversationSliceRecord;
+      return { type: "tool", seq: event.seq, ts, text, sessionId };
     }
     default:
       return null;
