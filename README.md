@@ -78,6 +78,16 @@ dsh plugin --profile web add github:madage/dsh-self-improved
 **给插件使用者的提醒（发布时保留）**：
 > dsh-self-improved 的 peerDependencies 会在 profile 下自动安装物理副本，需配合 dsh 自愈 symlink 布局使用，或将 profile 的 `.npmrc` 设 `auto-install-peers=false`。
 
+### ⚠️ 安装须知：duplicate loader entry id（bundle 插件重复装配，启动即崩）
+
+**症状**：dsh **启动直接失败**（窗口一闪即关 / 无法启动），`dsh web --dump-config` 可见同一 `id` 出现两次。
+
+**根因**：声明 `dsh.bundle` 的插件（0.1.1 起本插件、`dsh-plugin-marketplace` 等）会**自动**加入 `dsh.profile.bundles`，其自带 `cordis.patch.yml` 自动 insert 一个 entry；若 profile 层的 `cordis.patch.yml` 里**还手动 insert 了同一个 id** → loader 启动时抛 `duplicate loader entry id` 崩溃。
+
+**修复（已实测）**：把 profile 层 `cordis.patch.yml` 恢复为 `[]`（空）——bundle 插件的装配全部交给 `dsh.profile.bundles`，用户层**不要再手动 insert 任何 bundle 插件的条目**。
+
+**排查口诀**：dsh 启动闪退 → 先跑 `dsh --profile web --dump-config`，数每个 entry id 出现次数，>1 就是这里的问题。
+
 ### 方式二：本地开发（file: link）
 
 ```bash
