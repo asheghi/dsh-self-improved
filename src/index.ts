@@ -23,16 +23,8 @@ import "@deepseek-ai/dsh-schedule";
 
 export const name = "self-improved";
 
-/** 需要的宿主服务（Cordis inject 列表，按需声明） */
-export const inject = [
-  "session",
-  "settings",
-  "tools",
-  "systemPrompt",
-  "llm",
-  "schedule",
-  "skills",
-] as const;
+/** 需要的宿主服务（Cordis inject 列表；M0 只声明实际使用的服务） */
+export const inject = ["sessions", "settings", "tools"] as const;
 
 /** 模块开关（联动规则见 docs/design/dsh-memory-detailed-design.md §2.5） */
 export interface ModuleSwitches {
