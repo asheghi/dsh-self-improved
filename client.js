@@ -136,6 +136,7 @@ window.__ModuleLoader__.load({
       groupRecall: "召回 / 向量",
       groupConsolidate: "巩固（L2/L3）",
       groupEvolve: "自进化",
+      groupHousekeeping: "成长治理（清理策略）",
       save: "保存",
       reset: "恢复默认",
       saved: "已保存并立即生效",
@@ -186,6 +187,10 @@ window.__ModuleLoader__.load({
       fSkillRoot: "技能根目录（留空 = $DSH_HOME/skills）",
       fSkillPrefix: "合成技能名前缀（如 dsi-，留空=不加）",
       fSkillMax: "合成技能数量上限（0=不限）",
+      fHkPersona: "画像保留版本数",
+      fHkScenes: "场景上限",
+      fHkSceneRatio: "场景清理：来源记忆活跃比例阈值（0-1）",
+      fHkConvDays: "对话切片保留天数（0=不清理）",
       fRecallInjectChars: "注入块字符上限",
       secretHint: "留空保持当前密钥。",
       browserNav: "记忆",
@@ -259,6 +264,7 @@ window.__ModuleLoader__.load({
       groupRecall: "Recall / Embedding",
       groupConsolidate: "Consolidation (L2/L3)",
       groupEvolve: "Self-evolution",
+      groupHousekeeping: "Growth governance",
       save: "Save",
       reset: "Reset",
       saved: "Saved — applied immediately",
@@ -309,6 +315,10 @@ window.__ModuleLoader__.load({
       fSkillRoot: "Skills root (blank = $DSH_HOME/skills)",
       fSkillPrefix: "Synthesized skill name prefix (e.g. dsi-; blank = none)",
       fSkillMax: "Max synthesized skills (0=unlimited)",
+      fHkPersona: "Persona versions to keep",
+      fHkScenes: "Max scenes",
+      fHkSceneRatio: "Scene GC: source-memory active ratio threshold (0-1)",
+      fHkConvDays: "Conversation slice retention days (0=keep all)",
       fRecallInjectChars: "Max injected block chars",
       secretHint: "Leave blank to keep the current key.",
       browserNav: "Memory",
@@ -379,7 +389,11 @@ window.__ModuleLoader__.load({
       { path: ["evolve", "skillSynthesis", "minImportance"], label: "fSkillMin", type: "number", group: "groupEvolve" },
       { path: ["evolve", "skillSynthesis", "skillsRoot"], label: "fSkillRoot", type: "text", group: "groupEvolve" },
       { path: ["evolve", "skillSynthesis", "prefix"], label: "fSkillPrefix", type: "text", group: "groupEvolve" },
-      { path: ["evolve", "skillSynthesis", "maxSkills"], label: "fSkillMax", type: "number", group: "groupEvolve" }
+      { path: ["evolve", "skillSynthesis", "maxSkills"], label: "fSkillMax", type: "number", group: "groupEvolve" },
+      { path: ["housekeeping", "personaVersions"], label: "fHkPersona", type: "number", group: "groupHousekeeping" },
+      { path: ["housekeeping", "maxScenes"], label: "fHkScenes", type: "number", group: "groupHousekeeping" },
+      { path: ["housekeeping", "sceneActiveRatio"], label: "fHkSceneRatio", type: "number", group: "groupHousekeeping" },
+      { path: ["housekeeping", "conversationRetentionDays"], label: "fHkConvDays", type: "number", group: "groupHousekeeping" }
     ];
     FIELDS.forEach(function (f) { f.key = f.path.join("."); });
 

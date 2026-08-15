@@ -6,7 +6,7 @@
  *
  * 设计对齐：docs/design/dsh-memory-plugin-design.md §4.2 / §5.3
  */
-import { mkdirSync, writeFileSync, readFileSync, existsSync, copyFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync, existsSync, copyFileSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
@@ -440,6 +440,74 @@ export class MemoryStore {
       .prepare("DELETE FROM memories WHERE status = 'forgotten' AND updated_at < ?")
       .run(ts);
     return Number(res.changes);
+  }
+
+  // ---------- 成长治理（M6）：画像版本 / 场景 / 对话切片 上限与清理 ----------
+
+  /** 画像版本只保留最近 keep 个；返回删除数 */
+  prunePersonaVersions(keep: number): number {
+    if (keep <= 0) return 0;
+    const row = this.db.prepare("SELECT MAX(ver) m FROM persona_versions").get() as { m: number } | undefined;
+    if (!row || row.m === null) return 0;
+    const res = this.db.prepare("DELETE FROM persona_versions WHERE ver <= ?").run(row.m - keep);
+    return Number(res.changes);
+  }
+
+  /**
+   * 场景治理：① 来源记忆大多已失效（活跃比例 < activeRatio）的场景删除；
+   * ② 场景总数超过 maxScenes 时删除最旧的。返回删除数。
+   */
+  pruneScenes(maxScenes: number, activeRatio: number): number {
+    let deleted = 0;
+    const scenes = this.listScenes(10_000);
+    // ① 来源失效的场景
+    for (const s of scenes) {
+      const ids = (s.memoryIds ?? []).filter((id) => typeof id === "string").slice(0, 50);
+      if (ids.length === 0) continue;
+      const placeholders = ids.map(() => "?").join(",");
+      const row = this.db
+        .prepare(`SELECT COUNT(*) n FROM memories WHERE id IN (${placeholders}) AND status = 'active'`)
+        .get(...ids) as { n: number };
+      if (row.n / ids.length < activeRatio) {
+        if (this.db.prepare("DELETE FROM scenes WHERE id = ?").run(s.id).changes > 0) deleted++;
+      }
+    }
+    // ② 总数上限（删最旧）
+    const remaining = this.listScenes(10_000);
+    const overflow = remaining.length - maxScenes;
+    if (overflow > 0) {
+      const keepIds = remaining.slice(0, maxScenes).map((s) => s.id);
+      const keepPh = keepIds.map(() => "?").join(",");
+      const res = this.db
+        .prepare(`DELETE FROM scenes WHERE id NOT IN (${keepPh})`)
+        .run(...keepIds);
+      deleted += Number(res.changes);
+    }
+    return deleted;
+  }
+
+  /** 清理超过保留期的对话切片文件（conversations/*.jsonl）；返回删除文件数 */
+  pruneConversationSlices(olderThanMs: number): number {
+    const dir = join(this.dir, "conversations");
+    let deleted = 0;
+    let files: string[] = [];
+    try {
+      files = readdirSync(dir);
+    } catch {
+      return 0;
+    }
+    for (const f of files) {
+      if (!f.endsWith(".jsonl")) continue;
+      try {
+        if (statSync(join(dir, f)).mtimeMs < olderThanMs) {
+          unlinkSync(join(dir, f));
+          deleted++;
+        }
+      } catch {
+        /* noop */
+      }
+    }
+    return deleted;
   }
 }
 

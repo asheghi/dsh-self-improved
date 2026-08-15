@@ -103,6 +103,13 @@ export interface Config {
     decay: { enabled: boolean; minAgeDays: number; threshold: number; retentionDays: number; maxActiveMemories: number };
     skillSynthesis: { enabled: boolean; minImportance: number; skillsRoot: string; prefix: string; maxSkills: number };
   };
+  /** M6 成长治理：画像版本/场景/对话切片的上限与清理 */
+  housekeeping: {
+    personaVersions: number;
+    maxScenes: number;
+    sceneActiveRatio: number;
+    conversationRetentionDays: number;
+  };
 }
 
 export const Config = z.object({
@@ -164,6 +171,12 @@ export const Config = z.object({
       prefix: z.string().default("dsi-"),
       maxSkills: z.number().min(0).default(100),
     }),
+  }),
+  housekeeping: z.object({
+    personaVersions: z.number().min(1).default(10),
+    maxScenes: z.number().min(1).default(50),
+    sceneActiveRatio: z.number().min(0).max(1).default(0.3),
+    conversationRetentionDays: z.number().min(0).default(90),
   }),
 });
 
@@ -297,6 +310,22 @@ export function apply(ctx: Context, config: Config): void {
             if (r.decayed > 0 || r.deleted > 0) log("decay applied:", JSON.stringify(r));
           })
           .catch((e) => console.warn("[dsh-self-improved] decay error:", String(e))),
+      );
+      // M6 成长治理：画像版本 / 场景 / 对话切片
+      jobs.push(
+        Promise.resolve()
+          .then(() => {
+            const g = {
+              personaVersions: store.prunePersonaVersions(config.housekeeping.personaVersions),
+              scenes: store.pruneScenes(config.housekeeping.maxScenes, config.housekeeping.sceneActiveRatio),
+              slices: store.pruneConversationSlices(
+                Date.now() - config.housekeeping.conversationRetentionDays * 86_400_000,
+              ),
+            };
+            if (g.personaVersions > 0 || g.scenes > 0 || g.slices > 0) log("housekeeping:", JSON.stringify(g));
+            return g;
+          })
+          .catch((e) => console.warn("[dsh-self-improved] housekeeping error:", String(e))),
       );
       jobs.push(
         synthesizeSkills(

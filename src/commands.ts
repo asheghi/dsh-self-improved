@@ -81,9 +81,9 @@ export function handleMemoryCommand(store: MemoryStore, rawInput: string): Comma
   }
 }
 
-/** 记忆浏览器快照（设置页前端用；content 截断控制体积） */
+/** 记忆浏览器快照（设置页前端用；content 截断 + 数量上限控制体积） */
 export function browserSnapshot(store: MemoryStore): Record<string, unknown> {
-  const memories = store.listMemories({ limit: 500 }).map((m) => ({
+  const memories = store.listMemories({ limit: 300 }).map((m) => ({
     id: m.id,
     kind: m.kind,
     content: m.content.slice(0, 120),
@@ -94,7 +94,7 @@ export function browserSnapshot(store: MemoryStore): Record<string, unknown> {
     updatedAt: m.updatedAt,
     supersedes: m.supersedes ?? null,
   }));
-  const scenes = store.listScenes(100).map((s) => ({ id: s.id, title: s.title, updatedAt: s.updatedAt }));
+  const scenes = store.listScenes(50).map((s) => ({ id: s.id, title: s.title, updatedAt: s.updatedAt }));
   const persona = store.getPersona();
   return {
     memories,
