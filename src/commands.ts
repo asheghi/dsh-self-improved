@@ -178,6 +178,9 @@ export function installMemoryCommands(
   return commands.register({
     name: "memory",
     description: "管理 dsh-self-improved 记忆库（search/list/forget/correct/status/evolve）",
+    // 关键：声明 input 后命令系统才会接管带参输入（如 /memory status），
+    // 否则带参输入被判定为"命令不接受参数"而回落为普通消息发给 LLM。
+    input: { hint: "search <词> | list | status | forget <id> | correct <id> <内容> | evolve | browser" },
     handler: async (invocation: { rawInput?: string }) => {
       // 兜底：即使注销存在时序窗口，关闭状态下也拒绝执行
       if (opts?.isEnabled && !opts.isEnabled()) {
