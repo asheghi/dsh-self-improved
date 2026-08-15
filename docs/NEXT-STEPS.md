@@ -1,17 +1,17 @@
-# 后续步骤（在你的真实环境）
+# 后续步骤（真实环境）
 
-本仓库的 M0-M5 核心已全部实现并通过 66 项单元测试 + 隔离 headless 集成验证。
-以下事项需要**你的真实 DSH 环境**（本沙箱无法验证 Web 前端构建与真实模型调用）。
+M0–M6 核心已全部实现：66+ 项单元测试通过，并已部署到真实 DSH 环境（web profile）。
+以下为真实环境的安装/运维说明与已知限制。
 
 ## 1. 安装到真实环境（web profile）
 
 ```powershell
 # 1) 构建
 cd dsh-self-improved
-node node_modules\typescript\bin\tsc -p tsconfig.json
+npx tsc -p tsconfig.json
 
 # 2) 装进 web profile（E:\dsh\profiles\web）
-#    - 复制 lib/ + package.json + LICENSE + README.md 到
+#    - 复制 lib/ + client.js + package.json + LICENSE + README.md 到
 #      E:\dsh\profiles\web\node_modules\dsh-self-improved\
 #    - package.json dependencies 加 "dsh-self-improved": "file:node_modules/dsh-self-improved"
 #    - 在 profile 目录执行 pnpm install
@@ -20,63 +20,50 @@ node node_modules\typescript\bin\tsc -p tsconfig.json
 #          - id: dsh-self-improved
 #            name: dsh-self-improved
 
-# 3) 配置模型（settings.yaml 或 Web UI 设置页）
-#    $DSH_HOME/settings.yaml
+# 3) 模型配置（设置页即可，或 $DSH_HOME/settings.yaml）
 #    dsh-self-improved:
 #      extract:
 #        provider: deepseek-official   # 或你的提供商
 #        model: deepseek-chat
-#      recall:
-#        strategy: hybrid               # 需要 embedding 端点
-#        embedding:
-#          baseUrl: http://127.0.0.1:8088/v1   # 本地 embedding 服务
-#          model: text-embedding-3-small
-#          dimensions: 1024
 ```
 
-重启 Web 后：
-- 设置 → dsh-self-improved：总开关/模块开关/模型/隐私参数（自动渲染）
-- 聊天中可直接用 `/memory search <关键词>`、`/memory status` 等命令
-- **随时开关**：设置面板改动即时生效（`settings/updated` 热应用），无需重启
+> 部署铁律：**任何改动（尤其宿主 apiproxy 白名单、settings.yaml、client.js）都必须重启 dsh 才生效**。
+> settings.yaml 不要用 PowerShell 直改（编码/引号易坏），用 node 脚本 + 显式 UTF-8 无 BOM。
 
-## 2. 记忆浏览器页面（未实现，需 Web 环境开发）
+## 2. 运行时行为（调度模型与开关）
 
-按 DSH 客户端模块约定（`dsh-client-ui-*` 模式，参考 `dsh-tdai-memory` 的 `./client` 导出）新增前端模块：
+- **总开关关闭 = 插件彻底休眠**：停止全部后台定时器（15 分钟维护轮 / 夜间回顾 / 启动 60s 补跑），注销 `/memory` 命令与记忆工具；已存记忆保留，重新开启自动恢复（运行时热切换，无需重启）。
+- **调度模型**：
+  - 15 分钟定时轮：只做「提取 + 免费维护」（衰减/治理），**不调 LLM、零 token**；
+  - 夜间回顾（`review.time`，默认 22:00）：排空提取 + 完整进化（场景/画像 + 技能合成 + 衰减 + 治理）；改时间/开关即时热生效；
+  - 启动后约 60s：若有活跃记忆自动补跑一次完整回顾（`startupReviewDone` 保证只补一次）；
+  - 手动触发：`/memory evolve`。
+- **`/memory` 命令零 LLM**：handler 纯本地 SQLite 查询。命令声明了 `input`，命令系统会接管带参输入（含直接输入 `/memory status` 回车），不经过模型；建议用命令菜单（敲 `/`）触发。
+- **记忆浏览器**：设置页「自进化记忆」→「记忆」Tab（数据走 `dsh-self-improved-browser` 设置命名空间快照通道，无需会话上下文）。
 
-1. 在 package.json exports 增加 `"./client": "./client.js"`；
-2. 新建 `client/` 前端模块，注册一个页面/面板路由；
-3. 页面数据走宿主 API（或直接调用插件 service）：
-   - 记忆库 L1：`store.searchMemories/listMemories`（需暴露只读查询接口）
-   - 对话 L0：复用 `ctx.sessionQuery.searchSessions`
-   - 场景 L2 / 画像 L3：`store.listScenes/getPersona`
-   - 技能：dsh-skill 目录
-4. 前端构建产物需随 web-app 打包（本沙箱无法验证，务必在真实环境先验证客户端模块约定再写页面）。
+## 3. 验证清单
 
-## 3. 真实效果验证清单
-
-- [ ] 配好 API key 后：正常对话 → 等一次提取（默认 15 分钟定时或 flush 触发）→ `/memory list` 能看到提炼的记忆
-- [ ] 新会话问"我记得什么" → 自动召回注入生效（模型能"想起"）
-- [ ] 修正记忆：让模型调用 memory_correct，或手动 `/memory correct <id> <内容>`
-- [ ] 观察自进化：多次同类任务后 `$DSH_HOME/skills/` 出现技能；画像版本递增
-- [ ] 设置面板一键关闭/开启，确认无需重启即生效
+- [x] 正常对话 → 提取管线落记忆 → 设置页记忆 Tab 可见（或 `/memory list`）
+- [x] 新会话提问 → 召回注入生效（模型能"想起"）
+- [x] 纠正/遗忘：`/memory correct <id> <内容>` / `/memory forget <id>`，或记忆 Tab 操作
+- [x] 自进化：`$DSH_HOME/skills/` 出现 `dsi-*` 合成技能；画像版本递增（当前 v4）
+- [x] 设置面板开关即时生效（无需重启）
+- [ ] 重启后：`/memory status` 应直接出结果（不走 LLM）；关总开关后命令菜单不再出现 `/memory`
 
 ## 4. 本地向量召回（可选，默认关闭）
 
 ### 4.1 是什么 / 要不要开
 
-- **向量召回**：用 embedding 模型把记忆文本转成向量，按"语义相似度"检索——能命中"意思相近但用词不同"的记忆；与关键词检索做 RRF 融合即 `hybrid`。
-- **默认关闭，不影响任何功能**：召回策略默认 `keyword`（jieba 分词 + BM25，全本地、零额外调用）。向量是可选项，纯关键词模式完全可用。
-- **开关**：设置页"召回 / 向量"分组 → **召回策略** 下拉：`keyword`（关闭向量）／`hybrid`（启用）。未配置 embedding 端点时即使选 hybrid 也会自动降级为关键词。
+- **向量召回**：用 embedding 模型把记忆文本转成向量，按"语义相似度"检索；与关键词检索做 RRF 融合即 `hybrid`。
+- **默认关闭**：召回策略默认 `keyword`（jieba 分词 + BM25，全本地、零额外调用）。向量是可选项。
+- **开关**：设置页「召回 / 向量」分组 → 策略下拉 `keyword` / `hybrid`；未配置 embedding 端点时 hybrid 自动降级为关键词。
 
 ### 4.2 推荐方案：Ollama + bge-m3（全离线）
 
 ```powershell
-# 1) 安装 Ollama（https://ollama.com）后拉取中文友好、1024 维的 bge-m3
 ollama pull bge-m3
-ollama serve        # 常驻服务，默认 http://localhost:11434/v1
+ollama serve        # 默认 http://localhost:11434/v1
 ```
-
-设置页（或 `$DSH_HOME/settings.yaml`）：
 
 ```yaml
 dsh-self-improved:
@@ -88,26 +75,26 @@ dsh-self-improved:
       dimensions: 1024        # 必须与记忆库向量表一致（1024）
 ```
 
-或设置页 UI：填 Base URL / 模型，策略选 hybrid，保存即生效（无需重启）。
-
 ### 4.3 其它本地方案
 
 | 方案 | 说明 |
 |---|---|
 | LM Studio | 图形化本地推理，OpenAI 兼容，可加载 bge-m3 |
 | Xinference | 本地推理服务，支持 bge-m3 / bge-large-zh |
-| node-llama-cpp | 进程内 GGUF 嵌入，需要额外接入代码（不推荐优先尝试） |
+| node-llama-cpp | 进程内 GGUF 嵌入（不推荐优先尝试） |
 
 ### 4.4 注意事项
 
-- **维度必须 1024**：记忆库的向量表按 1024 维创建；模型输出维度不一致会写入失败（bge-m3 是 1024，正好）。
-- 向量写入发生在提取管线（配置后新提取的记忆自动写入向量）；旧记忆需要重新提取才会带向量（关键词检索不受影响）。
-- 隐私：hybrid 会把记忆内容发送给 embedding 服务；本地方案（Ollama）不出本机。
-- 云端点：务必确认该端点**提供 embedding 模型**（此前实测阿里云百炼 compatible-mode 端点只有对话/图像/音频模型，无法做向量）。
+- **维度必须 1024**：向量表按 1024 维创建；不一致会写入失败。
+- 向量写入发生在提取管线（配置后新提取的记忆自动带向量）；旧记忆需重新提取。
+- 隐私：hybrid 会把记忆内容发给 embedding 服务；本地方案不出本机。
+- 云端点务必确认提供 embedding 模型（此前实测阿里云百炼 compatible-mode 端点无 embedding）。
 
-## 5. 已知限制与说明
+## 5. 已知限制与运维
 
-- 提取/画像/技能需要**稳定输出 JSON 的模型**（若 flash 系模型提取异常，配置一个更强的模型；提取模型可与主模型分离配置）。
-- 向量召回（hybrid）需要 embedding 端点；未配置时自动降级为关键词召回。
-- 沙箱环境连不上外部 API，LLM 相关路径以单元测试（假 LLM）为权威验证；真实效果需在你的环境确认。
-- 安全：记得轮换之前暴露的 Gitee 令牌。
+- 提取/画像/技能需要**稳定输出 JSON 的模型**（若 flash 系提取异常，配置更强模型；提取模型可与主模型分离）。
+- 向量召回需要 embedding 端点；未配置自动降级关键词。
+- **设置保存 revision 冲突**：若报 `expected revision N, now M`（命名空间被其他修改），前端会自动刷新最新配置并保留草稿，再点一次保存即可；多数情况下源于运行进程内存写回 settings.yaml，重启可消除。
+- 安全：
+  - **泄露的百炼 API Key（`sk-sp-H.YYXLI...`）必须去控制台作废轮换**——仅清理文件/重启无法根治，进程内存会反复写回；相关技能：`dsi-rotate-leaked-dsh-api-key`。
+  - settings.yaml 修改后必须重启 dsh；运行中进程可能把内存旧配置写回文件。

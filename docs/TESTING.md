@@ -1,6 +1,7 @@
-# 测试指南（M0 探针）
+# 测试指南
 
-M0 探针在**隔离 DSH_HOME** 中验证插件与 DSH 的四个接线点，不影响真实环境（`E:\dsh` 与运行中的 Web）。
+单元测试：`node scripts/test-storage.mjs` / `test-extract.mjs` / `test-recall.mjs` / `test-evolve.mjs` / `test-commands.mjs`（全部 PASS）。
+以下为 M0 探针在**隔离 DSH_HOME** 中验证插件与 DSH 四个接线点的步骤，不影响真实环境（`E:\dsh` 与运行中的 Web）。
 
 ## 复现步骤
 
