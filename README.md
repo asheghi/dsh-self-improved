@@ -62,6 +62,16 @@ dsh-self-improved:
 - 本插件**架构启发自** [TencentDB Agent Memory](https://github.com/TencentCloud/TencentDB-Agent-Memory)（MIT 协议），为**自研独立实现**，与腾讯无隶属关系、非官方出品。
 - 本插件与全部依赖组件均为 MIT 系宽松协议，纯本地运行。
 
+## 致谢
+
+本项目在架构与设计上参考了以下开源项目，衷心感谢它们的作者与社区：
+
+- **[TencentDB Agent Memory](https://github.com/TencentCloud/TencentDB-Agent-Memory)**（腾讯云）—— 四层记忆金字塔（L0 对话捕获 → L1 记忆提取 → L2 场景归纳 → L3 用户画像）与记忆管理思想，是本插件记忆管线的直接启发来源；
+- **[OpenClaw](https://github.com/openclaw/openclaw)**（作者 **Peter Steinberger**）—— 开源个人 AI 助手框架，其「技能（Skill）」组织方式与本插件"技能合成 → dsh-skill"的产物形态一脉相承；
+- **[self-improving-agent](https://github.com/pskoett/self-improving-agent)**（作者 **pskoett**）—— OpenClaw 生态中的自我进化技能：从经验中提炼教训、纠正与可复用流程；本插件的自进化模块（记忆巩固 / 遗忘 / 纠正 + 技能合成）以此为设计灵感。
+
+再次感谢以上项目与作者的开源贡献。
+
 ## 文档
 
 - `README.md` —— 功能与用法总览（本文件）
