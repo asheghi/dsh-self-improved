@@ -209,8 +209,24 @@ export function apply(ctx: Context, config: Config): void {
         signal: input.signal,
       };
       if (input.sessionId) options.sessionId = input.sessionId;
-      if (config.extract.provider) options.provider = config.extract.provider;
-      if (config.extract.model) options.model = config.extract.model;
+      // 提取/巩固/技能模型：优先显式配置，其次回退到 DSH 默认模型（agentDefaultModel）
+      let provider = config.extract.provider;
+      let model = config.extract.model;
+      if (!provider || !model) {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const dm = (ctx as any).get?.("agentDefaultModel");
+          const sel = dm?.currentSelection?.();
+          if (sel && typeof sel.provider === "string" && typeof sel.model === "string") {
+            provider = provider || sel.provider;
+            model = model || sel.model;
+          }
+        } catch {
+          /* 无默认模型则保持未配置 */
+        }
+      }
+      if (provider) options.provider = provider;
+      if (model) options.model = model;
       for await (const chunk of ctx.llm.stream(options)) {
         input.signal.throwIfAborted();
         assembler.push(chunk);
