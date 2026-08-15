@@ -60,7 +60,24 @@ window.__ModuleLoader__.load({
       ".__dsi_tabBar{display:flex;gap:4px;border-bottom:1px solid var(--dsw-alias-border-l2);padding-bottom:8px}" +
       ".__dsi_tab{height:32px;border:1px solid transparent;background:transparent;color:var(--dsw-alias-label-secondary);border-radius:8px;padding:0 14px;font:inherit;font-size:14px;line-height:32px;cursor:pointer}" +
       ".__dsi_tab:hover{color:var(--dsw-alias-label-primary)}" +
-      ".__dsi_tabActive{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-3);border-color:var(--dsw-alias-border-l2)}";
+      ".__dsi_tabActive{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-3);border-color:var(--dsw-alias-border-l2)}" +
+      // 滑动开关
+      ".__dsi_switch{position:relative;display:inline-block;width:36px;height:20px;flex:none}" +
+      ".__dsi_switch input{opacity:0;width:0;height:0;position:absolute}" +
+      ".__dsi_switchTrack{position:absolute;inset:0;background:var(--dsw-alias-bg-layer-3);border:1px solid var(--dsw-alias-border-l2);border-radius:10px;transition:background .15s,border-color .15s}" +
+      ".__dsi_switch input:checked + .__dsi_switchTrack{background:var(--dsw-alias-state-business-primary);border-color:var(--dsw-alias-state-business-primary)}" +
+      ".__dsi_switchThumb{position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:var(--dsw-alias-label-tertiary);transition:transform .15s,background .15s}" +
+      ".__dsi_switch input:checked ~ .__dsi_switchThumb{transform:translateX(16px);background:var(--dsw-alias-label-on-accent)}" +
+      // 折叠面板
+      ".__dsi_collapse{display:flex;flex-direction:column;gap:8px}" +
+      ".__dsi_collapseHeader{display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;border:1px solid var(--dsw-alias-border-l2);border-radius:12px;padding:8px 12px;background:var(--dsw-alias-bg-layer-2)}" +
+      ".__dsi_collapseHeader:hover{border-color:var(--dsw-alias-state-business-primary)}" +
+      ".__dsi_collapseTitle{flex:1;font-size:14px;font-weight:600;line-height:22px;color:var(--dsw-alias-label-primary)}" +
+      ".__dsi_collapseCount{font-size:12px;color:var(--dsw-alias-label-tertiary)}" +
+      ".__dsi_collapseChevron{font-size:12px;color:var(--dsw-alias-label-tertiary);transition:transform .15s}" +
+      ".__dsi_collapseOpen .__dsi_collapseChevron{transform:rotate(90deg)}" +
+      ".__dsi_collapseBody{padding:2px 4px;display:flex;flex-direction:column;gap:8px}" +
+      ".__dsi_persona{white-space:pre-wrap;font-size:13px;line-height:21px;color:var(--dsw-alias-label-secondary);max-height:260px;overflow:auto;border:1px solid var(--dsw-alias-border-l2);border-radius:12px;padding:10px 12px;background:var(--dsw-alias-bg-layer-2)}";
     var tagId = "dsh-self-improved/main.css";
     if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId) + "]") === null) {
       var tag = document.createElement("style");
@@ -178,7 +195,11 @@ window.__ModuleLoader__.load({
       browserRefresh: "刷新",
       browserSummary: "共 {n} 条活跃记忆 · 待提取 {p} · 场景 {s} · 画像 v{v} · 技能 {k}",
       browserEmpty: "（没有活跃记忆）",
+      browserPersona: "人物画像",
+      browserPersonaEmpty: "（尚未生成画像——记忆积累后自进化会自动合成）",
+      browserMemories: "记忆",
       browserScenes: "场景",
+      browserScenesEmpty: "（暂无场景）",
       browserSkills: "已学习到的技能",
       browserSkillsEmpty: "（还没有技能——继续积累记忆，自进化会逐步提炼 SOP）",
       browserSynth: "已合成",
@@ -297,7 +318,11 @@ window.__ModuleLoader__.load({
       browserRefresh: "Refresh",
       browserSummary: "{n} active memories · {p} pending · {s} scenes · persona v{v} · {k} skills",
       browserEmpty: "(no active memories)",
+      browserPersona: "Persona",
+      browserPersonaEmpty: "(no persona yet — self-evolution synthesizes it as memories accumulate)",
+      browserMemories: "Memories",
       browserScenes: "Scenes",
+      browserScenesEmpty: "(no scenes yet)",
       browserSkills: "Learned skills",
       browserSkillsEmpty: "(no skills yet — keep accumulating memories, self-evolution will distill SOPs)",
       browserSynth: "synthesized",
@@ -473,18 +498,44 @@ window.__ModuleLoader__.load({
         });
       }
 
+      // 模块开关联动折叠：关掉的模块其配置组自动收起，总开关关闭时全部收起
+      var GROUP_SWITCH = {
+        groupExtract: "modules.extract",
+        groupRecall: "modules.recall",
+        groupConsolidate: "modules.consolidate",
+        groupEvolve: "modules.evolve",
+        groupStorage: "enabled"
+      };
+      function switchValue(key) {
+        return Boolean(draft[key] !== void 0 ? draft[key] : getPath(value, key.split(".")));
+      }
+      var masterOn = switchValue("enabled");
+      function groupVisible(g) {
+        if (g === "groupMaster" || g === "groupModules") return true;
+        var sw = GROUP_SWITCH[g];
+        if (!sw) return true;
+        if (sw === "enabled") return masterOn;
+        return masterOn && switchValue(sw);
+      }
+
       var nodes = [];
       var lastGroup = null;
       FIELDS.forEach(function (f) {
+        if (!groupVisible(f.group)) return; // 折叠隐藏的组
         if (f.group !== lastGroup) {
           lastGroup = f.group;
           nodes.push(h("div", { key: "g" + f.group, className: "__dsi_group" }, t(f.group)));
         }
         var overridden = getPath(user, f.path) !== void 0;
         if (f.type === "checkbox") {
+          // 滑动开关
           nodes.push(h("label", { key: f.path.join("."), className: "__dsi_field" },
             h("span", { className: "__dsi_row" },
-              h("input", { className: "__dsi_check", type: "checkbox", checked: Boolean(fieldDraft(f)), onChange: function (e) { setField(f, e.target.checked); } }),
+              h("span", { className: "__dsi_switch" },
+                h("input", { type: "checkbox", checked: Boolean(fieldDraft(f)), onChange: function (e) { setField(f, e.target.checked); } }),
+                h("span", { className: "__dsi_switchTrack" }),
+                h("span", { className: "__dsi_switchThumb" })
+              ),
               h("span", { className: "__dsi_label" }, t(f.label)),
               overridden ? h("span", { className: "__dsi_override" }, t("overridden")) : null
             )
@@ -662,21 +713,55 @@ window.__ModuleLoader__.load({
           ) : null);
       });
 
-      return h("div", { className: "__dsi_root" },
+      // 折叠面板（画像/记忆/场景/技能）
+      var [open, setOpen] = react.useState({ persona: false, memories: true, scenes: false, skills: false });
+      function toggle(k) {
+        setOpen(function (p) { var n = Object.assign({}, p); n[k] = !n[k]; return n; });
+      }
+      function collapse(key, title, count, body) {
+        var isOpen = open[key];
+        return h("div", { className: "__dsi_collapse" + (isOpen ? " __dsi_collapseOpen" : "") },
+          h("div", { className: "__dsi_collapseHeader", onClick: function () { toggle(key); } },
+            h("span", { className: "__dsi_collapseChevron" }, "▶"),
+            h("span", { className: "__dsi_collapseTitle" }, title),
+            h("span", { className: "__dsi_collapseCount" }, count)
+          ),
+          isOpen ? h("div", { className: "__dsi_collapseBody" }, body) : null
+        );
+      }
+
+      var persona = data.persona;
+      var scenesArr = data.scenes || [];
+      var personaBody = persona
+        ? h("div", { className: "__dsi_persona" }, persona.content)
+        : h("p", { className: "__dsi_status" }, t("browserPersonaEmpty"));
+
+      var memoryBody = h("div", { className: "__dsi_collapse" },
         h("div", { className: "__dsi_row" },
           h("input", { className: "__dsi_input", style: { maxWidth: 260 }, placeholder: t("browserSearch"), value: query, onChange: function (e) { setQuery(e.target.value); } }),
           h("button", { type: "button", className: "__dsi_btn", onClick: refresh, disabled: busy }, t("browserRefresh"))
         ),
+        listNodes.length ? listNodes : h("p", { className: "__dsi_status" }, t("browserEmpty"))
+      );
+
+      var scenesBody = scenesArr.length
+        ? h("div", { className: "__dsi_collapse" }, scenesNodes)
+        : h("p", { className: "__dsi_status" }, t("browserScenesEmpty"));
+
+      var skillsBody = skills.length
+        ? (skillsNodes.length ? h("div", { className: "__dsi_collapse" }, skillsNodes) : h("p", { className: "__dsi_status" }, t("browserSkillsEmpty")))
+        : h("p", { className: "__dsi_status" }, t("browserSkillsEmpty"));
+
+      return h("div", { className: "__dsi_root" },
         h("p", { className: "__dsi_status" },
-          t("browserSummary").replace("{n}", String(memories.length)).replace("{p}", String(data.pending || 0)).replace("{s}", String((data.scenes || []).length)).replace("{v}", String(data.persona ? data.persona.ver : "-")).replace("{k}", String(skills.length))
+          t("browserSummary").replace("{n}", String(memories.length)).replace("{p}", String(data.pending || 0)).replace("{s}", String(scenesArr.length)).replace("{v}", String(persona ? persona.ver : "-")).replace("{k}", String(skills.length))
         ),
         notice ? h("p", { className: "__dsi_ok" }, notice) : null,
         error ? h("p", { className: "__dsi_error" }, error) : null,
-        listNodes.length ? listNodes : h("p", { className: "__dsi_status" }, t("browserEmpty")),
-        (data.scenes || []).length ? h("div", { className: "__dsi_group" }, t("browserScenes")) : null,
-        scenesNodes,
-        skills.length ? h("div", { className: "__dsi_group" }, t("browserSkills")) : null,
-        skillsNodes.length ? skillsNodes : (skills.length ? h("p", { className: "__dsi_status" }, t("browserSkillsEmpty")) : null)
+        collapse("persona", t("browserPersona") + (persona ? " v" + persona.ver : ""), persona ? "" : "", personaBody),
+        collapse("memories", t("browserMemories"), String(memories.length), memoryBody),
+        collapse("scenes", t("browserScenes"), String(scenesArr.length), scenesBody),
+        collapse("skills", t("browserSkills"), String(skills.length), skillsBody)
       );
     }
 
