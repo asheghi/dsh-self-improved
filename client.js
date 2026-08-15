@@ -154,6 +154,7 @@ window.__ModuleLoader__.load({
       saved: "已保存并立即生效",
       saving: "保存中…",
       error: "保存失败",
+      conflict: "配置已被其他修改（版本冲突）：已刷新最新配置，你改动的内容已保留，请再点一次保存",
       unavailable: "设置命名空间不可用（服务端未注册 dsh-self-improved？）",
       overridden: "已覆盖",
       loading: "加载中…",
@@ -297,6 +298,7 @@ window.__ModuleLoader__.load({
       saved: "Saved — applied immediately",
       saving: "Saving…",
       error: "Save failed",
+      conflict: "Config changed elsewhere (revision conflict): refreshed to latest, your edits are kept — please save again",
       unavailable: "Settings namespace unavailable (dsh-self-improved not registered server-side?)",
       overridden: "overridden",
       loading: "Loading…",
@@ -489,6 +491,20 @@ window.__ModuleLoader__.load({
         setError(null);
       }
 
+      // 保存失败处理：revision 冲突（命名空间在读取后被其他修改）时刷新最新配置、保留用户草稿，
+      // 提示再次保存；其余错误原样展示
+      function handleMutateFailure(response) {
+        setBusy(false);
+        var detail = response && response.result && response.result.error || {};
+        var msg = String(detail.message || detail.code || "unknown");
+        if (/changed since it was read|revision conflict/i.test(msg)) {
+          scope.load(); // 刷新快照（draft 保留不动）
+          setError(t("conflict"));
+          return;
+        }
+        setError(t("error") + ": " + msg);
+      }
+
       function onSave() {
         setBusy(true); setNotice(null); setError(null);
         var ops = [];
@@ -523,12 +539,8 @@ window.__ModuleLoader__.load({
           ops: ops,
           ...snapshot.revision === void 0 ? {} : { expectedRevision: snapshot.revision }
         }).then(function (response) {
+          if (!response.result.ok) { handleMutateFailure(response); return; }
           setBusy(false);
-          if (!response.result.ok) {
-            var detail = response.result.error || {};
-            setError(t("error") + ": " + String(detail.message || detail.code || "unknown"));
-            return;
-          }
           setNotice(t("saved"));
           // 注意：不要用响应值重建 draft——响应可能是部分数据，缺字段会被渲染成 false（导致开关全关）
           scope.load();
@@ -544,8 +556,8 @@ window.__ModuleLoader__.load({
           ops: FIELDS.map(function (f) { return { op: "unset", path: f.path }; }),
           ...snapshot.revision === void 0 ? {} : { expectedRevision: snapshot.revision }
         }).then(function (response) {
+          if (!response.result.ok) { handleMutateFailure(response); return; }
           setBusy(false);
-          if (!response.result.ok) { setError(t("error")); return; }
           setNotice(t("saved"));
           scope.load();
         }).catch(function (e) {
