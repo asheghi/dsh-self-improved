@@ -546,6 +546,13 @@ window.__ModuleLoader__.load({
         var alive = true;
         var sync = function () { if (alive) setSnapshot(scope.getSnapshot()); };
         var un = typeof scope.subscribe === "function" ? scope.subscribe(sync) : null;
+        // 打开页面时触发一次服务端快照重建（noop 动作），保证一进来就是最新数据
+        try {
+          api.settings.mutate({
+            ns: "dsh-self-improved-browser",
+            ops: [{ op: "set", path: ["action"], value: JSON.stringify({ op: "noop" }) }]
+          });
+        } catch (e) { /* noop */ }
         return function () { alive = false; if (un) un(); if (scope.dispose) scope.dispose(); };
       }, [scope]);
 
