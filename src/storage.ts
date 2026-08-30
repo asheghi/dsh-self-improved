@@ -1,10 +1,10 @@
 /**
- * 存储模块（M1）：SQLite 记忆库。
+ * Storage module (M1): SQLite memory store.
  *
- * - memory.db：memories 主表 + FTS5 全文索引（可重建派生读模型）
- * - vectors.db：sqlite-vec vec0 向量表（M2/M3 起填充 embedding；M1 仅验证扩展可加载）
+ * - memory.db: memories main table + FTS5 full-text index (a derived read model that can be rebuilt)
+ * - vectors.db: sqlite-vec vec0 vector table (embedding filled from M2/M3 on; M1 only verifies the extension loads)
  *
- * 设计对齐：docs/design/dsh-memory-plugin-design.md §4.2 / §5.3
+ * Design alignment: docs/design/dsh-memory-plugin-design.md §4.2 / §5.3
  */
 import { mkdirSync, writeFileSync, readFileSync, existsSync, copyFileSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
@@ -38,12 +38,12 @@ export interface MemorySearchHit {
   content: string;
   importance: number;
   accessCount: number;
-  score: number; // bm25 得分（越小越相关）
+  score: number; // bm25 score (smaller = more relevant)
 }
 
 export interface MemorySearchOptions {
   limit?: number;
-  /** true = 任意词命中（OR，适合召回）；false = 全部词命中（AND，适合精确搜索） */
+  /** true = any term matches (OR, good for recall); false = all terms must match (AND, good for exact search) */
   matchAny?: boolean;
 }
 
@@ -71,7 +71,7 @@ export class MemoryStore {
     this.tryLoadVectors();
   }
 
-  /** 打开一个 SQLite 数据库（node:sqlite，DSH 同款；allowExtension 允许加载 sqlite-vec） */
+  /** Open a SQLite database (node:sqlite, same as DSH; allowExtension allows loading sqlite-vec) */
   private openDatabase(path: string): DatabaseSync {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const db = new DatabaseSync(path, { allowExtension: true } as any);
@@ -92,7 +92,7 @@ export class MemoryStore {
         status       TEXT NOT NULL DEFAULT 'active',
         supersedes   TEXT
       ) STRICT;
-      -- search_text 为 jieba 分词后的空格分隔词序列（unicode61 不做中文分词）
+      -- search_text is the space-separated token sequence produced by jieba (unicode61 does not segment Chinese)
       CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
         search_text,
         kind UNINDEXED,
@@ -101,14 +101,14 @@ export class MemoryStore {
       );
       CREATE INDEX IF NOT EXISTS idx_memories_kind ON memories(kind);
       CREATE INDEX IF NOT EXISTS idx_memories_status ON memories(status);
-      -- 提取管线状态：每会话已处理/待处理的 L0 seq 游标（持久化，重启不丢）
+      -- Extraction pipeline state: per-session processed/pending L0 seq cursors (persisted, survives restarts)
       CREATE TABLE IF NOT EXISTS extract_state (
         session_id    TEXT PRIMARY KEY,
         processed_seq INTEGER NOT NULL DEFAULT 0,
         pending_seq   INTEGER NOT NULL DEFAULT 0,
         updated_at    INTEGER NOT NULL
       ) STRICT;
-      -- L2 场景块（M4）
+      -- L2 scene blocks (M4)
       CREATE TABLE IF NOT EXISTS scenes (
         id           TEXT PRIMARY KEY,
         title        TEXT NOT NULL,
@@ -117,7 +117,7 @@ export class MemoryStore {
         created_at   INTEGER NOT NULL,
         updated_at   INTEGER NOT NULL
       ) STRICT;
-      -- L3 用户画像版本（M4，append-only 便于回滚）
+      -- L3 user persona versions (M4, append-only for easy rollback)
       CREATE TABLE IF NOT EXISTS persona_versions (
         ver        INTEGER PRIMARY KEY AUTOINCREMENT,
         content    TEXT NOT NULL,
@@ -126,7 +126,7 @@ export class MemoryStore {
     `);
   }
 
-  /** 尝试加载 sqlite-vec 扩展；失败仅禁用向量能力（M1 不依赖向量检索） */
+  /** Try to load the sqlite-vec extension; on failure only vector capabilities are disabled (M1 does not depend on vector search) */
   private tryLoadVectors(): void {
     try {
       this.vectors = this.openDatabase(join(this.dir, "vectors.db"));
@@ -138,12 +138,12 @@ export class MemoryStore {
         );
       `);
     } catch (error) {
-      console.warn("[dsh-self-improved] sqlite-vec 不可用，向量检索禁用：", String(error));
+      console.warn("[dsh-self-improved] sqlite-vec unavailable, vector search disabled:", String(error));
       this.vectors = null;
     }
   }
 
-  /** 写入一条原子记忆（L1） */
+  /** Insert one atomic memory (L1) */
   insertMemory(input: {
     kind: MemoryKind;
     content: string;
@@ -174,7 +174,7 @@ export class MemoryStore {
     return record;
   }
 
-  /** 关键词检索（jieba 分词 + FTS5 + BM25）。matchAny=true 用 OR（召回），默认 AND（精确） */
+  /** Keyword search (jieba tokenization + FTS5 + BM25). matchAny=true uses OR (recall), default is AND (exact) */
   searchMemories(query: string, options: MemorySearchOptions = {}): MemorySearchHit[] {
     const limit = options.limit ?? 10;
     if (!query.trim()) return [];
@@ -240,15 +240,15 @@ export class MemoryStore {
     };
   }
 
-  /** 标记遗忘（M4 起配合衰减；M1 提供基础删除能力） */
+  /** Mark as forgotten (paired with decay from M4 on; M1 provides basic delete capability) */
   forgetMemory(id: string): boolean {
     const res = this.db.prepare("UPDATE memories SET status = 'forgotten', updated_at = ? WHERE id = ?").run(Date.now(), id);
     return res.changes > 0;
   }
 
-  // ---------- 向量（M3，sqlite-vec KNN） ----------
+  // ---------- Vectors (M3, sqlite-vec KNN) ----------
 
-  /** 写入/更新记忆向量（向量检索开启时由 recall 调用；vec0 虚拟表不支持 UPSERT，用 INSERT OR REPLACE） */
+  /** Insert/update a memory embedding (called by recall when vector search is on; the vec0 virtual table does not support UPSERT, so INSERT OR REPLACE is used) */
   upsertEmbedding(memoryId: string, vector: number[]): boolean {
     if (!this.vectors) return false;
     try {
@@ -262,7 +262,7 @@ export class MemoryStore {
     }
   }
 
-  /** 向量近邻检索（KNN）；返回 [{memoryId, distance}] */
+  /** Vector nearest-neighbor search (KNN); returns [{memoryId, distance}] */
   vectorSearch(vector: number[], limit: number): Array<{ memoryId: string; distance: number }> {
     if (!this.vectors || vector.length === 0) return [];
     try {
@@ -289,7 +289,7 @@ export class MemoryStore {
     this.db.close();
   }
 
-  /** 原始会话切片落盘（L0 JSONL，每行一条；供提取管线输入/备份） */
+  /** Persist raw conversation slices (L0 JSONL, one record per line; input/backup for the extraction pipeline) */
   appendConversationSlice(sessionId: string, records: ConversationSliceRecord[]): void {
     if (records.length === 0) return;
     const dir = join(this.dir, "conversations");
@@ -299,9 +299,9 @@ export class MemoryStore {
     writeFileSync(path, lines, { encoding: "utf8", flag: "a" });
   }
 
-  // ---------- 提取管线状态（M2） ----------
+  // ---------- Extraction pipeline state (M2) ----------
 
-  /** 标记某会话的切片已捕获到 seq（提取队列的待处理水位） */
+  /** Mark a session's slices as captured up to seq (pending watermark of the extraction queue) */
   markPending(sessionId: string, seq: number): void {
     this.db
       .prepare(
@@ -314,7 +314,7 @@ export class MemoryStore {
       .run(sessionId, seq, Date.now());
   }
 
-  /** 有待处理切片的会话列表 */
+  /** Sessions with pending slices */
   pendingSessions(): Array<{ sessionId: string; processedSeq: number; pendingSeq: number }> {
     const rows = this.db
       .prepare("SELECT session_id, processed_seq, pending_seq FROM extract_state WHERE pending_seq > processed_seq")
@@ -326,7 +326,7 @@ export class MemoryStore {
     }));
   }
 
-  /** 读取某会话 [fromSeq, toSeq] 区间内的切片（从 JSONL） */
+  /** Read a session's slices in the [fromSeq, toSeq] range (from JSONL) */
   readSlices(sessionId: string, fromSeq: number, toSeq: number): ConversationSliceRecord[] {
     if (toSeq <= fromSeq) return [];
     const path = join(this.dir, "conversations", `${safeSegment(sessionId)}.jsonl`);
@@ -344,22 +344,22 @@ export class MemoryStore {
         const rec = JSON.parse(line) as any;
         if (typeof rec.seq === "number" && rec.seq > fromSeq && rec.seq <= toSeq) out.push(rec);
       } catch {
-        // 忽略坏行
+        // Ignore malformed lines
       }
     }
     return out;
   }
 
-  /** 推进已处理水位 */
+  /** Advance the processed watermark */
   advanceProcessed(sessionId: string, seq: number): void {
     this.db
       .prepare("UPDATE extract_state SET processed_seq = ?, updated_at = ? WHERE session_id = ?")
       .run(seq, Date.now(), sessionId);
   }
 
-  // ---------- M4：场景 / 画像 / 衰减 ----------
+  // ---------- M4: scenes / persona / decay ----------
 
-  /** 最新一条活跃记忆的创建时间（0 = 无）；用于"有新记忆才进化"判断 */
+  /** Creation time of the newest active memory (0 = none); used for the "evolve only when there are new memories" check */
   newestMemoryTs(): number {
     const row = this.db.prepare("SELECT MAX(created_at) m FROM memories WHERE status = 'active'").get() as
       | { m: number | null }
@@ -367,7 +367,7 @@ export class MemoryStore {
     return row && row.m !== null ? row.m : 0;
   }
 
-  /** 当前活跃记忆（供 consolidate / evolve 使用） */
+  /** Currently active memories (consumed by consolidate / evolve) */
   getActiveMemories(limit: number, minImportance = 0): MemoryRecord[] {
     const rows = minImportance > 0
       ? this.db.prepare("SELECT * FROM memories WHERE status = 'active' AND importance >= ? ORDER BY importance DESC, updated_at DESC LIMIT ?").all(minImportance, limit)
@@ -385,20 +385,20 @@ export class MemoryStore {
     }));
   }
 
-  /** 设置记忆状态（corrected / decayed / forgotten / active） */
+  /** Set a memory's status (corrected / decayed / forgotten / active) */
   setMemoryStatus(id: string, status: MemoryStatus): boolean {
     const res = this.db.prepare("UPDATE memories SET status = ?, updated_at = ? WHERE id = ?").run(status, Date.now(), id);
     return res.changes > 0;
   }
 
-  /** 保存画像（版本 +1，写 persona.md 镜像） */
+  /** Save the persona (version +1, writes the persona.md mirror) */
   savePersona(content: string): number {
     const now = Date.now();
     const res = this.db.prepare("INSERT INTO persona_versions (content, created_at) VALUES (?, ?)").run(content, now);
     const ver = Number(res.lastInsertRowid);
     const dir = join(this.dir, "persona");
     mkdirSync(dir, { recursive: true });
-    // 滚动备份：保留 persona.md.bak1 / .bak2
+    // Rolling backup: keep persona.md.bak1 / .bak2
     const main = join(dir, "persona.md");
     if (existsSyncSafe(main)) {
       const bak2 = join(dir, "persona.md.bak2");
@@ -410,7 +410,7 @@ export class MemoryStore {
     return ver;
   }
 
-  /** 读取最新画像（无则 undefined） */
+  /** Read the latest persona (undefined if none) */
   getPersona(): { ver: number; content: string; createdAt: number } | undefined {
     const row = this.db.prepare("SELECT ver, content, created_at FROM persona_versions ORDER BY ver DESC LIMIT 1").get() as
       | Record<string, unknown>
@@ -419,7 +419,7 @@ export class MemoryStore {
     return { ver: Number(row.ver), content: String(row.content), createdAt: Number(row.created_at) };
   }
 
-  /** 保存场景块 */
+  /** Save a scene block */
   saveScene(input: { id: string; title: string; markdown: string; memoryIds: string[] }): void {
     const now = Date.now();
     this.db
@@ -442,7 +442,7 @@ export class MemoryStore {
     }));
   }
 
-  /** 删除超过保留期的 forgotten 记忆（清理） */
+  /** Delete forgotten memories past their retention window (cleanup) */
   deleteForgottenOlderThan(ts: number): number {
     const res = this.db
       .prepare("DELETE FROM memories WHERE status = 'forgotten' AND updated_at < ?")
@@ -450,9 +450,9 @@ export class MemoryStore {
     return Number(res.changes);
   }
 
-  // ---------- 成长治理（M6）：画像版本 / 场景 / 对话切片 上限与清理 ----------
+  // ---------- Growth governance (M6): caps and cleanup for persona versions / scenes / conversation slices ----------
 
-  /** 画像版本只保留最近 keep 个；返回删除数 */
+  /** Keep only the most recent "keep" persona versions; returns the number deleted */
   prunePersonaVersions(keep: number): number {
     if (keep <= 0) return 0;
     const row = this.db.prepare("SELECT MAX(ver) m FROM persona_versions").get() as { m: number } | undefined;
@@ -462,13 +462,14 @@ export class MemoryStore {
   }
 
   /**
-   * 场景治理：① 来源记忆大多已失效（活跃比例 < activeRatio）的场景删除；
-   * ② 场景总数超过 maxScenes 时删除最旧的。返回删除数。
+   * Scene governance: ① delete scenes whose source memories are mostly stale
+   * (active ratio < activeRatio); ② when the total number of scenes exceeds
+   * maxScenes, delete the oldest. Returns the number deleted.
    */
   pruneScenes(maxScenes: number, activeRatio: number): number {
     let deleted = 0;
     const scenes = this.listScenes(10_000);
-    // ① 来源失效的场景
+    // ① Scenes whose source memories went stale
     for (const s of scenes) {
       const ids = (s.memoryIds ?? []).filter((id) => typeof id === "string").slice(0, 50);
       if (ids.length === 0) continue;
@@ -480,7 +481,7 @@ export class MemoryStore {
         if (this.db.prepare("DELETE FROM scenes WHERE id = ?").run(s.id).changes > 0) deleted++;
       }
     }
-    // ② 总数上限（删最旧）
+    // ② Total count cap (delete the oldest)
     const remaining = this.listScenes(10_000);
     const overflow = remaining.length - maxScenes;
     if (overflow > 0) {
@@ -494,7 +495,7 @@ export class MemoryStore {
     return deleted;
   }
 
-  /** 清理超过保留期的对话切片文件（conversations/*.jsonl）；返回删除文件数 */
+  /** Clean up conversation slice files past their retention window (conversations/*.jsonl); returns the number of files deleted */
   pruneConversationSlices(olderThanMs: number): number {
     const dir = join(this.dir, "conversations");
     let deleted = 0;
@@ -520,8 +521,8 @@ export class MemoryStore {
 }
 
 /**
- * jieba 中文分词：内容与查询统一走同一分词器，保证检索一致。
- * 分词器惰性初始化（词典加载有成本）。
+ * jieba Chinese tokenization: content and queries use the same tokenizer to keep search consistent.
+ * The tokenizer is lazily initialized (loading the dictionary has a cost).
  */
 let jieba: Jieba | null = null;
 export function tokenize(text: string): string {
@@ -530,13 +531,13 @@ export function tokenize(text: string): string {
       const dictPath = require.resolve("@node-rs/jieba/dict.txt");
       jieba = Jieba.withDict(readFileSync(dictPath));
     } catch {
-      jieba = null; // 词典加载失败时降级为按空白切分
+      jieba = null; // fall back to whitespace splitting when the dictionary fails to load
     }
   }
   try {
     const words = jieba ? jieba.cut(text, false) : text.split(/\s+/);
     return words
-      .map((t) => t.replace(/[^\p{L}\p{N}_]/gu, "")) // 清洗标点（FTS5 unicode61 不索引标点）
+      .map((t) => t.replace(/[^\p{L}\p{N}_]/gu, "")) // strip punctuation (FTS5 unicode61 does not index punctuation)
       .filter((t) => t.length > 0)
       .join(" ");
   } catch {
@@ -560,11 +561,11 @@ function copyFileSyncSafe(from: string, to: string): void {
   try {
     copyFileSync(from, to);
   } catch {
-    /* 备份失败不阻断画像保存 */
+    /* a failed backup does not block persona saving */
   }
 }
 
 export function defaultMemoryDir(): string {
-  // 对齐 DSH 的 dsh-home-paths：$DSH_HOME/memory
+  // Aligned with DSH's dsh-home-paths: $DSH_HOME/memory
   return join(resolveDshHome(undefined, process.env), "memory");
 }

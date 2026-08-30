@@ -4,6 +4,7 @@ dist/
 *.log
 .DS_Store
 *.tsbuildinfo
+.dsh-test/
 
-# 本地文档（设计/调研/运维笔记，仅本地保留，不进版本库）
+# Local docs (design/research/ops notes, kept out of the repo)
 docs/

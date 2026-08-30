@@ -1,20 +1,20 @@
 /**
- * L0 捕获模块（M1/M2）：把会话事件流归一化为提取管线输入切片（JSONL），
- * 在 session/flush 持久化屏障内落盘并标记提取队列水位。
+ * L0 capture module (M1/M2): normalizes the session event stream into extraction-pipeline input slices (JSONL),
+ * persists them within the session/flush barrier and marks the extraction queue watermark.
  *
- * 设计对齐：docs/design/dsh-memory-plugin-design.md §4.3
+ * Design alignment: docs/design/dsh-memory-plugin-design.md §4.3
  */
 import type { Context } from "@deepseek-ai/cordis";
 import type { MemoryStore, ConversationSliceRecord } from "./storage.js";
 
 export interface CaptureController {
-  /** 当前是否启用（总开关 && capture 模块开关） */
+  /** Whether currently enabled (master switch && capture module switch) */
   enabled(): boolean;
 }
 
 /**
- * 安装捕获监听器。
- * @param onCaptured 落盘并标记队列后调用；若返回 Promise 且被 await，会阻塞 flush（headless 收尾用）
+ * Install the capture listener.
+ * @param onCaptured Called after persisting and marking the queue; if it returns a Promise and is awaited, it blocks flush (used for headless finalization)
  */
 export function installCapture(
   ctx: Context,
@@ -22,7 +22,7 @@ export function installCapture(
   controller: CaptureController,
   onCaptured?: () => void | Promise<unknown>,
 ): void {
-  // 每会话已写到的最大 seq（进程内游标；权威防重由 DSH 事件 seq 保证）
+  // Max seq written per session (in-process cursor; authoritative dedup is guaranteed by the DSH event seq)
   const lastWritten = new Map<string, number>();
 
   ctx.on("session/flush", async (session) => {
@@ -47,7 +47,7 @@ export function installCapture(
   });
 }
 
-/** 把会话事件转成切片记录；非文本事件（如 turn/start、tool/call）返回 null */
+/** Convert a session event into a slice record; non-text events (such as turn/start, tool/call) return null */
 function toSlice(sessionId: string, event: SessionEventLike): ConversationSliceRecord | null {
   const ts = typeof event.time === "number" ? event.time : Date.now();
   const data = event.data as Record<string, unknown> | undefined;
@@ -72,7 +72,7 @@ function toSlice(sessionId: string, event: SessionEventLike): ConversationSliceR
   }
 }
 
-/** 从 LLM 消息 content 块数组（或字符串）中提取纯文本 */
+/** Extract plain text from an LLM message content block array (or string) */
 function textOfContent(content: unknown): string {
   if (Array.isArray(content)) {
     const parts: string[] = [];

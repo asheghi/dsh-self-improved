@@ -1,12 +1,12 @@
 /**
- * 召回注入模块（M3）：在 agent/pre-step 瀑布中，把相关记忆渲染成一条 user 消息
- * 追加进 decision.messages（官方注入正路，仿 dsh-time-context 范式）。
+ * Recall injection module (M3): in the agent/pre-step waterfall, renders relevant memories into a user message
+ * appended to decision.messages (the official injection path, modeled after the dsh-time-context pattern).
  *
- * 规则：
- * - 仅在 step 1 注入（对话开始前，对齐腾讯 Auto-Recall）；
- * - 按当前用户消息文本做去重缓存（同一消息不重复注入）；
- * - 检索超时/失败 → 跳过注入，绝不阻塞回合；
- * - 注入消息 source: { kind: "plugin", plugin: "dsh-self-improved", form: "snapshot" }（可回放、可审计）。
+ * Rules:
+ * - Inject only at step 1 (before the conversation starts, aligned with Tencent Auto-Recall);
+ * - Dedup cache keyed by the current user message text (the same message is never injected twice);
+ * - Search timeout/failure → skip injection, never block the turn;
+ * - Injected message source: { kind: "plugin", plugin: "dsh-self-improved", form: "snapshot" } (replayable, auditable).
  */
 import type { Context } from "@deepseek-ai/cordis";
 import { createUserMessage } from "@deepseek-ai/dsh-llm";
@@ -16,13 +16,13 @@ import { renderRecallBlock } from "./recall.js";
 export interface InjectController {
   enabled(): boolean;
   maxHits: number;
-  /** 注入块字符上限（防单次注入撑爆上下文） */
+  /** Character cap for the injection block (prevents a single injection from flooding the context) */
   maxChars?: number;
   debug?: boolean;
 }
 
 export function installRecallInjection(ctx: Context, recall: RecallService, controller: InjectController): void {
-  // 最近注入过的用户消息（文本 hash → 注入文本），避免同一步/重复消息反复注入
+  // User messages recently injected (text hash → injected text), so the same step/repeated messages are not injected over and over
   const injectedCache = new Map<string, string>();
   const CACHE_MAX = 128;
 
@@ -34,10 +34,10 @@ export function installRecallInjection(ctx: Context, recall: RecallService, cont
       if (decision.kind === "reject" || payload.signal?.aborted) return decision;
       if (!controller.enabled()) return decision;
 
-      // 仅回合第一步注入
+      // Inject only on the first step of a turn
       if (payload.step !== 1) return decision;
 
-      // 取本次待处理消息中的最后一条 user 消息作为检索查询
+      // Use the last user message among the pending messages as the search query
       const query = lastUserText(decision.messages);
       if (controller.debug) console.log("[dsh-self-improved] pre-step query:", JSON.stringify(query.slice(0, 80)), "step:", payload.step);
       if (!query) return decision;
@@ -48,11 +48,11 @@ export function installRecallInjection(ctx: Context, recall: RecallService, cont
       if (controller.debug) console.log("[dsh-self-improved] recall hits:", hits.length, hits.map((h) => h.kind).join(","));
       let block = renderRecallBlock(hits, controller.maxHits);
       if (controller.maxChars && block.length > controller.maxChars) {
-        block = block.slice(0, controller.maxChars) + "\n…（已截断）";
+        block = block.slice(0, controller.maxChars) + "\n… (truncated)";
       }
       if (!block) return decision;
 
-      // 缓存并注入
+      // Cache and inject
       if (injectedCache.size >= CACHE_MAX) injectedCache.clear();
       injectedCache.set(cacheKey, block);
       return {
@@ -75,7 +75,7 @@ export function installRecallInjection(ctx: Context, recall: RecallService, cont
   );
 }
 
-/** 从待处理消息中取最后一条"真实用户消息"的文本（用于检索；跳过插件注入/快照类 user 消息） */
+/** Take the text of the last "real user message" among the pending messages (used for search; skips plugin-injected/snapshot user messages) */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function lastUserText(messages: any[] | undefined): string {
   if (!Array.isArray(messages)) return "";
@@ -83,7 +83,7 @@ function lastUserText(messages: any[] | undefined): string {
     const msg = messages[i];
     if (!msg || msg.role !== "user") continue;
     const src = msg.source;
-    // 跳过系统/插件注入的 user 消息（运行时上下文、AGENTS.md 指令、技能目录、召回快照等）
+    // Skip user messages injected by the system/plugins (runtime context, AGENTS.md instructions, skill catalog, recall snapshots, etc.)
     if (src) {
       const form = src.form;
       const kind = src.kind;

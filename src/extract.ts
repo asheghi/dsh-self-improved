@@ -1,10 +1,10 @@
 /**
- * L1 提取管线（M2）：消费 L0 切片 → LLM 提取原子记忆 → 校验/去重 → 入库。
+ * L1 extraction pipeline (M2): consumes L0 conversation slices → LLM extracts atomic memories → validation/dedup → storage.
  *
- * 设计要点（吸取 dsh-tdai-memory 教训）：
- * - LLM 输出必须经 JSON 严格校验 + 兜底降级（坏输出 → 原文摘要），绝不静默失败；
- * - 提取绝不阻塞主对话（由调用方决定 await 时机）；
- * - 内容/查询统一 jieba 分词，去重用 token 重叠度。
+ * Design notes (lessons learned from dsh-tdai-memory):
+ * - LLM output must pass strict JSON validation plus a fallback path (bad output → source-text summary); never fail silently;
+ * - Extraction must never block the main conversation (the caller decides when to await);
+ * - Content and queries share one jieba tokenizer; dedup relies on token overlap.
  */
 import type { MemoryStore, MemoryKind, ConversationSliceRecord } from "./storage.js";
 import { tokenize } from "./storage.js";
@@ -16,26 +16,26 @@ export interface ExtractedMemoryDraft {
   importance: number;
 }
 
-/** LLM 调用抽象：输入提示词，返回模型文本（由宿主用 ctx.llm.stream 实现，测试可注入假实现） */
+/** LLM call abstraction: takes a prompt and returns model text (the host implements it with ctx.llm.stream; tests can inject a fake) */
 export interface ExtractCallLlm {
   (input: { system: string; user: string; sessionId: string; signal: AbortSignal }): Promise<string>;
 }
 
 export interface ExtractSettings {
   enabled: boolean;
-  /** 定时轮询间隔（分钟） */
+  /** Polling interval in minutes */
   intervalMinutes: number;
-  /** 单次提取输入字符上限（超出取头尾） */
+  /** Max input characters per extraction run (head+tail are kept beyond the limit) */
   batchMaxChars: number;
   maxOutputTokens: number;
   timeoutMs: number;
-  /** 去重：与已有记忆 token 重叠度过高则跳过 */
+  /** Dedup: skip when token overlap with an existing memory is too high */
   dedup: boolean;
-  /** 坏 JSON 时回退为"原文摘要"记忆，而不是静默丢弃 */
+  /** On bad JSON, fall back to a "source-text summary" memory instead of dropping it silently */
   fallbackOnBadJson: boolean;
-  /** 丢弃重要度低于该值的提取结果（降噪） */
+  /** Drop extracted results whose importance is below this value (noise reduction) */
   minImportance: number;
-  /** headless 一次性运行：flush 时同步排空（防 5s 关停超时） */
+  /** Headless one-shot run: drain synchronously on flush (avoids the 5s shutdown timeout) */
   flushDrain: boolean;
 }
 
@@ -46,16 +46,16 @@ export interface ExtractPumpResult {
   errors: number;
 }
 
-export const EXTRACT_SYSTEM_PROMPT = `你是长期记忆提取器。你的任务是从对话中提取"值得长期记住"的原子记忆。
+export const EXTRACT_SYSTEM_PROMPT = `You are a long-term memory extractor. Your task is to extract atomic memories "worth remembering long term" from conversations.
 
-要求：
-1. 只输出一个 JSON 对象，不要输出任何其他文字、解释或代码块标记。
-2. JSON 结构固定为：{"memories":[{"kind":"fact|preference|event|instruction","content":"一句话","importance":1-10}]}
-3. kind 含义：fact=客观事实；preference=用户偏好/习惯；event=发生的事件；instruction=给未来 AI 的指令/约定。
-4. content 必须是独立可检索的一句话（第三人称、不含"我说/用户说"），不超过 80 字。
-5. importance 1-10：对长期协作价值越高分越高；琐碎寒暄不提取。
-6. 不提取：API 密钥、密码、令牌等敏感凭据；临时性内容。
-7. 没有值得记住的内容时输出 {"memories":[]}。`;
+Requirements:
+1. Output only a single JSON object, with no other text, explanations, or code fence markers.
+2. The JSON structure is fixed: {"memories":[{"kind":"fact|preference|event|instruction","content":"one sentence","importance":1-10}]}
+3. kind meanings: fact = objective fact; preference = user preference/habit; event = something that happened; instruction = an instruction/agreement for the future AI.
+4. content must be a self-contained, retrievable sentence (third person, no "I said" / "the user said"), no longer than 80 characters.
+5. importance 1-10: the higher the long-term collaboration value, the higher the score; do not extract trivial small talk.
+6. Do not extract sensitive credentials such as API keys, passwords, or tokens; do not extract transient content.
+7. When there is nothing worth remembering, output {"memories":[]}.`;
 
 const SENSITIVE_RE = /\b(sk-[A-Za-z0-9]{8,}|api[_-]?key\s*[:=]|password\s*[:=]|token\s*[:=])\b/i;
 
@@ -67,7 +67,7 @@ export class Extractor {
     private readonly embedding: EmbeddingProvider | null = null,
   ) {}
 
-  /** 处理所有有待处理切片的会话；返回汇总。防重入 + 节流。 */
+  /** Processes every session with pending slices; returns a summary. Re-entrancy guard + throttling. */
   async pump(): Promise<ExtractPumpResult> {
     if (!this.settings.enabled) return { sessions: 0, memories: 0, skipped: 0, errors: 0 };
     if (this.pumping) return { sessions: 0, memories: 0, skipped: 0, errors: 0 };
@@ -110,7 +110,7 @@ export class Extractor {
   ): Promise<{ memories: number; skipped: number }> {
     const slices = this.store.readSlices(sessionId, fromSeq, toSeq);
     if (slices.length === 0) {
-      // 无新内容也推进水位，避免反复空转
+      // Advance the watermark even when there is no new content, to avoid spinning on empty runs
       this.store.advanceProcessed(sessionId, toSeq);
       return { memories: 0, skipped: 0 };
     }
@@ -124,7 +124,7 @@ export class Extractor {
     const inserted: Array<{ content: string; id: string }> = [];
     for (const draft of drafts) {
       if (draft.importance < this.settings.minImportance) {
-        skipped++; // 低价值噪音直接丢弃（降噪）
+        skipped++; // low-value noise dropped outright (noise reduction)
         continue;
       }
       if (this.settings.dedup && this.isDuplicate(draft)) {
@@ -135,7 +135,7 @@ export class Extractor {
       inserted.push({ content: record.content, id: record.id });
       memories++;
     }
-    // 向量回填（可选）：配置了 embedding 时写入，供混合检索
+    // Embedding backfill (optional): written when an embedding provider is configured, for hybrid retrieval
     if (inserted.length > 0 && this.embedding) {
       try {
         const vectors = await this.embedding.embed(inserted.map((m) => m.content));
@@ -150,7 +150,7 @@ export class Extractor {
     return { memories, skipped };
   }
 
-  /** 解析并校验 LLM 输出；坏输出走兜底（fallbackOnBadJson 时） */
+  /** Parses and validates LLM output; bad output takes the fallback path (when fallbackOnBadJson is on) */
   parseMemories(text: string, sourceSummary: string): ExtractedMemoryDraft[] {
     const json = extractJson(text);
     const drafts: ExtractedMemoryDraft[] = [];
@@ -169,17 +169,17 @@ export class Extractor {
         drafts.push({ kind, content, importance: Math.max(1, Math.min(10, importance)) });
       }
     }
-    // 兜底：仅当 JSON 解析失败（非"合法空结果"）且文本非空时，把原文摘要记为低重要度事件
+    // Fallback: only when JSON parsing failed (i.e. not a "valid empty result") and the text is non-empty, record the source summary as a low-importance event
     if (drafts.length === 0 && !parsedOk && this.settings.fallbackOnBadJson && text.trim()) {
       const summary = summarize(sourceSummary, 200);
       if (summary) {
-        drafts.push({ kind: "event", content: `[自动摘要] ${summary}`, importance: 1 });
+        drafts.push({ kind: "event", content: `[auto summary] ${summary}`, importance: 1 });
       }
     }
     return drafts;
   }
 
-  /** 基础去重：与最近命中的记忆做 jieba token 重叠度判断 */
+  /** Basic dedup: judges jieba token overlap against the nearest memory hits */
   private isDuplicate(draft: ExtractedMemoryDraft): boolean {
     const tokens = new Set(tokenize(draft.content).split(/\s+/).filter(Boolean));
     if (tokens.size === 0) return false;
@@ -197,23 +197,23 @@ export class Extractor {
 
 const KINDS: ReadonlySet<string> = new Set(["fact", "preference", "event", "instruction"]);
 
-/** 两次 pump 的最小间隔：DSH 会在多处 flush 检查点触发回调，避免 LLM 调用风暴 */
+/** Minimum interval between two pumps: DSH fires callbacks at multiple flush checkpoints, so avoid an LLM call storm */
 const MIN_PUMP_INTERVAL_MS = 30_000;
 
-/** 渲染 LLM 输入：角色标注 + 头尾截断 */
+/** Renders the LLM input: role labels + head/tail truncation */
 function renderPrompt(slices: ConversationSliceRecord[], maxChars: number): string {
   const parts = slices.map((s) => {
-    const role = s.type === "user" ? "用户" : s.type === "assistant" ? "AI" : "工具结果";
-    return `${role}：${s.text}`;
+    const role = s.type === "user" ? "User" : s.type === "assistant" ? "AI" : "Tool result";
+    return `${role}: ${s.text}`;
   });
   const joined = parts.join("\n");
   if (joined.length <= maxChars) return joined;
   const head = Math.floor(maxChars * 0.6);
   const tail = maxChars - head;
-  return joined.slice(0, head) + "\n…[中间省略]…\n" + joined.slice(-tail);
+  return joined.slice(0, head) + "\n…[middle omitted]…\n" + joined.slice(-tail);
 }
 
-/** 从模型文本中尽量提取 JSON（容忍代码块包裹/前后杂讯） */
+/** Extracts JSON from model text as best as possible (tolerates code fences and surrounding noise) */
 function extractJson(text: string): unknown | null {
   const trimmed = text.trim();
   const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
@@ -221,7 +221,7 @@ function extractJson(text: string): unknown | null {
   try {
     return JSON.parse(candidate);
   } catch {
-    /* 继续尝试 */
+    /* keep trying */
   }
   const start = candidate.indexOf("{");
   const end = candidate.lastIndexOf("}");

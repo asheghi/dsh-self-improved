@@ -1,7 +1,7 @@
 /**
  * dsh-self-improved — browser half.
  *
- * A "自进化记忆" section inside the Web UI settings page: edits the
+ * An "Evolving Memory" section inside the Web UI settings page: edits the
  * `dsh-self-improved` settings namespace (master switch, module switches,
  * storage, extraction LLM, recall/embedding, consolidate, evolve) through the
  * settings scope transport plus nested `settings.mutate` ops. Changes are
@@ -61,14 +61,14 @@ window.__ModuleLoader__.load({
       ".__dsi_tab{height:32px;border:1px solid transparent;background:transparent;color:var(--dsw-alias-label-secondary);border-radius:8px;padding:0 14px;font:inherit;font-size:14px;line-height:32px;cursor:pointer}" +
       ".__dsi_tab:hover{color:var(--dsw-alias-label-primary)}" +
       ".__dsi_tabActive{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-3);border-color:var(--dsw-alias-border-l2)}" +
-      // 滑动开关
+      // Slide switch
       ".__dsi_switch{position:relative;display:inline-block;width:36px;height:20px;flex:none}" +
       ".__dsi_switch input{opacity:0;width:0;height:0;position:absolute}" +
       ".__dsi_switchTrack{position:absolute;inset:0;background:var(--dsw-alias-bg-layer-3);border:1px solid var(--dsw-alias-border-l2);border-radius:10px;transition:background .15s,border-color .15s}" +
       ".__dsi_switch input:checked + .__dsi_switchTrack{background:var(--dsw-alias-state-business-primary);border-color:var(--dsw-alias-state-business-primary)}" +
       ".__dsi_switchThumb{position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:var(--dsw-alias-label-tertiary);transition:transform .15s,background .15s}" +
       ".__dsi_switch input:checked ~ .__dsi_switchThumb{transform:translateX(16px);background:var(--dsw-alias-label-on-accent)}" +
-      // 折叠面板
+      // Collapsible panel
       ".__dsi_collapse{display:flex;flex-direction:column;gap:8px}" +
       ".__dsi_collapseHeader{display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;border:1px solid var(--dsw-alias-border-l2);border-radius:12px;padding:8px 12px;background:var(--dsw-alias-bg-layer-2)}" +
       ".__dsi_collapseHeader:hover{border-color:var(--dsw-alias-state-business-primary)}" +
@@ -78,7 +78,7 @@ window.__ModuleLoader__.load({
       ".__dsi_collapseOpen .__dsi_collapseChevron{transform:rotate(90deg)}" +
       ".__dsi_collapseBody{padding:2px 4px;display:flex;flex-direction:column;gap:8px}" +
       ".__dsi_persona{white-space:pre-wrap;font-size:13px;line-height:21px;color:var(--dsw-alias-label-secondary);max-height:260px;overflow:auto;border:1px solid var(--dsw-alias-border-l2);border-radius:12px;padding:10px 12px;background:var(--dsw-alias-bg-layer-2)}" +
-      // 详情弹出框
+      // Detail modal
       ".__dsi_modalBackdrop{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:1000;padding:24px}" +
       ".__dsi_modal{background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l2);border-radius:16px;max-width:640px;width:100%;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 8px 40px rgba(0,0,0,.25)}" +
       ".__dsi_modalHeader{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 18px;border-bottom:1px solid var(--dsw-alias-border-l2)}" +
@@ -100,148 +100,148 @@ window.__ModuleLoader__.load({
     var NS = "selfImproved";
     var inject = ["slots", "locale", "settingsScope", "connection"];
     var zh = {
-      nav: "自进化记忆",
-      tabConfig: "配置",
-      tabMemories: "记忆",
-      intro: "长期记忆与自进化插件：自动捕获对话、提炼记忆、回合前召回注入，并随时间巩固、遗忘与进化。",
-      helpTitle: "插件说明",
+      nav: "Evolving Memory",
+      tabConfig: "Config",
+      tabMemories: "Memory",
+      intro: "Long-term memory & self-evolution: captures conversations, extracts memories, injects recall before turns, and consolidates/forgets/evolves over time.",
+      helpTitle: "About this plugin",
       help: [
-        "dsh-self-improved 为 DSH 补充跨会话的长期记忆与自进化能力，所有数据默认保存在本地（$DSH_HOME/memory），不上传。",
+        "dsh-self-improved adds cross-session long-term memory and self-evolution to DSH. All data is stored locally by default ($DSH_HOME/memory) — nothing is uploaded.",
         "",
-        "【工作流程】",
-        "L0 对话捕获：每个会话结束时自动把对话写入本地切片，供提取管线使用。",
-        "L1 记忆提取：后台用大模型从对话中提炼「原子记忆」（事实 / 偏好 / 事件 / 指令），带 JSON 校验、去重与敏感信息过滤。",
-        "L2 场景归纳 / L3 用户画像：定期把记忆归纳为场景块，并增量合成用户画像（版本化，可回滚）。",
-        "自动召回注入：新回合开始前，按当前问题检索相关记忆，以「【相关记忆】」块注入给模型——AI 从此记得你。",
-        "自进化：记忆按「重要度 × 新鲜度 × 被引用次数」衰减遗忘；用户可纠正记忆；成功经验可提炼为可复用技能写入 dsh-skill。",
-        "调度：每 15 分钟只做「提取 + 免费维护（衰减/清理）」，不耗模型；每天固定时刻（默认 22:00，可改）做一次完整回顾（排空提取 + 场景/画像 + 技能合成 + 治理）；启动后约 60 秒也会补跑一次；也可用 /memory evolve 手动触发。",
+        "[Pipeline]",
+        "L0 capture: each session's conversation is saved locally for the extraction pipeline.",
+        "L1 extraction: a background LLM distills atomic memories (fact / preference / event / instruction) with JSON validation, dedup and sensitive-info filtering.",
+        "L2 scenes / L3 persona: memories are grouped into scene blocks; a versioned user persona is synthesized incrementally.",
+        "Auto recall injection: before each turn, relevant memories are retrieved by the current question and injected to the model as a memory block.",
+        "Self-evolution: memories decay by importance × recency × access; users can correct memories; successful patterns can become reusable skills in dsh-skill.",
+        "Schedule: every 15 min only extraction + free maintenance (decay/cleanup) runs — no LLM cost; a full review (drain extraction + scenes/persona + skills + governance) runs daily at a fixed time (default 22:00, configurable) and ~60s after startup; trigger manually via /memory evolve.",
         "",
-        "【模块开关】",
-        "• 记录对话：捕获 L0（关闭后不再产生新记忆素材）",
-        "• 提炼记忆：L1 提取（关闭后召回仍可用旧记忆）",
-        "• 归纳场景/画像：L2/L3（关闭后画像不更新）",
-        "• 自进化：衰减/技能合成（关闭后记忆只增不减）",
-        "• 自动召回注入：回合前注入（关闭后仍可用工具主动搜索）",
-        "• 记忆工具：memory_search / memory_correct / memory_forget 等模型可见工具",
+        "[Module switches]",
+        "• Capture (L0): records conversations (off = no new memory material)",
+        "• Extract (L1): distillation (off = recall still uses old memories)",
+        "• Consolidate (L2/L3): scenes/persona (off = persona not updated)",
+        "• Evolve: decay & skill synthesis (off = memory only grows)",
+        "• Recall injection: pre-turn injection (off = tools still allow manual search)",
+        "• Tools: memory_search / memory_correct / memory_forget model-visible tools",
         "",
-        "【怎么用】",
-        "• 聊天输入框敲「/」打开命令菜单：/memory status、/memory list、/memory search <词>、/memory forget <id>、/memory correct <id> <新内容>",
-        "• 模型会自动使用记忆工具（memory_search 等），无需手动操作",
-        "• 本页修改保存后立即生效，无需重启",
+        "[Usage]",
+        "• Type \"/\" in the chat input to open the command menu: /memory status, /memory list, /memory search <q>, /memory forget <id>, /memory correct <id> <text>",
+        "• The model auto-uses memory tools (memory_search etc.) — no manual action needed",
+        "• Changes here apply immediately after saving — no restart",
         "",
-        "【模型与隐私】",
-        "• 提取/画像/技能默认使用 DSH 默认模型，可在「提取」分组单独指定",
-        "• 敏感凭据（API key / 密码等）会被过滤，不会写入记忆",
-        "• 记忆库纯本地；向量召回需配置 embedding 端点，未配置时自动降级为关键词召回",
+        "[Models & privacy]",
+        "• Extraction/persona/skills use DSH's default model; you can set a dedicated one under Extraction",
+        "• Secrets (API keys / passwords) are filtered out of memories",
+        "• Fully local; vector recall needs an embedding endpoint, otherwise keyword-only",
         "",
-        "【注意事项】",
-        "• 提取依赖可用的模型且输出稳定；长会话会分批消化（每次一批、一次调用，30 秒节流）",
-        "• 画像（persona）与技能会在记忆积累到一定量后逐步生成",
-        "• 关闭总开关会停止全部后台定时任务（提取/维护/夜间回顾）；已存记忆保留，重新开启即自动恢复",
-        "• 卸载插件不会自动删除本地记忆数据"
+        "[Notes]",
+        "• Extraction needs a working, stable model; long sessions are drained in batches (one LLM call per batch, 30s throttle)",
+        "• Persona and skills appear once memories accumulate",
+        "• Disabling the master switch stops all background timers (extraction/maintenance/nightly review); stored memories are kept and everything resumes when re-enabled",
+        "• Uninstalling the plugin does not delete local memory data"
       ].join("\n"),
-      groupMaster: "总开关",
-      groupModules: "模块开关",
-      groupStorage: "存储",
-      groupExtract: "提取（L1）",
-      groupRecall: "召回 / 向量",
-      groupConsolidate: "巩固（L2/L3）",
-      groupEvolve: "自进化",
-      groupHousekeeping: "成长治理（清理策略）",
-      groupReview: "夜间回顾（每日完整进化）",
-      save: "保存",
-      reset: "恢复默认",
-      saved: "已保存并立即生效",
-      saving: "保存中…",
-      error: "保存失败",
-      conflict: "配置已被其他修改（版本冲突）：已刷新最新配置，你改动的内容已保留，请再点一次保存",
-      unavailable: "设置命名空间不可用（服务端未注册 dsh-self-improved？）",
-      overridden: "已覆盖",
-      loading: "加载中…",
-      fEnabled: "启用插件（总开关）",
-      fDebug: "调试日志",
-      fCapture: "记录对话（L0 捕获）",
-      fExtract: "提炼记忆（L1 提取）",
-      fConsolidate: "归纳场景/画像（L2/L3）",
-      fEvolve: "自进化（衰减/技能）",
-      fRecall: "自动召回注入",
-      fTools: "记忆工具（memory_search 等）",
-      fStorageRoot: "记忆库目录（留空 = $DSH_HOME/memory）",
-      fSearchLimit: "工具默认返回条数",
-      fProvider: "提取 Provider（留空用默认模型）",
-      fModel: "提取模型（留空用默认模型）",
-      fInterval: "定时轮询间隔（分钟）",
-      fBatchChars: "单次提取输入字符上限",
-      fMaxTokens: "最大输出 Tokens",
-      fTimeoutMs: "提取超时（毫秒）",
-      fDedup: "去重（token 重叠）",
-      fFallback: "坏 JSON 回退原文摘要",
-      fFlushDrain: "headless 退出前排空提取",
-      fStrategy: "召回策略",
-      fStrategyHint: "keyword=纯关键词（默认，不调用向量服务）；hybrid=关键词+向量融合（需先配置下方 Embedding 端点，未配置时自动降级为关键词）。",
-      fMaxResults: "召回条数上限",
-      fScoreThreshold: "相似度阈值（0=不过滤）",
-      fRecallTimeout: "召回超时（毫秒）",
-      fEmbBase: "Embedding Base URL（留空=纯关键词）",
-      fEmbKey: "Embedding API Key（只写）",
-      fEmbModel: "Embedding 模型",
-      fEmbDims: "向量维度",
-      fEmbTimeout: "Embedding 超时（毫秒）",
-      fSceneMax: "参与场景归纳的记忆数",
-      fPersonaMax: "参与画像合成的记忆数",
-      fSceneBatch: "每个场景最大记忆数",
-      fDecay: "遗忘衰减",
-      fDecayAge: "最小存在天数（天）",
-      fDecayThreshold: "衰减评分阈值",
-      fDecayRetention: "遗忘清理保留期（天，0=不清理）",
-      fDecayMaxActive: "活跃记忆上限（0=不限，超限自动降级最低分）",
-      fSkill: "技能合成（→ dsh-skill）",
-      fSkillMin: "技能合成最低重要度",
-      fSkillRoot: "技能根目录（留空 = $DSH_HOME/skills）",
-      fSkillPrefix: "合成技能名前缀（如 dsi-，留空=不加）",
-      fSkillMax: "合成技能数量上限（0=不限）",
-      fHkPersona: "画像保留版本数",
-      fHkScenes: "场景上限",
-      fHkSceneRatio: "场景清理：来源记忆活跃比例阈值（0-1）",
-      fHkConvDays: "对话切片保留天数（0=不清理）",
-      fRecallInjectChars: "注入块字符上限",
-      fReviewEnabled: "启用夜间回顾（每天做一次完整进化）",
-      fReviewTime: "回顾时间（HH:MM，24 小时制）",
-      secretHint: "留空保持当前密钥。",
-      browserNav: "记忆",
-      browserNoSession: "记忆浏览器需要在会话上下文中运行：请先打开/进入一个会话后再查看（聊天输入框敲 / 打开命令菜单也可管理记忆）。",
-      browserHint: "加载中…（数据来自 /memory browser --json）",
-      browserSearch: "筛选（关键词）",
-      browserRefresh: "刷新",
-      browserSummary: "共 {n} 条活跃记忆 · 待提取 {p} · 场景 {s} · 画像 v{v} · 技能 {k}",
-      browserEmpty: "（没有活跃记忆）",
-      browserPersona: "人物画像",
-      browserPersonaEmpty: "（尚未生成画像——记忆积累后自进化会自动合成）",
-      browserMemories: "记忆",
-      browserScenes: "场景",
-      browserScenesEmpty: "（暂无场景）",
-      browserSkills: "已学习到的技能",
-      browserSkillsEmpty: "（还没有技能——继续积累记忆，自进化会逐步提炼 SOP）",
-      browserSynth: "已合成",
-      browserSkillDelete: "删除",
-      browserSkillDeleteConfirm: "确认删除这个合成技能？（系统技能不可删）",
-      browserSkillDeleted: "已删除",
-      browserDetail: "详情",
-      browserDetailClose: "关闭",
-      browserMetaKind: "类型",
-      browserMetaImportance: "重要度",
-      browserMetaAccess: "命中次数",
-      browserMetaStatus: "状态",
-      browserMetaCreated: "创建时间",
-      browserMetaUpdated: "更新时间",
+      groupMaster: "Master",
+      groupModules: "Modules",
+      groupStorage: "Storage",
+      groupExtract: "Extraction (L1)",
+      groupRecall: "Recall / Embedding",
+      groupConsolidate: "Consolidation (L2/L3)",
+      groupEvolve: "Self-evolution",
+      groupHousekeeping: "Growth governance",
+      groupReview: "Nightly review (daily full evolution)",
+      save: "Save",
+      reset: "Reset",
+      saved: "Saved — applied immediately",
+      saving: "Saving…",
+      error: "Save failed",
+      conflict: "Config changed elsewhere (revision conflict): refreshed to latest, your edits are kept — please save again",
+      unavailable: "Settings namespace unavailable (dsh-self-improved not registered server-side?)",
+      overridden: "overridden",
+      loading: "Loading…",
+      fEnabled: "Enable plugin (master switch)",
+      fDebug: "Debug logs",
+      fCapture: "Capture conversations (L0)",
+      fExtract: "Extract memories (L1)",
+      fConsolidate: "Consolidate scenes/persona (L2/L3)",
+      fEvolve: "Self-evolve (decay/skills)",
+      fRecall: "Auto recall injection",
+      fTools: "Memory tools (memory_search etc.)",
+      fStorageRoot: "Memory dir (blank = $DSH_HOME/memory)",
+      fSearchLimit: "Default tool result limit",
+      fProvider: "Extraction provider (blank = default model)",
+      fModel: "Extraction model (blank = default model)",
+      fInterval: "Poll interval (minutes)",
+      fBatchChars: "Max input chars per batch",
+      fMaxTokens: "Max output tokens",
+      fTimeoutMs: "Extraction timeout (ms)",
+      fDedup: "Dedup (token overlap)",
+      fFallback: "Fallback to summary on bad JSON",
+      fFlushDrain: "Drain extraction before headless exit",
+      fStrategy: "Recall strategy",
+      fStrategyHint: "keyword = pure keyword (default, no embedding calls); hybrid = keyword + vector fusion (requires an Embedding endpoint below; auto-falls back to keyword if unset).",
+      fMaxResults: "Max recall results",
+      fScoreThreshold: "Score threshold (0 = off)",
+      fRecallTimeout: "Recall timeout (ms)",
+      fEmbBase: "Embedding Base URL (blank = keyword only)",
+      fEmbKey: "Embedding API Key (write-only)",
+      fEmbModel: "Embedding model",
+      fEmbDims: "Vector dimensions",
+      fEmbTimeout: "Embedding timeout (ms)",
+      fSceneMax: "Memories for scene grouping",
+      fPersonaMax: "Memories for persona",
+      fSceneBatch: "Max memories per scene",
+      fDecay: "Forgetting decay",
+      fDecayAge: "Min age (days)",
+      fDecayThreshold: "Decay score threshold",
+      fDecayRetention: "Forgotten retention (days, 0=keep)",
+      fDecayMaxActive: "Max active memories (0=unlimited; overflow auto-decays lowest)",
+      fSkill: "Skill synthesis (→ dsh-skill)",
+      fSkillMin: "Skill min importance",
+      fSkillRoot: "Skills root (blank = $DSH_HOME/skills)",
+      fSkillPrefix: "Synthesized skill name prefix (e.g. dsi-; blank = none)",
+      fSkillMax: "Max synthesized skills (0=unlimited)",
+      fHkPersona: "Persona versions to keep",
+      fHkScenes: "Max scenes",
+      fHkSceneRatio: "Scene GC: source-memory active ratio threshold (0-1)",
+      fHkConvDays: "Conversation slice retention days (0=keep all)",
+      fRecallInjectChars: "Max injected block chars",
+      fReviewEnabled: "Enable nightly review (one full evolution per day)",
+      fReviewTime: "Review time (HH:MM, 24h)",
+      secretHint: "Leave blank to keep the current key.",
+      browserNav: "Memory",
+      browserNoSession: "The memory browser needs a session context: open/enter a session first (you can also type \"/\" in chat to open the command menu).",
+      browserHint: "Loading… (data from /memory browser --json)",
+      browserSearch: "Filter",
+      browserRefresh: "Refresh",
+      browserSummary: "{n} active memories · {p} pending · {s} scenes · persona v{v} · {k} skills",
+      browserEmpty: "(no active memories)",
+      browserPersona: "Persona",
+      browserPersonaEmpty: "(no persona yet — self-evolution synthesizes it as memories accumulate)",
+      browserMemories: "Memories",
+      browserScenes: "Scenes",
+      browserScenesEmpty: "(no scenes yet)",
+      browserSkills: "Learned skills",
+      browserSkillsEmpty: "(no skills yet — keep accumulating memories, self-evolution will distill SOPs)",
+      browserSynth: "synthesized",
+      browserSkillDelete: "Delete",
+      browserSkillDeleteConfirm: "Delete this synthesized skill? (system skills are protected)",
+      browserSkillDeleted: "Deleted",
+      browserDetail: "Detail",
+      browserDetailClose: "Close",
+      browserMetaKind: "Kind",
+      browserMetaImportance: "Importance",
+      browserMetaAccess: "Access count",
+      browserMetaStatus: "Status",
+      browserMetaCreated: "Created",
+      browserMetaUpdated: "Updated",
       browserMetaId: "ID",
-      browserMetaSupersedes: "替代（纠正链）",
-      browserCorrect: "纠正",
-      browserForget: "遗忘",
-      browserCorrectPrompt: "纠正为：",
-      browserCorrected: "已纠正",
-      browserForgetConfirm: "确认遗忘这条记忆？",
-      browserForgotten: "已遗忘"
+      browserMetaSupersedes: "Supersedes",
+      browserCorrect: "Correct",
+      browserForget: "Forget",
+      browserCorrectPrompt: "Correct to:",
+      browserCorrected: "Corrected",
+      browserForgetConfirm: "Forget this memory?",
+      browserForgotten: "Forgotten"
     };
     var en = {
       nav: "Evolving Memory",
@@ -380,7 +380,7 @@ window.__ModuleLoader__.load({
       browserMetaUpdated: "Updated",
       browserMetaId: "ID",
       browserMetaSupersedes: "Supersedes",
-      browserCorrect: "Fix",
+      browserCorrect: "Correct",
       browserForget: "Forget",
       browserCorrectPrompt: "Correct to:",
       browserCorrected: "Corrected",
@@ -491,14 +491,14 @@ window.__ModuleLoader__.load({
         setError(null);
       }
 
-      // 保存失败处理：revision 冲突（命名空间在读取后被其他修改）时刷新最新配置、保留用户草稿，
-      // 提示再次保存；其余错误原样展示
+      // Save-failure handling: on a revision conflict (the namespace changed after it was read),
+      // refresh the latest config, keep the user's draft, and ask to save again; other errors are shown as-is
       function handleMutateFailure(response) {
         setBusy(false);
         var detail = response && response.result && response.result.error || {};
         var msg = String(detail.message || detail.code || "unknown");
         if (/changed since it was read|revision conflict/i.test(msg)) {
-          scope.load(); // 刷新快照（draft 保留不动）
+          scope.load(); // refresh the snapshot (draft is left untouched)
           setError(t("conflict"));
           return;
         }
@@ -520,7 +520,7 @@ window.__ModuleLoader__.load({
           }
           if (f.type === "checkbox") {
             if (Boolean(d) === Boolean(current)) continue;
-            // 注意：关闭必须 set false——unset 会让解析值回落 schema 默认值（多为 true），开关等于没关
+            // Note: disabling must use set false — unset would let the parsed value fall back to the schema default (usually true), so the switch would never turn off
             ops.push({ op: "set", path: f.path, value: Boolean(d) });
             continue;
           }
@@ -542,7 +542,7 @@ window.__ModuleLoader__.load({
           if (!response.result.ok) { handleMutateFailure(response); return; }
           setBusy(false);
           setNotice(t("saved"));
-          // 注意：不要用响应值重建 draft——响应可能是部分数据，缺字段会被渲染成 false（导致开关全关）
+          // Note: do not rebuild the draft from the response — it may be partial data, and missing fields would render as false (turning every switch off)
           scope.load();
         }).catch(function (e) {
           setBusy(false); setError(t("error") + ": " + String(e && e.message || e));
@@ -565,7 +565,7 @@ window.__ModuleLoader__.load({
         });
       }
 
-      // 模块开关联动折叠：关掉的模块其配置组自动收起，总开关关闭时全部收起
+      // Collapse groups in sync with module switches: a disabled module hides its config group; all groups collapse when the master switch is off
       var GROUP_SWITCH = {
         groupExtract: "modules.extract",
         groupRecall: "modules.recall",
@@ -588,14 +588,14 @@ window.__ModuleLoader__.load({
       var nodes = [];
       var lastGroup = null;
       FIELDS.forEach(function (f) {
-        if (!groupVisible(f.group)) return; // 折叠隐藏的组
+        if (!groupVisible(f.group)) return; // hidden by collapse
         if (f.group !== lastGroup) {
           lastGroup = f.group;
           nodes.push(h("div", { key: "g" + f.group, className: "__dsi_group" }, t(f.group)));
         }
         var overridden = getPath(user, f.path) !== void 0;
         if (f.type === "checkbox") {
-          // 滑动开关
+          // Slide switch
           nodes.push(h("label", { key: f.path.join("."), className: "__dsi_field" },
             h("span", { className: "__dsi_row" },
               h("span", { className: "__dsi_switch" },
@@ -672,8 +672,8 @@ window.__ModuleLoader__.load({
       return out;
     }
 
-    // ── 记忆浏览器（设置页第二个标签页；经 dsh-self-improved-browser 命名空间数据通道，无需 session）─────
-    var KIND_LABEL = { fact: "📖事实", preference: "📌偏好", event: "🧭事件", instruction: "📋指令", persona: "👤画像" };
+    // ── Memory browser (second settings tab; data channel via the dsh-self-improved-browser namespace, no session needed) ─────
+    var KIND_LABEL = { fact: "📖 Fact", preference: "📌 Preference", event: "🧭 Event", instruction: "📋 Instruction", persona: "👤 Persona" };
 
     function BrowserSection(props) {
       var t = props.t;
@@ -691,7 +691,7 @@ window.__ModuleLoader__.load({
         var alive = true;
         var sync = function () { if (alive) setSnapshot(scope.getSnapshot()); };
         var un = typeof scope.subscribe === "function" ? scope.subscribe(sync) : null;
-        // 打开页面时触发一次服务端快照重建（noop 动作），保证一进来就是最新数据
+        // Trigger one server-side snapshot rebuild on open (noop action) so the view starts with fresh data
         try {
           api.settings.mutate({
             ns: "dsh-self-improved-browser",
@@ -705,7 +705,7 @@ window.__ModuleLoader__.load({
       if (snapshot.status === "ready" && snapshot.value && typeof snapshot.value.snapshot === "string") {
         try { data = JSON.parse(snapshot.value.snapshot); } catch (e) { data = null; }
       }
-      // 详情弹出框数据（服务端按需返回完整记忆）
+      // Detail modal data (the server returns the full memory on demand)
       var detailObj = null;
       if (snapshot.status === "ready" && snapshot.value && typeof snapshot.value.detail === "string" && snapshot.value.detail) {
         try { detailObj = JSON.parse(snapshot.value.detail); } catch (e) { detailObj = null; }
@@ -758,7 +758,7 @@ window.__ModuleLoader__.load({
           h("div", { className: "__dsi_browserMain" },
             h("span", { className: "__dsi_browserKind" }, KIND_LABEL[m.kind] || m.kind),
             h("span", { className: "__dsi_browserContent" }, m.content),
-            h("span", { className: "__dsi_browserMeta" }, "★" + m.importance + " · 命中" + m.accessCount + " · " + m.id.slice(0, 8))
+            h("span", { className: "__dsi_browserMeta" }, "★" + m.importance + " · hits " + m.accessCount + " · " + m.id.slice(0, 8))
           ),
           h("span", { className: "__dsi_browserOps" },
             h("button", { type: "button", className: "__dsi_btn", onClick: function () { viewDetail(m); }, disabled: busy }, t("browserDetail")),
@@ -793,7 +793,7 @@ window.__ModuleLoader__.load({
           ) : null);
       });
 
-      // 折叠面板（画像/记忆/场景/技能）
+      // Collapsible panels (persona/memories/scenes/skills)
       var [open, setOpen] = react.useState({ persona: false, memories: true, scenes: false, skills: false });
       function toggle(k) {
         setOpen(function (p) { var n = Object.assign({}, p); n[k] = !n[k]; return n; });
@@ -832,7 +832,7 @@ window.__ModuleLoader__.load({
         ? (skillsNodes.length ? h("div", { className: "__dsi_collapse" }, skillsNodes) : h("p", { className: "__dsi_status" }, t("browserSkillsEmpty")))
         : h("p", { className: "__dsi_status" }, t("browserSkillsEmpty"));
 
-      var STATUS_LABEL = { active: "活跃", decayed: "已衰减", forgotten: "已遗忘", corrected: "已纠正" };
+      var STATUS_LABEL = { active: "Active", decayed: "Decayed", forgotten: "Forgotten", corrected: "Corrected" };
       function fmtTime(ts) {
         try { return new Date(ts).toLocaleString(); } catch (e) { return String(ts); }
       }
@@ -873,7 +873,7 @@ window.__ModuleLoader__.load({
       );
     }
 
-    // ── 主设置区：一个 section，内部"配置 / 记忆"两个 Tab ──────────────────
+    // ── Main settings section: one section with "Config / Memory" tabs ──────────────────
     function MainSection(props) {
       var t = props.t;
       var [tab, setTab] = react.useState("config");
@@ -893,7 +893,7 @@ window.__ModuleLoader__.load({
       var scope = ctx.settingsScope.bind({ namespace: "dsh-self-improved" });
       var browserScope = ctx.settingsScope.bind({ namespace: "dsh-self-improved-browser" });
       var api = ctx.connection.api;
-      // 单个设置区，内部两个 Tab：配置 / 记忆
+      // Single settings section with two tabs: Config / Memory
       ctx.slots.inject("settings.section", function () {
         return ctx.slots.register({
           name: "settings.section",

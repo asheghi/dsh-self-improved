@@ -1,7 +1,7 @@
 {
   "name": "dsh-self-improved",
-  "version": "0.1.1",
-  "description": "DeepSeek Harness 长期记忆与自进化插件：L0 对话捕获 → L1 记忆提取 → L2 场景归纳 → L3 用户画像，自动召回注入 + 技能合成，纯本地。",
+  "version": "0.1.2",
+  "description": "DeepSeek Harness long-term memory & self-evolution plugin: L0 conversation capture -> L1 memory extraction -> L2 scene consolidation -> L3 user persona, auto recall injection + skill synthesis, fully local.",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",

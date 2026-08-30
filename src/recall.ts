@@ -1,8 +1,8 @@
 /**
- * 召回服务（M3）：关键词（jieba+FTS5 BM25）+ 可选向量（sqlite-vec）+ 混合（RRF 融合）。
+ * Recall service (M3): keyword (jieba+FTS5 BM25) + optional vectors (sqlite-vec) + hybrid (RRF fusion).
  *
- * embedding 可插拔：未配置 embedding 时退化为纯关键词召回；
- * 混合召回需要 embedding provider 与已写入的向量（M2 提取管线可选地回填向量）。
+ * Pluggable embedding: falls back to pure keyword recall when embedding is not configured;
+ * hybrid recall requires an embedding provider plus already-stored vectors (the M2 extraction pipeline optionally backfills vectors).
  */
 import type { MemoryStore, MemorySearchHit } from "./storage.js";
 
@@ -11,13 +11,13 @@ export type RecallStrategy = "keyword" | "hybrid";
 export interface RecallSettings {
   strategy: RecallStrategy;
   maxResults: number;
-  /** 关键词 BM25 分数阈值（bm25 越小越相关；0 = 不过滤） */
+  /** Keyword BM25 score threshold (a smaller bm25 is more relevant; 0 = no filtering) */
   scoreThreshold: number;
   timeoutMs: number;
 }
 
 export interface EmbeddingProvider {
-  /** 把文本批量转为向量；失败抛错由调用方降级 */
+  /** Batch-convert texts into vectors; throws on failure so the caller can degrade */
   embed(texts: string[]): Promise<number[][]>;
 }
 
@@ -26,13 +26,13 @@ export interface RecallHit {
   kind: string;
   content: string;
   importance: number;
-  /** 融合后的相关分（越大越相关） */
+  /** Fused relevance score (higher means more relevant) */
   score: number;
 }
 
 /**
- * 创建 OpenAI 兼容的 embedding provider（POST {baseUrl}/embeddings）。
- * 未配置 baseUrl 时返回 null（纯关键词模式）。
+ * Create an OpenAI-compatible embedding provider (POST {baseUrl}/embeddings).
+ * Returns null when baseUrl is not configured (pure keyword mode).
  */
 export function createOpenAiEmbedding(config: {
   baseUrl?: string;
@@ -79,18 +79,18 @@ export class RecallService {
     private readonly embedding: EmbeddingProvider | null = null,
   ) {}
 
-  /** 检索入口：策略路由 + 超时降级（失败返回空，绝不阻塞回合） */
+  /** Search entry point: strategy routing + timeout degradation (returns empty on failure, never blocks the turn) */
   async search(query: string, options: { maxResults?: number } = {}): Promise<RecallHit[]> {
     if (!query.trim()) return [];
     const maxResults = options.maxResults ?? this.settings.maxResults;
     try {
       const deadline = AbortSignal.timeout(this.settings.timeoutMs);
-      // 关键词路径是同步 DB 查询；向量/混合路径可能涉及外部调用
+      // The keyword path is a synchronous DB query; vector/hybrid paths may involve external calls
       const result =
         this.settings.strategy === "hybrid" && this.embedding
           ? await this.hybridSearch(query, maxResults, deadline)
           : await this.keywordSearch(query, maxResults, deadline);
-      // 时间分片内 abort 检查（防外部调用挂起）
+      // Abort check within the time slice (prevents external calls from hanging)
       deadline.throwIfAborted();
       return result;
     } catch (error) {
@@ -99,7 +99,7 @@ export class RecallService {
     }
   }
 
-  /** 关键词召回（BM25，jieba 分词；OR 语义保证口语化查询也能命中，按 BM25 排序） */
+  /** Keyword recall (BM25, jieba tokenization; OR semantics ensures colloquial queries still hit, ordered by BM25) */
   private async keywordSearch(query: string, limit: number, _signal: AbortSignal): Promise<RecallHit[]> {
     const hits = this.store.searchMemories(query, { limit: Math.max(limit * 3, 10), matchAny: true });
     return hits
@@ -108,7 +108,7 @@ export class RecallService {
       .map((h) => toRecallHit(h, h.score));
   }
 
-  /** 混合召回：关键词 + 向量，RRF 融合 */
+  /** Hybrid recall: keyword + vector, fused with RRF */
   private async hybridSearch(query: string, limit: number, signal: AbortSignal): Promise<RecallHit[]> {
     const [keywordHits, vectorHits] = await Promise.all([
       this.keywordSearch(query, Math.max(limit * 3, 10), signal),
@@ -117,7 +117,7 @@ export class RecallService {
     return rrfFuse([keywordHits, vectorHits], limit);
   }
 
-  /** 向量召回（含回填：新内容先写入 embedding 再检索，保证冷启动可用） */
+  /** Vector recall (with backfill: new content is embedded before retrieval so cold start works) */
   private async vectorSearch(query: string, limit: number, _signal: AbortSignal): Promise<RecallHit[]> {
     if (!this.embedding) return [];
     const [vector] = await this.embedding.embed([query]);
@@ -137,7 +137,7 @@ function toRecallHit(h: MemorySearchHit, score: number): RecallHit {
   return { id: h.id, kind: h.kind, content: h.content, importance: h.importance, score };
 }
 
-/** 倒数排名融合（RRF）：k=60，合并多路结果按融合分排序 */
+/** Reciprocal rank fusion (RRF): k=60, merges results from multiple sources and sorts by fused score */
 function rrfFuse(lists: RecallHit[][], limit: number): RecallHit[] {
   const scores = new Map<string, { hit: RecallHit; score: number }>();
   const K = 60;
@@ -147,7 +147,7 @@ function rrfFuse(lists: RecallHit[][], limit: number): RecallHit[] {
       const contribution = 1 / (K + rank + 1);
       if (existing) {
         existing.score += contribution;
-        // 保留更高的重要度
+        // Keep the higher importance
         if (hit.importance > existing.hit.importance) existing.hit = hit;
       } else {
         scores.set(hit.id, { hit, score: contribution });
@@ -160,23 +160,23 @@ function rrfFuse(lists: RecallHit[][], limit: number): RecallHit[] {
     .map((v) => ({ ...v.hit, score: v.score }));
 }
 
-/** 渲染注入块（纯函数，供测试与 agent/pre-step 注入使用） */
+/** Render the injection block (pure function, used by tests and agent/pre-step injection) */
 export function renderRecallBlock(hits: RecallHit[], maxHits = 5): string {
   if (hits.length === 0) return "";
-  const lines = hits.slice(0, maxHits).map((h) => `- [${kindLabel(h.kind)}] ${h.content}（重要度 ${h.importance}/10）`);
-  return `【相关记忆】\n${lines.join("\n")}`;
+  const lines = hits.slice(0, maxHits).map((h) => `- [${kindLabel(h.kind)}] ${h.content} (importance ${h.importance}/10)`);
+  return `Relevant memories\n${lines.join("\n")}`;
 }
 
 function kindLabel(kind: string): string {
   switch (kind) {
     case "fact":
-      return "事实";
+      return "fact";
     case "preference":
-      return "偏好";
+      return "preference";
     case "event":
-      return "事件";
+      return "event";
     case "instruction":
-      return "指令";
+      return "instruction";
     default:
       return kind;
   }

@@ -1,19 +1,19 @@
 /**
- * 巩固模块（M4）：L2 场景归纳 + L3 用户画像合成（LLM 驱动，画像版本化）。
+ * Consolidation module (M4): L2 scene consolidation + L3 user persona synthesis (LLM-driven, versioned personas).
  *
- * - 场景：把高重要度记忆分批交给 LLM 归纳为场景块（标题 + Markdown），来源记忆 id 留痕；
- * - 画像：基于 top 记忆 + 上一版画像，LLM 增量合成，写入 persona_versions 表 + persona.md（带滚动备份）。
+ * - Scenes: high-importance memories are batched to the LLM and consolidated into scene blocks (title + Markdown), with source memory ids kept for traceability;
+ * - Persona: based on top memories + the previous persona version, the LLM synthesizes incrementally, writing to the persona_versions table + persona.md (with rolling backups).
  */
 import { randomUUID } from "node:crypto";
 import type { MemoryStore } from "./storage.js";
 import type { EmbeddingProvider } from "./recall.js";
 
 export interface ConsolidateSettings {
-  /** 参与场景归纳的记忆数上限 */
+  /** Max number of memories participating in scene consolidation */
   sceneMaxMemories: number;
-  /** 参与画像合成的记忆数上限 */
+  /** Max number of memories participating in persona synthesis */
   personaMaxMemories: number;
-  /** 场景内最大记忆数 */
+  /** Max memories per scene */
   sceneBatchSize: number;
 }
 
@@ -26,13 +26,13 @@ export interface ConsolidateResult {
   personaVersion?: number;
 }
 
-export const SCENE_SYSTEM_PROMPT = `你是记忆组织者。把给出的原子记忆归纳成"场景块"（Scenes）：每个场景是过去一段相关经历的小节，标题简短（4-12 字），正文 3-6 行 Markdown 总结。
-只输出一个 JSON 对象：{"scenes":[{"title":"标题","summary":"正文 Markdown"}]}，不要输出其他文字。`;
+export const SCENE_SYSTEM_PROMPT = `You are a memory organizer. Consolidate the given atomic memories into "scene blocks" (Scenes): each scene is a short section about a related past experience, with a brief title (4-12 words) and a 3-6 line Markdown summary as the body.
+Output only one JSON object: {"scenes":[{"title":"title","summary":"body Markdown"}]}, with no other text.`;
 
-export const PERSONA_SYSTEM_PROMPT = `你是用户画像分析师。基于记忆库中的用户相关记忆，维护一份精炼的用户画像（Markdown）：
-- 结构：## 基本信息 / ## 偏好与习惯 / ## 工作方式 / ## 已知约定
-- 只写有依据的内容，标注来源类型（事实/偏好）；没有的内容留空小节。
-- 输出为纯 Markdown 文本，不要 JSON、不要解释。`;
+export const PERSONA_SYSTEM_PROMPT = `You are a user persona analyst. Based on user-related memories in the memory store, maintain a concise user persona (Markdown):
+- Structure: ## Basic Info / ## Preferences & Habits / ## Working Style / ## Known Conventions
+- Only write content backed by evidence, tagging the source kind (fact/preference); leave a section empty when there is nothing for it.
+- Output plain Markdown text only — no JSON, no explanations.`;
 
 export class Consolidator {
   constructor(
@@ -42,7 +42,7 @@ export class Consolidator {
     private readonly embedding: EmbeddingProvider | null = null,
   ) {}
 
-  /** 归纳场景 + 合成画像（内部各自独立失败不影响另一项） */
+  /** Consolidates scenes + synthesizes the persona (each step fails independently without affecting the other) */
   async consolidate(): Promise<ConsolidateResult> {
     const result: ConsolidateResult = { scenes: 0 };
     try {
@@ -59,7 +59,7 @@ export class Consolidator {
     return result;
   }
 
-  /** L2：把记忆分批归纳为场景块 */
+  /** L2: consolidate memories into scene blocks in batches */
   private async groupScenes(): Promise<number> {
     const memories = this.store.getActiveMemories(this.settings.sceneMaxMemories);
     if (memories.length === 0) return 0;
@@ -88,14 +88,14 @@ export class Consolidator {
     return count;
   }
 
-  /** L3：基于 top 记忆 + 上一版画像合成新画像 */
+  /** L3: synthesize a new persona from top memories + the previous persona version */
   private async synthesizePersona(): Promise<number | undefined> {
     const memories = this.store.getActiveMemories(this.settings.personaMaxMemories);
     if (memories.length === 0) return undefined;
     const prev = this.store.getPersona();
     const input = [
-      prev ? `## 上一版画像（供增量参考）\n${prev.content}\n` : "",
-      "## 新记忆\n" + memories.map((m) => `- [${m.kind}] ${m.content}`).join("\n"),
+      prev ? `## Previous persona (for incremental reference)\n${prev.content}\n` : "",
+      "## New memories\n" + memories.map((m) => `- [${m.kind}] ${m.content}`).join("\n"),
     ].join("\n");
     const signal = AbortSignal.timeout(180_000);
     const content = (await this.callLlm({ system: PERSONA_SYSTEM_PROMPT, user: input, signal })).trim();
@@ -104,7 +104,7 @@ export class Consolidator {
       return undefined;
     }
     const ver = this.store.savePersona(content);
-    // 画像向量（供 recall 检索画像段落；失败不阻断）
+    // Persona vector (lets recall retrieve the persona section; failure is non-blocking)
     if (this.embedding) {
       try {
         const [vec] = await this.embedding.embed([content]);
@@ -117,7 +117,7 @@ export class Consolidator {
   }
 }
 
-/** 解析场景 JSON（容忍代码块/杂讯） */
+/** Parses scene JSON (tolerates code fences/noise) */
 function parseSceneJson(text: string): Array<{ title?: string; summary?: string }> | null {
   const trimmed = text.trim();
   const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/);

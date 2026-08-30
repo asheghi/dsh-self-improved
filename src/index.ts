@@ -1,14 +1,14 @@
 /**
- * dsh-self-improved —— DeepSeek Harness 长期记忆与自进化插件（纯本地）。
+ * dsh-self-improved — DeepSeek Harness long-term memory and self-evolution plugin (fully local).
  *
- * M1 状态：记忆库（SQLite + FTS5 + sqlite-vec 骨架）+ L0 捕获落盘 + 记忆/对话搜索工具。
- * 设计文档见 docs/（design/ 与 research/）。
+ * M1 status: memory store (SQLite + FTS5 + sqlite-vec skeleton) + L0 capture persistence + memory/conversation search tools.
+ * Design docs live in docs/ (design/ and research/).
  */
 import z from "@deepseek-ai/schemastery";
 import type { Context } from "@deepseek-ai/cordis";
 import { settingsNamespace } from "@deepseek-ai/dsh-settings";
 
-// 服务类型增强：把各 dsh-* 包的 `declare module '@deepseek-ai/cordis'` 类型增强引入本次编译。
+// Service type augmentation: pull the `declare module '@deepseek-ai/cordis'` type augmentations from the dsh-* packages into this compilation.
 import "@deepseek-ai/dsh-session";
 import "@deepseek-ai/dsh-agent";
 import "@deepseek-ai/dsh-system-prompt";
@@ -29,10 +29,10 @@ import { BlockAssembler, createUserMessage } from "@deepseek-ai/dsh-llm";
 
 export const name = "self-improved";
 
-/** 需要的宿主服务（Cordis inject 列表；M1 新增 sessionQuery 用于对话全文搜索） */
+/** Required host services (Cordis inject list; M1 adds sessionQuery for conversation full-text search) */
 export const inject = ["sessions", "settings", "tools", "sessionQuery", "llm"] as const;
 
-/** 模块开关（联动规则见 docs/design/dsh-memory-detailed-design.md §2.5） */
+/** Module switches (see docs/design/dsh-memory-detailed-design.md §2.5 for coupling rules) */
 export interface ModuleSwitches {
   capture: boolean;
   extract: boolean;
@@ -43,27 +43,27 @@ export interface ModuleSwitches {
 }
 
 export interface ExtractConfig {
-  /** 定时轮询间隔（分钟） */
+  /** Polling interval in minutes */
   intervalMinutes: number;
-  /** 单次提取输入字符上限 */
+  /** Max input characters per extraction batch */
   batchMaxChars: number;
   maxOutputTokens: number;
   timeoutMs: number;
-  /** 去重 */
+  /** Deduplicate */
   dedup: boolean;
-  /** 坏 JSON 回退原文摘要（默认关闭，避免产生低价值摘要噪音） */
+  /** Fall back to summarizing the raw text on bad JSON (off by default to avoid low-value summary noise) */
   fallbackOnBadJson: boolean;
-  /** 丢弃重要度低于该值的提取结果（降噪，默认 3） */
+  /** Drop extracted results whose importance is below this value (noise reduction, default 3) */
   minImportance: number;
-  /** headless：flush 时同步排空 */
+  /** headless: drain extraction synchronously on flush */
   flushDrain: boolean;
-  /** 提取模型（留空跟随 DSH 默认） */
+  /** Extraction model (leave empty to follow the DSH default) */
   model: string;
   provider: string;
 }
 
 export interface EmbeddingConfig {
-  /** OpenAI 兼容 embedding 端点；留空 = 纯关键词召回 */
+  /** OpenAI-compatible embedding endpoint; empty = keyword-only recall */
   baseUrl: string;
   apiKey: string;
   model: string;
@@ -76,41 +76,41 @@ export interface RecallConfig {
   maxResults: number;
   scoreThreshold: number;
   timeoutMs: number;
-  /** 注入块字符上限（防单次注入撑爆上下文） */
+  /** Max characters per injected block (prevents a single injection from blowing up the context) */
   maxInjectChars: number;
   embedding: EmbeddingConfig;
 }
 
 export interface Config {
-  /** L1 总开关：随时关闭/开启，热切换，不重启 */
+  /** L1 master switch: turn off/on at any time, hot-switched, no restart */
   enabled: boolean;
-  /** 探针/调试日志 */
+  /** Probe/debug logging */
   debug: boolean;
-  /** 记忆库根目录；留空 = $DSH_HOME/memory */
+  /** Memory store root directory; empty = $DSH_HOME/memory */
   storageRoot: string;
-  /** 工具默认返回条数 */
+  /** Default number of results returned by tools */
   searchLimit: number;
-  /** L2 模块开关 */
+  /** L2 module switches */
   modules: ModuleSwitches;
-  /** L1 提取管线参数 */
+  /** L1 extraction pipeline parameters */
   extract: ExtractConfig;
-  /** M3 召回参数 */
+  /** M3 recall parameters */
   recall: RecallConfig;
-  /** M4 巩固（L2/L3）参数 */
+  /** M4 consolidation (L2/L3) parameters */
   consolidate: { sceneMaxMemories: number; personaMaxMemories: number; sceneBatchSize: number };
-  /** M4 自进化参数 */
+  /** M4 self-evolution parameters */
   evolve: {
     decay: { enabled: boolean; minAgeDays: number; threshold: number; retentionDays: number; maxActiveMemories: number };
     skillSynthesis: { enabled: boolean; minImportance: number; skillsRoot: string; prefix: string; maxSkills: number };
   };
-  /** M6 成长治理：画像版本/场景/对话切片的上限与清理 */
+  /** M6 growth governance: caps and cleanup for persona versions/scenes/conversation slices */
   housekeeping: {
     personaVersions: number;
     maxScenes: number;
     sceneActiveRatio: number;
     conversationRetentionDays: number;
   };
-  /** M6 夜间回顾计划：每天固定时刻做一次完整进化（提取排空+巩固+技能+治理） */
+  /** M6 nightly review schedule: run one full evolution at a fixed time every day (extraction drain + consolidation + skills + governance) */
   review: { enabled: boolean; time: string };
 }
 
@@ -191,22 +191,22 @@ export function apply(ctx: Context, config: Config): void {
     if (config.debug) console.log("[dsh-self-improved]", ...args);
   };
 
-  // ① 设置命名空间：Web UI 设置页自动渲染表单 + settings/updated 热应用（随时开关的核心）
+  // ① Settings namespace: the web UI settings page auto-renders the form + hot-apply via settings/updated (the core of the anytime on/off switch)
   const ns = settingsNamespace("dsh-self-improved");
   const scope = ctx.settings.register(ns, Config, { base: config });
   log("settings namespace registered");
 
-  // 运行时可变状态（M5：总开关/模块开关随时切换，无需重启）
+  // Runtime mutable state (M5: master/module switches can be flipped at any time without a restart)
   const state = { enabled: config.enabled, modules: { ...config.modules } };
   const readModule = (m: keyof ModuleSwitches): boolean => state.enabled && state.modules[m];
 
-  // ② 记忆库（M1）：SQLite + FTS5 + sqlite-vec 骨架
+  // ② Memory store (M1): SQLite + FTS5 + sqlite-vec skeleton
   const dir = config.storageRoot.trim() || defaultMemoryDir();
   const store = new MemoryStore(dir);
   log("memory store ready:", dir);
 
-  // ③ L0 捕获 + L1 提取：session/flush 屏障内落盘切片并标记队列；
-  //    headless（flushDrain）时同步排空提取，防止 5s 关停超时杀掉管线。
+  // ③ L0 capture + L1 extraction: persist slices and mark the queue inside session/flush barriers;
+  //    in headless mode (flushDrain) drain extraction synchronously so the 5s shutdown timeout does not kill the pipeline.
   const extractSettings: ExtractSettings = {
     enabled: readModule("extract"),
     intervalMinutes: config.extract.intervalMinutes,
@@ -220,7 +220,7 @@ export function apply(ctx: Context, config: Config): void {
   };
   const embeddingProvider = createOpenAiEmbedding(config.recall.embedding);
 
-  // 通用 LLM 调用器（提取/巩固/技能合成共用；复用 DSH 模型栈）
+  // Shared LLM caller (used by extraction/consolidation/skill synthesis; reuses the DSH model stack)
   const makeLlmCall = (purpose: string, maxTokens: number) =>
     async (input: { system: string; user: string; sessionId?: string; signal: AbortSignal }): Promise<string> => {
       const assembler = new BlockAssembler();
@@ -238,7 +238,7 @@ export function apply(ctx: Context, config: Config): void {
         signal: input.signal,
       };
       if (input.sessionId) options.sessionId = input.sessionId;
-      // 提取/巩固/技能模型：优先显式配置，其次回退到 DSH 默认模型（agentDefaultModel）
+      // Extraction/consolidation/skill model: explicit config first, then fall back to the DSH default model (agentDefaultModel)
       let provider = config.extract.provider;
       let model = config.extract.model;
       if (!provider || !model) {
@@ -251,7 +251,7 @@ export function apply(ctx: Context, config: Config): void {
             model = model || sel.model;
           }
         } catch {
-          /* 无默认模型则保持未配置 */
+          /* stay unconfigured when there is no default model */
         }
       }
       if (provider) options.provider = provider;
@@ -282,7 +282,7 @@ export function apply(ctx: Context, config: Config): void {
   });
   log("capture + extract installed");
 
-  // 定时进化管线（dsh-schedule 不在 headless base 装配中，用进程内定时器）
+  // Timed evolution pipeline (dsh-schedule is not part of the headless base assembly, so in-process timers are used)
   const consolidateLlm = makeLlmCall("memory-consolidate", 2000);
   const consolidator = new Consolidator(
     store,
@@ -297,10 +297,10 @@ export function apply(ctx: Context, config: Config): void {
   const skillLlm = makeLlmCall("memory-skill", 3000);
   let lastEvolveTs = 0;
   /**
-   * 进化一轮。
-   * heavy=true：执行巩固+技能（LLM 重活）——夜间回顾 / 手动 / 启动补跑用；
-   * heavy=false：只做免费维护（衰减+治理）——15 分钟定时轮用。
-   * force=true：忽略"无新记忆"跳过条件（手动/夜间/启动）。
+   * Run one evolution round.
+   * heavy=true: run consolidation + skills (heavy LLM work) — for nightly review / manual / startup backfill;
+   * heavy=false: only free maintenance (decay + governance) — used by the 15-minute timer round.
+   * force=true: ignore the "no new memories" skip condition (manual/nightly/startup).
    */
   const runEvolution = async (force: boolean, heavy = true): Promise<Record<string, unknown>> => {
     const summary: Record<string, unknown> = { forced: force, heavy };
@@ -332,7 +332,7 @@ export function apply(ctx: Context, config: Config): void {
       );
     }
     if (heavy && !doHeavy) summary.skipped = "no new memories";
-    // 免费维护：衰减 + 成长治理（无 LLM，每轮都做）
+    // Free maintenance: decay + growth governance (no LLM, runs every round)
     jobs.push(
       Promise.resolve()
         .then(() =>
@@ -365,7 +365,7 @@ export function apply(ctx: Context, config: Config): void {
     if (newest > 0) lastEvolveTs = newest;
     return summary;
   };
-  // 完整回顾：排空待提取 + 完整进化（巩固/技能/衰减/治理）
+  // Full review: drain pending extraction + full evolution (consolidation/skills/decay/governance)
   const fullReview = async (reason: string): Promise<Record<string, unknown>> => {
     const pumped = await extractor.pump().catch((e) => {
       console.warn("[dsh-self-improved] review pump error:", String(e));
@@ -376,7 +376,7 @@ export function apply(ctx: Context, config: Config): void {
     return { pumped, ...summary };
   };
 
-  // 定时器统一管理：跟随总开关——关闭立即全部停止，重新打开自动恢复武装
+  // Unified timer management: follows the master switch — off stops all timers immediately, on re-arms them automatically
   let timer: NodeJS.Timeout | undefined;
   let reviewTimer: NodeJS.Timeout | undefined;
   let startupTimer: NodeJS.Timeout | undefined;
@@ -384,11 +384,11 @@ export function apply(ctx: Context, config: Config): void {
 
   const parseHHMM = (s: string): number => {
     const m = /^(\d{1,2}):(\d{2})$/.exec(s.trim());
-    if (!m) return 22 * 3_600_000; // 非法配置回退 22:00
+    if (!m) return 22 * 3_600_000; // fall back to 22:00 on invalid config
     return Number(m[1]) * 3_600_000 + Number(m[2]) * 60_000;
   };
 
-  // 15 分钟轮：只做"提取 + 免费维护"，不碰 LLM 重活（进化交给夜间回顾/手动/启动补跑）
+  // 15-minute round: only "extraction + free maintenance", no heavy LLM work (evolution is left to nightly review / manual / startup backfill)
   const armMaintenanceTimer = (): void => {
     if (timer) clearInterval(timer);
     timer = undefined;
@@ -405,7 +405,7 @@ export function apply(ctx: Context, config: Config): void {
     timer.unref?.();
   };
 
-  // 夜间回顾：每天 config.review.time（默认 22:00）做一次；完成后重新武装下一天
+  // Nightly review: run once a day at config.review.time (default 22:00); re-arm for the next day after it completes
   const armNightlyReview = (): void => {
     if (reviewTimer) clearTimeout(reviewTimer);
     reviewTimer = undefined;
@@ -426,7 +426,7 @@ export function apply(ctx: Context, config: Config): void {
     log("nightly review armed at", config.review.time, "(in", Math.round(diff / 60_000), "min)");
   };
 
-  // 启动补跑：~60s 后若有活跃记忆，做一次完整回顾（重启不丢数据、不用等夜间）；只补跑一次
+  // Startup backfill: ~60s after boot, run one full review if there are active memories (no data lost on restart, no waiting for nighttime); runs only once
   const armStartupReview = (): void => {
     if (startupTimer) clearTimeout(startupTimer);
     startupTimer = undefined;
@@ -456,7 +456,7 @@ export function apply(ctx: Context, config: Config): void {
   });
   log("schedulers armed (15min maintenance, nightly review, 60s startup backfill); disabling master switch stops all timers");
 
-  // ④ 记忆工具（M1/M4）：可运行时开关（tools 模块）
+  // ④ Memory tools (M1/M4): runtime-toggleable (tools module)
   let toolsDispose: (() => void) | null = null;
   const syncTools = (): void => {
     const want = readModule("tools");
@@ -471,7 +471,7 @@ export function apply(ctx: Context, config: Config): void {
   };
   syncTools();
 
-  // ⑤ 召回注入（M3）：agent/pre-step 自动注入相关记忆
+  // ⑤ Recall injection (M3): automatically inject relevant memories at agent/pre-step
   const recallSettings: RecallSettings = {
     strategy: config.recall.strategy === "hybrid" ? "hybrid" : "keyword",
     maxResults: config.recall.maxResults,
@@ -487,7 +487,7 @@ export function apply(ctx: Context, config: Config): void {
   });
   log("recall injection installed (strategy:", recallSettings.strategy, ")");
 
-  // ⑥ CLI 命令（M5）：/memory（宿主提供 commands 服务时生效）；跟随总开关热切换注册/注销
+  // ⑥ CLI command (M5): /memory (active when the host provides a commands service); hot-registers/unregisters following the master switch
   let commandsDispose: (() => void) | null = null;
   const syncCommands = (): void => {
     if (!state.enabled) {
@@ -508,24 +508,24 @@ export function apply(ctx: Context, config: Config): void {
   };
   syncCommands();
 
-  // ⑦ 热应用：settings/updated → 更新运行时状态（随时开关，无需重启）
+  // ⑦ Hot apply: settings/updated → update runtime state (toggle anytime, no restart)
   scope.watch((next) => {
     state.enabled = next.enabled;
     state.modules = { ...next.modules };
     extractSettings.enabled = readModule("extract");
     syncTools();
-    syncCommands(); // 总开关关闭 → 注销 /memory 命令；打开 → 重新注册
-    // 夜间回顾时间/开关热切换：重新武装定时器
+    syncCommands(); // master switch off → unregister the /memory command; on → register again
+    // Nightly review time/switch hot-changed: re-arm the timers
     if (next.review.enabled !== config.review.enabled || next.review.time !== config.review.time) {
       config.review = { enabled: next.review.enabled, time: next.review.time };
     }
-    // 任何运行时配置变化 → 统一重挂功能定时器（关闭总开关=全部定时器立即停止）
+    // Any runtime config change → re-arm the feature timers uniformly (master switch off = all timers stop immediately)
     syncSchedulers();
     log("runtime config applied:", "enabled=", next.enabled, "modules=", JSON.stringify(next.modules));
   });
 
-  // ⑧ 记忆浏览器数据通道（设置页前端无需 session 即可读取/操作记忆）：
-  //    专用命名空间 dsh-self-improved-browser：snapshot=快照 JSON，action=前端发来的操作
+  // ⑧ Memory browser data channel (the settings-page frontend can read/operate memories without a session):
+  //    dedicated namespace dsh-self-improved-browser: snapshot = snapshot JSON, action = operation sent by the frontend
   const browserNs = settingsNamespace("dsh-self-improved-browser");
   const BrowserSchema = z.object({
     snapshot: z.string().default("{}"),
@@ -542,7 +542,7 @@ export function apply(ctx: Context, config: Config): void {
       lastSnapshotJson = json;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const cur = (browserScope.get() ?? {}) as any;
-      browserScope.replace({ snapshot: json, action: cur.action ?? "" }).catch(() => { /* 尽力而为 */ });
+      browserScope.replace({ snapshot: json, action: cur.action ?? "" }).catch(() => { /* best effort */ });
     } catch {
       /* noop */
     }
@@ -553,7 +553,7 @@ export function apply(ctx: Context, config: Config): void {
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const action = JSON.parse(raw) as any;
-      // 详情：按需返回完整记忆（快照里内容是截断的）
+      // Detail: return the full memory on demand (content is truncated in the snapshot)
       if (action.op === "detail" && typeof action.id === "string") {
         const m = store.getMemory(action.id);
         if (m) {
@@ -561,7 +561,7 @@ export function apply(ctx: Context, config: Config): void {
             .replace({ snapshot: lastSnapshotJson, action: "", detail: JSON.stringify(m) })
             .catch(() => { /* noop */ });
         }
-        return; // 详情不需要刷新快照
+        return; // detail does not need a snapshot refresh
       }
       if (action.op === "forget" && typeof action.id === "string") {
         store.forgetMemory(action.id);
@@ -581,7 +581,7 @@ export function apply(ctx: Context, config: Config): void {
     } catch {
       /* noop */
     }
-    lastSnapshotJson = ""; // 强制下次刷新
+    lastSnapshotJson = ""; // force a refresh on the next round
     refreshBrowserSnapshot();
     browserScope.replace({ snapshot: lastSnapshotJson, action: "" }).catch(() => { /* noop */ });
   };
@@ -595,8 +595,8 @@ export function apply(ctx: Context, config: Config): void {
   (ctx as any).on("dispose", () => clearInterval(browserTimer));
   log("memory browser channel ready (dsh-self-improved-browser)");
 
-  // ⑥ 后台管线（M2 起：extract/consolidate/evolve，dsh-schedule 驱动）
-  // 注：M0 已确认 schedule 服务不在 headless base 装配中，引入时需按装配判断
+  // ⑥ Background pipeline (from M2 on: extract/consolidate/evolve, driven by dsh-schedule)
+  // Note: M0 confirmed the schedule service is not in the headless base assembly; gate on the assembly when introducing it
 
-  log("dsh-self-improved 已加载（M5 完整版）");
+  log("dsh-self-improved loaded (full M5 build)");
 }

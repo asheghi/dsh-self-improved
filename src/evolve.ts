@@ -1,8 +1,8 @@
 /**
- * 自进化模块（M4）：
- * 1) 遗忘衰减：importance × recency × access 评分，低于阈值标记 decayed；过期 forgotten 清理；
- * 2) 技能合成：把高价值记忆（指令/事件）提炼为可复用 SOP，写入 dsh-skill 文件系统仓库
- *    （$DSH_HOME/skills/<name>/SKILL.md，YAML frontmatter；dsh-skill-filesystem watch 自动加载）。
+ * Self-evolution module (M4):
+ * 1) Forgetting decay: importance × recency × access scoring; memories below the threshold are marked decayed; expired forgotten memories are purged;
+ * 2) Skill synthesis: distills high-value memories (instructions/events) into reusable SOP skills, written to the dsh-skill filesystem repository
+ *    ($DSH_HOME/skills/<name>/SKILL.md, YAML frontmatter; the dsh-skill-filesystem watcher auto-loads them).
  */
 import { mkdirSync, writeFileSync, existsSync, rmSync, readdirSync } from "node:fs";
 import { join } from "node:path";
@@ -11,25 +11,25 @@ import type { MemoryStore } from "./storage.js";
 
 export interface DecaySettings {
   enabled: boolean;
-  /** 记忆至少存在多少天才能被衰减 */
+  /** Minimum age in days before a memory can be decayed */
   minAgeDays: number;
-  /** 评分阈值，低于即标记 decayed */
+  /** Score threshold; below it a memory is marked decayed */
   threshold: number;
-  /** forgotten 记忆超过多少天被物理清理（0 = 不清理） */
+  /** Days after which forgotten memories are physically deleted (0 = never) */
   retentionDays: number;
-  /** 活跃记忆总量上限（0 = 不限）；超限时自动把最低分记忆降级 */
+  /** Cap on total active memories (0 = unlimited); over the cap, the lowest-scoring memories are demoted automatically */
   maxActiveMemories: number;
 }
 
 export interface SkillSynthesisSettings {
   enabled: boolean;
-  /** 参与合成的记忆最低重要度 */
+  /** Minimum importance for a memory to participate in synthesis */
   minImportance: number;
-  /** 技能根目录；留空 = $DSH_HOME/skills */
+  /** Skills root directory; empty = $DSH_HOME/skills */
   skillsRoot: string;
-  /** 合成技能的名称前缀（标识来源、避免与系统技能撞名）；留空 = 不加前缀 */
+  /** Name prefix for synthesized skills (marks the source, avoids clashing with system skills); empty = no prefix */
   prefix: string;
-  /** 合成技能总数上限（0 = 不限）；达到后停止新合成 */
+  /** Cap on the total number of synthesized skills (0 = unlimited); synthesis stops once reached */
   maxSkills: number;
 }
 
@@ -37,28 +37,28 @@ export interface EvolveCallLlm {
   (input: { system: string; user: string; signal: AbortSignal }): Promise<string>;
 }
 
-export const SKILL_SYSTEM_PROMPT = `你是技能提炼器。基于用户与 AI 协作中沉淀的记忆，提炼一条可复用的标准操作流程（SOP）技能。
-输出一个 Markdown 文件，格式严格如下：
+export const SKILL_SYSTEM_PROMPT = `You are a skill distiller. Based on memories accumulated from user-AI collaboration, distill one reusable standard operating procedure (SOP) skill.
+Output a Markdown file in exactly the following format:
 ---
-name: 技能名（小写 kebab-case，如 bump-pnpm-deps）
-description: 一句话说明（30 字内）
-whenToUse: 什么场景下使用
+name: skill name (lowercase kebab-case, e.g. bump-pnpm-deps)
+description: one-sentence summary (max ~30 words)
+whenToUse: when to use this skill
 ---
-技能正文：触发条件、操作步骤（1. 2. 3.）、注意事项、反例。
-只输出这个 Markdown，不要额外文字。`;
+Skill body: trigger conditions, operation steps (1. 2. 3.), caveats, and counterexamples.
+Output only this Markdown, with no extra text.`;
 
-/** 记忆评分：importance × recency × (1 + log(1+access)) */
+/** Memory score: importance × recency × (1 + log(1+access)) */
 export function memoryScore(record: {
   importance: number;
   accessCount: number;
   createdAt: number;
 }, now: number): number {
   const ageDays = Math.max(0, (now - record.createdAt) / 86_400_000);
-  const recency = Math.pow(0.5, ageDays / 30); // 30 天半衰期
+  const recency = Math.pow(0.5, ageDays / 30); // 30-day half-life
   return record.importance * recency * (1 + Math.log1p(record.accessCount));
 }
 
-/** 执行遗忘衰减与清理；返回衰减/清理计数 */
+/** Applies forgetting decay and cleanup; returns decay/deletion counts */
 export function applyDecay(store: MemoryStore, settings: DecaySettings, now = Date.now()): { decayed: number; deleted: number } {
   if (!settings.enabled) return { decayed: 0, deleted: 0 };
   const memories = store.getActiveMemories(10_000);
@@ -74,7 +74,7 @@ export function applyDecay(store: MemoryStore, settings: DecaySettings, now = Da
   if (settings.retentionDays > 0) {
     deleted = store.deleteForgottenOlderThan(now - settings.retentionDays * 86_400_000);
   }
-  // 总量上限：超出时把最低分活跃记忆降级，直到回到上限内
+  // Total cap: while over the cap, demote the lowest-scoring active memories until back under it
   if (settings.maxActiveMemories > 0) {
     const active = store.getActiveMemories(100_000);
     const overflow = active.length - settings.maxActiveMemories;
@@ -88,10 +88,10 @@ export function applyDecay(store: MemoryStore, settings: DecaySettings, now = Da
   return { decayed, deleted };
 }
 
-/** 删除一个合成的技能目录（仅允许 dsi- 前缀或显式授权名，防路径穿越） */
+/** Deletes a synthesized skill directory (only dsi- prefixed or explicitly authorized names are allowed; prevents path traversal) */
 export function deleteSkill(name: string, skillsRoot = ""): boolean {
   const trimmed = name.trim();
-  // 只允许删除带前缀的合成技能（本插件产物）
+  // Only prefixed synthesized skills (this plugin's own products) may be deleted
   const prefix = "dsi-";
   if (!trimmed.startsWith(prefix)) return false;
   if (!/^dsi-[a-z0-9-]+$/.test(trimmed)) return false;
@@ -106,7 +106,7 @@ export function deleteSkill(name: string, skillsRoot = ""): boolean {
   }
 }
 
-/** 统计已合成的技能数（带前缀的目录） */
+/** Counts synthesized skills (directories carrying the prefix) */
 export function countSynthesizedSkills(prefix: string, skillsRoot = ""): number {
   const root = skillsRoot.trim() || defaultSkillsDir();
   try {
@@ -118,7 +118,7 @@ export function countSynthesizedSkills(prefix: string, skillsRoot = ""): number 
   }
 }
 
-/** 技能合成：一次调用生成一条 SOP 并写入 dsh-skill 仓库；返回写入的技能数 */
+/** Skill synthesis: one call generates one SOP and writes it to the dsh-skill repository; returns the number of skills written */
 export async function synthesizeSkills(
   store: MemoryStore,
   callLlm: EvolveCallLlm,
@@ -126,7 +126,7 @@ export async function synthesizeSkills(
   skillsRoot: string,
 ): Promise<number> {
   if (!settings.enabled) return 0;
-  // 技能上限：已合成的 dsi-* 技能达到上限则跳过
+  // Skill cap: skip when the synthesized dsi-* skills have reached the limit
   const prefix = (settings.prefix ?? "").trim();
   if (settings.maxSkills > 0 && prefix) {
     const root0 = skillsRoot.trim() || defaultSkillsDir();
@@ -144,7 +144,7 @@ export async function synthesizeSkills(
   const text = (await callLlm({ system: SKILL_SYSTEM_PROMPT, user: input, signal })).trim();
   const parsed = parseSkillMarkdown(text);
   if (!parsed || !parsed.name) {
-    // 失败原因落盘，便于排查（web 控制台日志用户看不到）
+    // Write the failure reason to disk for debugging (the user cannot see web console logs)
     try {
       mkdirSync(join(store.dir, "skills-debug"), { recursive: true });
       writeFileSync(join(store.dir, "skills-debug", "rejected-latest.txt"), text, { encoding: "utf8" });
@@ -152,13 +152,13 @@ export async function synthesizeSkills(
     console.warn("[dsh-self-improved] skill synthesis rejected model output (see skills-debug/rejected-latest.txt):", text.slice(0, 120));
     return 0;
   }
-  // 名称加前缀（标识来源 / 避免与系统技能撞名），并同步改写 frontmatter 的 name
+  // Prefix the name (marks the source / avoids clashing with system skills) and rewrite the frontmatter name to match
   const baseName = prefix && !parsed.name.startsWith(prefix) ? `${prefix}${parsed.name}` : parsed.name;
   let finalText = text;
   if (baseName !== parsed.name) {
     finalText = text.replace(/^(name:\s*).*$/m, `name: ${baseName}`);
   }
-  // 撞名容错：已存在同目录时自动加数字后缀（-2, -3…），而不是放弃
+  // Name-collision tolerance: when the directory already exists, append a numeric suffix (-2, -3…) instead of giving up
   let dir = join(root, baseName);
   let suffix = 2;
   while (existsSync(join(dir, "SKILL.md")) && suffix < 20) {
@@ -166,7 +166,7 @@ export async function synthesizeSkills(
     suffix += 1;
   }
   const file = join(dir, "SKILL.md");
-  if (existsSync(file)) return 0; // 20 个后缀都撞名，放弃
+  if (existsSync(file)) return 0; // all 20 suffixes collided, give up
   mkdirSync(dir, { recursive: true });
   writeFileSync(file, finalText.endsWith("\n") ? finalText : finalText + "\n", { encoding: "utf8" });
   return 1;
@@ -176,7 +176,7 @@ export function defaultSkillsDir(): string {
   return join(resolveDshHome(undefined, process.env), "skills");
 }
 
-/** 解析技能 Markdown：优先 frontmatter；无 frontmatter 时容错提取标题作为技能名 */
+/** Parses skill Markdown: prefers frontmatter; without frontmatter, falls back to extracting the heading as the skill name */
 function parseSkillMarkdown(text: string): { name?: string } | null {
   const fmMatch = text.match(/^---\s*\n([\s\S]*?)\n---/);
   if (fmMatch) {
@@ -185,7 +185,7 @@ function parseSkillMarkdown(text: string): { name?: string } | null {
     const description = fm.match(/^description:\s*(.+)/m)?.[1];
     if (name && description) return { name };
   }
-  // 容错：从一级标题提取技能名（转 kebab-case）
+  // Fallback: extract the skill name from a top-level heading (converted to kebab-case)
   const heading = text.match(/^#\s+([^\n]+)/m)?.[1]?.trim();
   if (heading && text.length > 80) {
     const name = heading
