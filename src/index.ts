@@ -17,10 +17,10 @@ import "@deepseek-ai/dsh-schedule";
 import "@deepseek-ai/dsh-session-query";
 
 import { MemoryStore, defaultMemoryDir } from "./storage.js";
-import { installCapture } from "./capture.js";
+import { installCapture, projectKeyFromCwd } from "./capture.js";
 import { registerMemoryTools } from "./tools.js";
 import { Extractor, type ExtractSettings } from "./extract.js";
-import { RecallService, createOpenAiEmbedding, type RecallSettings } from "./recall.js";
+import { RecallService, createOpenAiEmbedding, renderCuratedProfile, type RecallSettings } from "./recall.js";
 import { installRecallInjection } from "./inject.js";
 import { Consolidator } from "./consolidate.js";
 import { applyDecay, synthesizeSkills, deleteSkill } from "./evolve.js";
@@ -30,7 +30,7 @@ import { BlockAssembler, createUserMessage } from "@deepseek-ai/dsh-llm";
 export const name = "self-improved";
 
 /** Required host services (Cordis inject list; M1 adds sessionQuery for conversation full-text search) */
-export const inject = ["sessions", "settings", "tools", "sessionQuery", "llm"] as const;
+export const inject = ["sessions", "settings", "tools", "sessionQuery", "llm", "systemPrompt"] as const;
 
 /** Module switches (see docs/design/dsh-memory-detailed-design.md §2.5 for coupling rules) */
 export interface ModuleSwitches {
@@ -53,13 +53,17 @@ export interface ExtractConfig {
   dedup: boolean;
   /** Fall back to summarizing the raw text on bad JSON (off by default to avoid low-value summary noise) */
   fallbackOnBadJson: boolean;
-  /** Drop extracted results whose importance is below this value (noise reduction, default 3) */
+  /** Drop extracted results whose importance is below this value (noise reduction, high floor = extraction is a privilege) */
   minImportance: number;
   /** headless: drain extraction synchronously on flush */
   flushDrain: boolean;
   /** Extraction model (leave empty to follow the DSH default) */
   model: string;
   provider: string;
+  /** strict = conservative extraction gate (task-local/system-ish output rejected); off = legacy migration replays only */
+  provenanceFilter: "strict" | "off";
+  /** Require verbatim evidence on every extracted memory */
+  requireEvidence: boolean;
 }
 
 export interface EmbeddingConfig {
@@ -78,6 +82,12 @@ export interface RecallConfig {
   timeoutMs: number;
   /** Max characters per injected block (prevents a single injection from blowing up the context) */
   maxInjectChars: number;
+  /** Relative relevance gate margin (0–1; hits must score within this fraction of the best hit) */
+  relevanceMargin: number;
+  /** Importance floor for contextual (non-baseline) injection hits */
+  minImportance: number;
+  /** Max memory blocks per turn (stacking guard; 0 = unlimited) */
+  maxInjectPerTurn: number;
   embedding: EmbeddingConfig;
 }
 
@@ -97,7 +107,7 @@ export interface Config {
   /** M3 recall parameters */
   recall: RecallConfig;
   /** M4 consolidation (L2/L3) parameters */
-  consolidate: { sceneMaxMemories: number; personaMaxMemories: number; sceneBatchSize: number };
+  consolidate: { scenesEnabled: boolean; sceneMaxMemories: number; personaMaxMemories: number; sceneBatchSize: number };
   /** M4 self-evolution parameters */
   evolve: {
     decay: { enabled: boolean; minAgeDays: number; threshold: number; retentionDays: number; maxActiveMemories: number };
@@ -134,17 +144,22 @@ export const Config = z.object({
     timeoutMs: z.number().min(5000).default(60000),
     dedup: z.boolean().default(true),
     fallbackOnBadJson: z.boolean().default(false),
-    minImportance: z.number().min(1).max(10).default(3),
+    minImportance: z.number().min(1).max(10).default(6),
     flushDrain: z.boolean().default(false),
     model: z.string().default(""),
     provider: z.string().default(""),
+    provenanceFilter: z.string().default("strict"),
+    requireEvidence: z.boolean().default(true),
   }),
   recall: z.object({
     strategy: z.string().default("keyword"),
     maxResults: z.number().min(1).max(20).default(5),
-    scoreThreshold: z.number().min(0).default(0),
+    scoreThreshold: z.number().default(0),
     timeoutMs: z.number().min(1000).default(5000),
     maxInjectChars: z.number().min(100).default(800),
+    relevanceMargin: z.number().min(0).max(1).default(0.5),
+    minImportance: z.number().min(0).max(10).default(0),
+    maxInjectPerTurn: z.number().min(0).max(20).default(4),
     embedding: z.object({
       baseUrl: z.string().default(""),
       apiKey: z.string().default(""),
@@ -154,6 +169,7 @@ export const Config = z.object({
     }),
   }),
   consolidate: z.object({
+    scenesEnabled: z.boolean().default(false),
     sceneMaxMemories: z.number().min(1).default(50),
     personaMaxMemories: z.number().min(1).default(30),
     sceneBatchSize: z.number().min(1).max(20).default(8),
@@ -167,7 +183,7 @@ export const Config = z.object({
       maxActiveMemories: z.number().min(0).default(500),
     }),
     skillSynthesis: z.object({
-      enabled: z.boolean().default(true),
+      enabled: z.boolean().default(false),
       minImportance: z.number().min(1).max(10).default(7),
       skillsRoot: z.string().default(""),
       prefix: z.string().default("dsi-"),
@@ -205,6 +221,15 @@ export function apply(ctx: Context, config: Config): void {
   const store = new MemoryStore(dir);
   log("memory store ready:", dir);
 
+  // Hermes-style durable baseline: a small curated profile belongs in the
+  // system prompt, not after the current request as another user-role message.
+  // Contextual/project recall remains a separately labeled runtime snapshot.
+  ctx.systemPrompt.section({
+    name: "dsh-self-improved:curated-profile",
+    order: 20,
+    text: () => (readModule("recall") ? renderCuratedProfile(store, 2400) : ""),
+  });
+
   // ③ L0 capture + L1 extraction: persist slices and mark the queue inside session/flush barriers;
   //    in headless mode (flushDrain) drain extraction synchronously so the 5s shutdown timeout does not kill the pipeline.
   const extractSettings: ExtractSettings = {
@@ -217,6 +242,10 @@ export function apply(ctx: Context, config: Config): void {
     fallbackOnBadJson: config.extract.fallbackOnBadJson,
     minImportance: config.extract.minImportance,
     flushDrain: config.extract.flushDrain,
+    provenanceFilter: config.extract.provenanceFilter === "off" ? ("off" as const) : ("strict" as const),
+    requireEvidence: config.extract.requireEvidence,
+    projectId: "",
+    projectIdForSession: (sessionId) => store.getSessionProject(sessionId),
   };
   const embeddingProvider = createOpenAiEmbedding(config.recall.embedding);
 
@@ -287,6 +316,7 @@ export function apply(ctx: Context, config: Config): void {
   const consolidator = new Consolidator(
     store,
     {
+      scenesEnabled: config.consolidate.scenesEnabled,
       sceneMaxMemories: config.consolidate.sceneMaxMemories,
       personaMaxMemories: config.consolidate.personaMaxMemories,
       sceneBatchSize: config.consolidate.sceneBatchSize,
@@ -471,21 +501,38 @@ export function apply(ctx: Context, config: Config): void {
   };
   syncTools();
 
-  // ⑤ Recall injection (M3): automatically inject relevant memories at agent/pre-step
-  const recallSettings: RecallSettings = {
+  // ⑤ Recall injection (M3): automatically inject relevant memories at agent/pre-step.
+  // Scope comes directly from the event's owning Agent, never mutable cross-session state.
+  const projectKeyOfPayload = (payload: unknown): string => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const cwd = (payload as any)?.agent?.session?.header?.cwd;
+    return projectKeyFromCwd(typeof cwd === "string" ? cwd : "");
+  };
+  const sessionIdForPayload = (payload: unknown): string => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const id = (payload as any)?.agent?.id;
+    return typeof id === "string" ? id : "";
+  };
+  const rec: { recallSettings: RecallSettings } = { recallSettings: {
     strategy: config.recall.strategy === "hybrid" ? "hybrid" : "keyword",
     maxResults: config.recall.maxResults,
     scoreThreshold: config.recall.scoreThreshold,
     timeoutMs: config.recall.timeoutMs,
-  };
-  const recall = new RecallService(store, recallSettings, embeddingProvider);
+    relevanceMargin: config.recall.relevanceMargin,
+    minImportance: config.recall.minImportance,
+  } };
+  const recall = new RecallService(store, rec.recallSettings, embeddingProvider);
   installRecallInjection(ctx, recall, {
     enabled: () => readModule("recall"),
     maxHits: config.recall.maxResults,
     maxChars: config.recall.maxInjectChars,
     debug: config.debug,
+    projectKeyOf: projectKeyOfPayload,
+    sessionIdOf: sessionIdForPayload,
+    maxInjectPerTurn: config.recall.maxInjectPerTurn,
+    onInjected: (ids) => store.recordAccess(ids),
   });
-  log("recall injection installed (strategy:", recallSettings.strategy, ")");
+  log("recall injection installed (strategy:", rec.recallSettings.strategy, ", project scoping on)");
 
   // ⑥ CLI command (M5): /memory (active when the host provides a commands service); hot-registers/unregisters following the master switch
   let commandsDispose: (() => void) | null = null;
@@ -499,7 +546,11 @@ export function apply(ctx: Context, config: Config): void {
       return;
     }
     if (commandsDispose) return;
-    commandsDispose = installMemoryCommands(ctx, store, { evolve: () => fullReview("manual"), isEnabled: () => state.enabled });
+    commandsDispose = installMemoryCommands(ctx, store, {
+      evolve: () => fullReview("manual"),
+      isEnabled: () => state.enabled,
+      skillsPrefix: config.evolve.skillSynthesis.prefix,
+    });
     if (commandsDispose) {
       log("memory command installed (/memory)");
     } else {
@@ -537,7 +588,7 @@ export function apply(ctx: Context, config: Config): void {
   let lastHandledAction = "";
   const refreshBrowserSnapshot = (): void => {
     try {
-      const json = JSON.stringify(browserSnapshot(store));
+      const json = JSON.stringify(browserSnapshot(store, config.evolve.skillSynthesis.prefix));
       if (json === lastSnapshotJson) return;
       lastSnapshotJson = json;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -569,12 +620,33 @@ export function apply(ctx: Context, config: Config): void {
       } else if (action.op === "correct" && typeof action.id === "string" && typeof action.content === "string") {
         const old = store.getMemory(action.id);
         if (old) {
-          store.insertMemory({ kind: old.kind, content: action.content, importance: old.importance, supersedes: old.id });
+          // Direct browser action → user-initiated correction: trusted, inheriting the
+          // old row's scope/project/session; the old row is retired (corrected).
+          store.insertMemory(
+            { kind: old.kind, content: action.content, importance: old.importance, supersedes: old.id },
+            {
+              provenance: "user",
+              source: "browser-correct",
+              scope: old.meta?.scope ?? "global",
+              projectId: old.meta?.projectId ?? null,
+              sessionId: old.meta?.sessionId ?? null,
+              confidence: 0.9,
+            },
+          );
           store.setMemoryStatus(old.id, "corrected");
           log("browser action: correct", action.id.slice(0, 8));
         }
+      } else if (action.op === "confirm-correct" && typeof action.newId === "string") {
+        // Confirm a tool-staged correction candidate: promote it to trusted user
+        // provenance and retire the superseded row it points at.
+        const candidate = store.getMemory(action.newId);
+        if (candidate?.supersedes) {
+          store.updateMeta(candidate.id, { provenance: "user", source: "browser-correct", confidence: 0.9 });
+          store.setMemoryStatus(candidate.supersedes, "corrected");
+          log("browser action: confirm-correct", candidate.id.slice(0, 8));
+        }
       } else if (action.op === "deleteSkill" && typeof action.name === "string") {
-        if (deleteSkill(action.name, config.evolve.skillSynthesis.skillsRoot)) {
+        if (deleteSkill(action.name, config.evolve.skillSynthesis.skillsRoot, config.evolve.skillSynthesis.prefix)) {
           log("browser action: deleteSkill", action.name);
         }
       }

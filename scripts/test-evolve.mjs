@@ -8,7 +8,7 @@ import { MemoryStore } from "../lib/storage.js";
 import { Consolidator } from "../lib/consolidate.js";
 import { applyDecay, memoryScore, synthesizeSkills, deleteSkill } from "../lib/evolve.js";
 
-const dir = join(process.env.TEST_DIR ?? "E:\\dshPro\\.dsh-test", "m4-unit");
+const dir = join(process.env.TEST_DIR ?? "/tmp/dsh-mem-test", "m4-unit");
 rmSync(dir, { recursive: true, force: true });
 const skillsRoot = join(dir, "skills");
 rmSync(skillsRoot, { recursive: true, force: true });
@@ -32,23 +32,28 @@ const branchedFakeLlm = async ({ system }) =>
   system.includes("scene block")
     ? JSON.stringify({ scenes: [{ title: "Toolchain collaboration", summary: "The user manages dependencies with pnpm and prefers PowerShell." }] })
     : `## Basic Info\n- Uses Windows and PowerShell\n\n## Preferences & Habits\n- Prefers pnpm for dependency management`;
-const consolidator = new Consolidator(store, { sceneMaxMemories: 50, personaMaxMemories: 30, sceneBatchSize: 8 }, branchedFakeLlm);
+const consolidator = new Consolidator(store, { scenesEnabled: true, sceneMaxMemories: 50, personaMaxMemories: 30, sceneBatchSize: 8 }, branchedFakeLlm);
 const r1 = await consolidator.consolidate();
 check("scene consolidation writes", r1.scenes === 1, JSON.stringify(r1));
 check("scene is listable", store.listScenes().length === 1 && store.listScenes()[0].title === "Toolchain collaboration");
 check("persona first generated ver=1", r1.personaVersion === 1, JSON.stringify(r1));
 
 // ---------- 2) Persona versioning ----------
+// Gate: without new high-value memories, a re-consolidation keeps the existing persona version
 const personaFakeLlm = async () =>
   `## Basic Info\n- Uses Windows and PowerShell\n\n## Preferences & Habits\n- Prefers pnpm for dependency management`;
 const c2 = new Consolidator(store, { sceneMaxMemories: 50, personaMaxMemories: 30, sceneBatchSize: 8 }, personaFakeLlm);
 const r2 = await c2.consolidate();
-check("persona second run bumps version to 2", r2.personaVersion === 2, JSON.stringify(r2));
+check("persona re-run without new memories keeps version (churn gate)", r2.personaVersion === 1, JSON.stringify(r2));
 const p1 = store.getPersona();
 check("persona content persisted", p1?.content.includes("PowerShell") === true);
 check("persona.md written to disk", existsSync(join(dir, "persona", "persona.md")));
+// 3 new memories since the last version → the gate opens and a new version is written
+store.insertMemory({ kind: "fact", content: "User codes mainly in TypeScript", importance: 7 });
+store.insertMemory({ kind: "preference", content: "User prefers dark editors", importance: 7 });
+store.insertMemory({ kind: "preference", content: "User runs Arch Linux on the workstation", importance: 8 });
 const r3 = await c2.consolidate();
-check("persona third run bumps version to 3", r3.personaVersion === 3, JSON.stringify(r3));
+check("persona bumps version after ≥3 new memories", r3.personaVersion === 2, JSON.stringify(r3));
 check("persona.md has a backup", existsSync(join(dir, "persona", "persona.md.bak1")));
 
 // ---------- 3) Forgetting decay ----------
@@ -72,10 +77,18 @@ if (existsSync(join(skillsRoot, "bump-pnpm-deps", "SKILL.md"))) {
   const content = readFileSync(join(skillsRoot, "bump-pnpm-deps", "SKILL.md"), "utf8");
   check("skill contains frontmatter and steps", content.includes("name: bump-pnpm-deps") && content.includes("pnpm update"));
 }
+// Same-content re-synthesis: must NOT spawn a suffixed near-duplicate (dedupe gate)
 const synthesized2 = await synthesizeSkills(store, skillFakeLlm, { enabled: true, minImportance: 7, skillsRoot }, skillsRoot);
-check("name collision creates suffixed copy (-2)", synthesized2 === 1 && existsSync(join(skillsRoot, "bump-pnpm-deps-2", "SKILL.md")));
-const synthesized3 = await synthesizeSkills(store, skillFakeLlm, { enabled: true, minImportance: 7, skillsRoot }, skillsRoot);
-check("continued collision creates -3", synthesized3 === 1 && existsSync(join(skillsRoot, "bump-pnpm-deps-3", "SKILL.md")));
+check("same-theme re-synthesis writes zero duplicates", synthesized2 === 0 && !existsSync(join(skillsRoot, "bump-pnpm-deps-2", "SKILL.md")));
+// Genuinely different content under the same planned name → a suffixed variant is allowed
+const skillFakeLlmV2 = async () =>
+  `---\nname: bump-pnpm-deps\ndescription: Safely update dependencies with pnpm behind a proxy\nwhenToUse: When project dependencies need updating behind a proxy\n---\n1. Check current dependency versions\n2. Run pnpm update through the proxy endpoint\n3. Confirm the lockfile has been updated\n4. Document any new proxy quirks in the release notes for the team`;
+const synthesized3 = await synthesizeSkills(store, skillFakeLlmV2, { enabled: true, minImportance: 7, skillsRoot }, skillsRoot);
+check("distinct content under same name gets a -2 variant", synthesized3 === 1 && existsSync(join(skillsRoot, "bump-pnpm-deps-2", "SKILL.md")));
+if (existsSync(join(skillsRoot, "bump-pnpm-deps-2", "SKILL.md"))) {
+  const content = readFileSync(join(skillsRoot, "bump-pnpm-deps-2", "SKILL.md"), "utf8");
+  check("suffixed skill rewrites frontmatter name", content.includes("name: bump-pnpm-deps-2"));
+}
 
 // Prefix: synthesized skill names get the dsi- prefix; on collision the suffix applies to the prefixed name
 const pfxRoot = join(dir, "skills-pfx");
@@ -88,7 +101,7 @@ if (existsSync(pfxFile)) {
   check("frontmatter name rewritten to the prefixed name", content.includes("name: dsi-bump-pnpm-deps"));
 }
 const pfx2 = await synthesizeSkills(store, skillFakeLlm, { enabled: true, minImportance: 7, skillsRoot: pfxRoot, prefix: "dsi-" }, pfxRoot);
-check("prefixed collision generates dsi-bump-pnpm-deps-2", pfx2 === 1 && existsSync(join(pfxRoot, "dsi-bump-pnpm-deps-2", "SKILL.md")));
+check("prefixed same-content re-synthesis writes zero duplicates", pfx2 === 0 && !existsSync(join(pfxRoot, "dsi-bump-pnpm-deps-2", "SKILL.md")));
 
 // Delete skill: only dsi- prefixed, well-formed skill directories may be deleted
 const d1 = deleteSkill("dsi-bump-pnpm-deps", pfxRoot);
@@ -105,6 +118,35 @@ const cap1 = await synthesizeSkills(store, skillFakeLlm, { enabled: true, minImp
 check("synthesis allowed under the cap (1/1)", cap1 === 1 && existsSync(join(capRoot, "dsi-bump-pnpm-deps", "SKILL.md")));
 const cap2 = await synthesizeSkills(store, skillFakeLlm, { enabled: true, minImportance: 7, skillsRoot: capRoot, prefix: "dsi-", maxSkills: 1 }, capRoot);
 check("synthesis stops at the cap", cap2 === 0);
+
+// maxSkills is enforced even with an EMPTY prefix (counts unprefixed dirs too)
+const bareRoot = join(dir, "skills-bare");
+rmSync(bareRoot, { recursive: true, force: true });
+const bare1 = await synthesizeSkills(store, skillFakeLlm, { enabled: true, minImportance: 7, skillsRoot: bareRoot, prefix: "", maxSkills: 1 }, bareRoot);
+check("synthesis without prefix still writes (1/1)", bare1 === 1 && existsSync(join(bareRoot, "bump-pnpm-deps", "SKILL.md")));
+const bare2 = await synthesizeSkills(store, skillFakeLlm, { enabled: true, minImportance: 7, skillsRoot: bareRoot, prefix: "", maxSkills: 1 }, bareRoot);
+check("empty prefix still enforces maxSkills", bare2 === 0, `bare2=${bare2}`);
+
+// Heading-only model output (no frontmatter) is rejected — no fallback skill naming
+const headingOnlyRoot = join(dir, "skills-heading");
+rmSync(headingOnlyRoot, { recursive: true, force: true });
+const headingOnly = async () =>
+  `# Bump pnpm dependencies\n1. Check current dependency versions\n2. Run pnpm update\n3. Confirm the lockfile has been updated`.padEnd(120, "x");
+const hReject = await synthesizeSkills(store, headingOnly, { enabled: true, minImportance: 7, skillsRoot: headingOnlyRoot, prefix: "dsi-" }, headingOnlyRoot);
+check("heading-only output rejected (frontmatter required)", hReject === 0 && !existsSync(join(headingOnlyRoot, "dsi-bump-pnpm-deps")));
+// Frontmatter missing description is also rejected (valid frontmatter = name + description)
+const noDesc = async () =>
+  `---\nname: bump-pnpm-deps\nwhenToUse: When project dependencies need updating\n---\n1. Check current dependency versions\n2. Run pnpm update`.padEnd(120, "x");
+check("frontmatter without description rejected", (await synthesizeSkills(store, noDesc, { enabled: true, minImportance: 7, skillsRoot: headingOnlyRoot, prefix: "dsi-" }, headingOnlyRoot)) === 0);
+
+// Deletion honors the CONFIGURED prefix, not a hardcoded one
+const otherRoot = join(dir, "skills-other-prefix");
+rmSync(otherRoot, { recursive: true, force: true });
+await synthesizeSkills(store, skillFakeLlm, { enabled: true, minImportance: 7, skillsRoot: otherRoot, prefix: "mem-" }, otherRoot);
+check("custom-prefixed skill written", existsSync(join(otherRoot, "mem-bump-pnpm-deps", "SKILL.md")));
+check("hardcoded dsi- prefix refuses to delete mem- skill", deleteSkill("mem-bump-pnpm-deps", otherRoot) === false);
+check("configured prefix deletes its own skill", deleteSkill("mem-bump-pnpm-deps", otherRoot, "mem-") === true && !existsSync(join(otherRoot, "mem-bump-pnpm-deps")));
+check("deletion with empty prefix is refused", existsSync(join(skillsRoot, "bump-pnpm-deps-2", "SKILL.md")) && deleteSkill("bump-pnpm-deps-2", skillsRoot, "") === false);
 
 // Memory total cap: over the limit, the lowest-scoring memories are demoted automatically
 const capMem = await import("../lib/storage.js").then((m) => new m.MemoryStore(join(dir, "cap-mem")));

@@ -41,6 +41,7 @@
     "@deepseek-ai/dsh-llm": "^0.1.0-rc.6",
     "@deepseek-ai/dsh-schedule": "^0.1.0-rc.6",
     "@deepseek-ai/dsh-session": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-session-query": "^0.1.0-rc.6",
     "@deepseek-ai/dsh-settings": "^0.1.0-rc.6",
     "@deepseek-ai/dsh-skill": "^0.1.0-rc.6",
     "@deepseek-ai/dsh-storage-domain": "^0.1.0-rc.6",
@@ -54,7 +55,10 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "prepare": "tsc -p tsconfig.json"
+    "prepare": "tsc -p tsconfig.json",
+    "test:all": "node scripts/test-storage.mjs && node scripts/test-extract.mjs && node scripts/test-recall.mjs && node scripts/test-evolve.mjs && node scripts/test-commands.mjs && node scripts/test-hermes.mjs && node scripts/test-audit-skills.mjs && node scripts/test-settings-ui.mjs",
+    "migrate:hermes": "node scripts/migrate-hermes.mjs --dry-run",
+    "skills:audit": "node scripts/audit-generated-skills.mjs"
   },
   "keywords": [
     "dsh",

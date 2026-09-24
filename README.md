@@ -2,7 +2,7 @@
 
 **Long-term memory & self-evolving plugin** for DeepSeek Harness (fully local).
 
-> Status: M0–M6 complete and deployed to a real environment (web profile). Design/research docs stay local only (see `.gitignore`).
+> Status: M0–M6 complete and deployed to a real environment (web profile), **upgraded with the Hermes-conservative memory policy** on top (see "What changed" below). Design/research docs stay local only (see `.gitignore`).
 
 ## What it is
 
@@ -12,6 +12,44 @@ Adds the two missing capabilities to DSH — "cross-session memory + self-evolut
 - **Self-evolution**: memories are consolidated, decayed and corrected; successful workflows can be distilled into reusable skills; the user persona keeps evolving with conversations.
 
 The architecture follows the four-layer memory pyramid of TencentDB Agent Memory (L0 capture → L1 extraction → L2 scene grouping → L3 persona), but **reuses DSH-native services** (`ctx.llm` / `session` events / `agent/pre-step` injection / `dsh-skill` / `storageDomain`) with a fully local SQLite store (FTS5 + sqlite-vec). No data is uploaded anywhere.
+
+## What changed (Hermes-conservative upgrade)
+
+The older "M0–M6 behavior all unchanged" claim no longer holds — the memory policy itself has been made deliberately conservative (Hermes-style), with high-signal-by-default behavior:
+
+- **High-signal model, not high-volume.** Only memories that are (a) confirmed as coming from *direct human* input, (b) backed by quoted evidence in the conversation, and (c) not task/session-local become durable memories. Assistant-generated or unverified prose does **not** silently enter the store.
+  - `extract.provenanceFilter: "strict"` (default) + `extract.requireEvidence: true` (default). Setting these to `off`/`false` reopens the old permissive pipeline (not recommended).
+- **Curated baseline vs contextual recall.** Recall injection distinguishes a small **system-curated baseline** (pinned, human-corroborated profile facts) from **scoped contextual recall** (only memories matching the current question — project/session-scoped, ranked by relevance). Generic prompts ("hi", "continue") inject **nothing**.
+- **Injection gating.** `recall.relevanceMargin` (default 0.5), `recall.minImportance` (default 0 = off), and `recall.maxInjectPerTurn` (default 4) keep injected blocks short and relevant.
+- **Automatic consistent backup / quarantine for upgrades.** First run on an existing store performs an additive migration: every pre-upgrade row is tagged `(provenance=unknown, source=legacy)` and **never injected** until explicitly Human-confirmed (`accept-legacy`); legacy `instruction` rows are quarantined. Legacy near-duplicates are collapsed to `status=migrated` (preserved, invisible) — **nothing is deleted**.
+  - Run the dry-run migration explicitly, e.g. via the package script (see "Operations"): `pnpm run migrate:hermes`.
+- **Direct confirmation path for corrections.** Corrections you make (via `/memory correct <id> <text>`, the memory browser "Correct" action, or the `memory_correct` tool) are applied immediately and mark the memory human-confirmed — corrections are the fastest way to promote/curate content.
+- **Skill synthesis is default-off.** `evolve.skillSynthesis.enabled` defaults to `false`; enable it under Self-evolution (UI or settings) if you want successful patterns distilled into `dsh-skill` entries.
+- **Generated-skill archive script.** Old dsi-* synthesized skills that accumulated duplicates can be audited and archived (see "Operations" below).
+
+## Operations
+
+### Dry-run migration (`scripts/migrate-hermes.mjs`)
+
+Analyzes an existing memory store against the new policy using a disposable SQLite snapshot; the live database is not touched:
+
+```bash
+pnpm run migrate:hermes -- --dir ~/.dsh/memory --dry-run   # dry run: analysis only, source db untouched
+pnpm run migrate:hermes -- --dir ~/.dsh/memory            # real run: backs up memory.db.pre-hermes.bak first
+```
+
+Always run the dry-run first and review its JSON report; the real run never deletes anything (rows are collapsed to `supersedes` links and a JSON summary is written to `memory/migration-log/`), but it does mutate statuses/FTS, so treat the automatic backup as the rollback point.
+
+### Generated-skill audit & archive (dry-run by default)
+
+Audits old generated (`dsi-*`) skills for exact-name duplicates and high body-overlap (token jaccard ≥ 0.8, matching the synthesis-time dedupe), and on explicit `--apply` MOVES redundant skills into `<root>/.dsi-archive/<timestamp>/` — never deletes — while fixing retained skills whose frontmatter name disagrees with their directory:
+
+```bash
+pnpm run skills:audit -- --root ~/.dsh/skills            # dry run (default)
+pnpm run skills:audit -- --root ~/.dsh/skills --apply    # archive redundant dsi-* skills under .dsi-archive/
+```
+
+Only directories starting with the generated prefix (default `dsi-`) and containing `SKILL.md` are classified — unrelated system/user skills are never reported or touched. It is idempotent: a second `--apply` finds nothing further.
 
 ## Roadmap
 
@@ -24,6 +62,8 @@ The architecture follows the four-layer memory pyramid of TencentDB Agent Memory
 | M4 | Self-evolution: L2/L3 consolidation (scenes + versioned persona), decay, correct/forget tools, skill synthesis → dsh-skill | ✅ Unit-tested; synthesized skills in production |
 | M5 | UI/ops: settings panel (auto-rendered) + hot runtime toggles + `/memory` command + memory browser | ✅ Complete, deployed to web profile |
 | M6 | Growth governance (caps/cleanup) + scheduling (nightly review / free maintenance / startup backfill) | ✅ Complete: governance caps, nightly review (default 22:00), 15-min loop is maintenance-only, master switch stops all timers |
+
+> Qualification: M0–M6 milestones shipped as described, but the **memory policy has since been tightened** (Hermes-conservative provenance/evidence gates, curated baseline, injection caps, skill synthesis default-off) — see "What changed" for what differs from the original permissive pipeline.
 
 ## Installation
 
@@ -113,6 +153,7 @@ dsh-self-improved:
 Notes:
 
 - **Master switch off = plugin fully dormant**: all background timers stop (15-min maintenance loop / nightly review / startup backfill), `/memory` and memory tools are unregistered; stored memories are kept and everything resumes when re-enabled.
+- **Conservative defaults come from settings**, not hardcoding: `extract.provenanceFilter: "strict"`, `extract.requireEvidence: true`, `recall.relevanceMargin: 0.5`, `recall.minImportance: 0`, `recall.maxInjectPerTurn: 4`, `consolidate.scenesEnabled: false`, `evolve.skillSynthesis.enabled: false` — all editable in the settings UI ("Evolving Memory" → Config).
 - **Scheduling**: the 15-minute loop only does extraction + free maintenance (decay/governance, no LLM cost); full evolution (scenes/persona/skills) runs at the nightly review (default 22:00), ~60s after startup, or via manual `/memory evolve`.
 - **`/memory` commands are zero-LLM**: they query the local memory store directly; the command declares `input`, so parameterized input is handled by the command system (trigger via the command menu, `/`).
 - The memory browser (Settings → "Self-evolving memory" → "Memory" tab) lets you view/filter/correct/forget memories, the persona, scenes and synthesized skills.
@@ -135,7 +176,7 @@ This project references the following open-source projects; many thanks to their
 - `README.zh.md` — 中文版说明
 - `docs/` (install/verify checklists, testing guide, design docs, DSH research) — **local only**, excluded via `.gitignore`
 
-Unit tests: `node scripts/test-storage.mjs` / `test-extract.mjs` / `test-recall.mjs` / `test-evolve.mjs` / `test-commands.mjs` (all PASS).
+Unit tests: `pnpm run test:all` (storage / extract / recall / evolve / commands / hermes policy / skill-audit fixtures — all PASS); individual runners live in `scripts/test-*.mjs`.
 
 ## License
 

@@ -20,7 +20,7 @@ export function installCapture(
   ctx: Context,
   store: MemoryStore,
   controller: CaptureController,
-  onCaptured?: () => void | Promise<unknown>,
+  onCaptured?: (sessions: string[]) => void | Promise<unknown>,
 ): void {
   // Max seq written per session (in-process cursor; authoritative dedup is guaranteed by the DSH event seq)
   const lastWritten = new Map<string, number>();
@@ -38,28 +38,53 @@ export function installCapture(
       store.appendConversationSlice(session.id, records);
       const maxSeq = records[records.length - 1].seq;
       store.markPending(session.id, maxSeq);
+      const cwd = typeof session.header?.cwd === "string" ? session.header.cwd : "";
+      store.setSessionProject(session.id, projectKeyFromCwd(cwd));
       lastWritten.set(session.id, maxSeq);
     }
     if (onCaptured) {
-      const result = onCaptured();
+      const result = onCaptured([session.id]);
       if (result instanceof Promise) await result;
     }
   });
 }
 
+/** Stable project scope key. Keep the normalized absolute cwd to avoid basename collisions. */
+export function projectKeyFromCwd(cwd: string): string {
+  const normalized = cwd.trim().replace(/\\/g, "/").replace(/\/+$/, "");
+  return normalized || "default";
+}
+
+function sourceKindOf(data: Record<string, unknown> | undefined): string {
+  const source = data?.source as Record<string, unknown> | undefined;
+  return source && typeof source.kind === "string" ? source.kind : "unknown";
+}
+
+/** MessageSourceMap is merge-extensible: trust only the one explicit human producer. */
+function isDirectHumanMessage(data: Record<string, unknown> | undefined): boolean {
+  return sourceKindOf(data) === "user";
+}
+
 /** Convert a session event into a slice record; non-text events (such as turn/start, tool/call) return null */
-function toSlice(sessionId: string, event: SessionEventLike): ConversationSliceRecord | null {
+export function toSlice(sessionId: string, event: SessionEventLike): ConversationSliceRecord | null {
   const ts = typeof event.time === "number" ? event.time : Date.now();
   const data = event.data as Record<string, unknown> | undefined;
   switch (event.type) {
     case "user/message": {
+      const sourceKind = sourceKindOf(data);
+      const directHuman = isDirectHumanMessage(data);
+      // Unknown and plugin-defined producers are untrusted by default. They remain
+      // captured as non-extractable audit slices rather than being mistaken for humans.
       const text = textOfContent(data?.content);
-      return text ? { type: "user", seq: event.seq, ts, text, sessionId } : null;
+      if (!text) return null;
+      return { type: directHuman ? "user" : "tool", seq: event.seq, ts, text, sessionId, injected: !directHuman, sourceKind };
     }
     case "assistant/message": {
       const message = (data?.message ?? data) as Record<string, unknown> | undefined;
       const text = textOfContent(message?.content);
-      return text ? { type: "assistant", seq: event.seq, ts, text, sessionId } : null;
+      if (!text) return null;
+      const sourceKind = sourceKindOf(message);
+      return { type: "assistant", seq: event.seq, ts, text, sessionId, injected: sourceKind !== "model", sourceKind };
     }
     case "tool/result": {
       const message = data?.message as Record<string, unknown> | undefined;

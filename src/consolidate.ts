@@ -9,6 +9,8 @@ import type { MemoryStore } from "./storage.js";
 import type { EmbeddingProvider } from "./recall.js";
 
 export interface ConsolidateSettings {
+  /** Scene generation is opt-in; scenes are not part of normal recall and otherwise waste LLM calls. */
+  scenesEnabled?: boolean;
   /** Max number of memories participating in scene consolidation */
   sceneMaxMemories: number;
   /** Max number of memories participating in persona synthesis */
@@ -45,10 +47,12 @@ export class Consolidator {
   /** Consolidates scenes + synthesizes the persona (each step fails independently without affecting the other) */
   async consolidate(): Promise<ConsolidateResult> {
     const result: ConsolidateResult = { scenes: 0 };
-    try {
-      result.scenes = await this.groupScenes();
-    } catch (error) {
-      console.warn("[dsh-self-improved] scene grouping failed:", String(error));
+    if (this.settings.scenesEnabled) {
+      try {
+        result.scenes = await this.groupScenes();
+      } catch (error) {
+        console.warn("[dsh-self-improved] scene grouping failed:", String(error));
+      }
     }
     try {
       const ver = await this.synthesizePersona();
@@ -59,16 +63,19 @@ export class Consolidator {
     return result;
   }
 
-  /** L2: consolidate memories into scene blocks in batches */
+  /** L2: consolidate memories into scene blocks in batches. A scene is only worth
+   * writing when it is grounded in ≥3 source memories (thin scenes are useless). */
   private async groupScenes(): Promise<number> {
-    const memories = this.store.getActiveMemories(this.settings.sceneMaxMemories);
-    if (memories.length === 0) return 0;
+    const memories = this.store.getActiveMemories(this.settings.sceneMaxMemories, 0, true);
+    if (memories.length < 3) return 0;
     const batches: typeof memories[] = [];
     for (let i = 0; i < memories.length; i += this.settings.sceneBatchSize) {
       batches.push(memories.slice(i, i + this.settings.sceneBatchSize));
     }
     let count = 0;
     for (const batch of batches) {
+      const grounded = batch.filter((m) => m.status === "active");
+      if (grounded.length < 3) continue;
       const input = batch.map((m) => `- [${m.kind}] ${m.content}`).join("\n");
       const signal = AbortSignal.timeout(180_000);
       const text = await this.callLlm({ system: SCENE_SYSTEM_PROMPT, user: input, signal });
@@ -88,11 +95,27 @@ export class Consolidator {
     return count;
   }
 
-  /** L3: synthesize a new persona from top memories + the previous persona version */
+  /** L3: synthesize a new persona from top memories + the previous persona version.
+   * Quality gate: only regenerate when ≥3 memories were added since the latest version
+   * (or when no version exists yet); otherwise keep the existing persona untouched
+   * (prevents endless churn and wasted LLM calls on unchanged data). */
   private async synthesizePersona(): Promise<number | undefined> {
-    const memories = this.store.getActiveMemories(this.settings.personaMaxMemories);
+    // Clean, user-only synthesis: global scope + fact/preference kinds + PROVENANCE
+    // user. persona-provenance rows are themselves synthesized text; feeding them
+    // back would let generated content drift away from real user statements.
+    const memories = this.store
+      .getActiveMemories(10_000, 0, true)
+      .filter((m) => m.meta?.provenance === "user")
+      .filter((m) => m.meta?.scope === "global" && (m.kind === "fact" || m.kind === "preference"))
+      .slice(0, this.settings.personaMaxMemories);
     if (memories.length === 0) return undefined;
-    const prev = this.store.getPersona();
+    const candidatePrev = this.store.getPersona();
+    // Pre-M7 personas were synthesized from contaminated task-local instructions;
+    // preserve them for audit but never feed them forward into the trusted profile.
+    const prev = candidatePrev && candidatePrev.createdAt >= this.store.migrationAppliedAt() ? candidatePrev : undefined;
+    if (prev && memories.filter((m) => m.createdAt > prev.createdAt).length < 3) {
+      return prev.ver;
+    }
     const input = [
       prev ? `## Previous persona (for incremental reference)\n${prev.content}\n` : "",
       "## New memories\n" + memories.map((m) => `- [${m.kind}] ${m.content}`).join("\n"),
@@ -104,15 +127,6 @@ export class Consolidator {
       return undefined;
     }
     const ver = this.store.savePersona(content);
-    // Persona vector (lets recall retrieve the persona section; failure is non-blocking)
-    if (this.embedding) {
-      try {
-        const [vec] = await this.embedding.embed([content]);
-        if (vec?.length) this.store.upsertEmbedding(`persona:${ver}`, vec);
-      } catch {
-        /* noop */
-      }
-    }
     return ver;
   }
 }

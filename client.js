@@ -124,6 +124,12 @@ window.__ModuleLoader__.load({
         "• Recall injection: pre-turn injection (off = tools still allow manual search)",
         "• Tools: memory_search / memory_correct / memory_forget model-visible tools",
         "",
+        "[Conservative policy (hermes defaults)]",
+        "• Extraction provenanceFilter=strict + requireEvidence=true: only human-confirmed memories with evidence enter the store",
+        "• Recall is gated by relevance margin (0.5), importance floor, and a 4-memories-per-turn injection cap",
+        "• Scene grouping (L2) is off by default — recall uses the curated baseline + contextual search",
+        "• Skill synthesis is off by default; enable it under Self-evolution if wanted",
+        "",
         "[Usage]",
         "• Type \"/\" in the chat input to open the command menu: /memory status, /memory list, /memory search <q>, /memory forget <id>, /memory correct <id> <text>",
         "• The model auto-uses memory tools (memory_search etc.) — no manual action needed",
@@ -150,7 +156,7 @@ window.__ModuleLoader__.load({
       groupHousekeeping: "Growth governance",
       groupReview: "Nightly review (daily full evolution)",
       save: "Save",
-      reset: "Reset",
+      reset: "Reset to defaults",
       saved: "Saved — applied immediately",
       saving: "Saving…",
       error: "Save failed",
@@ -177,10 +183,20 @@ window.__ModuleLoader__.load({
       fDedup: "Dedup (token overlap)",
       fFallback: "Fallback to summary on bad JSON",
       fFlushDrain: "Drain extraction before headless exit",
+      fProvenance: "Extraction provenance filter",
+      fProvenanceHint: "strict (recommended) = only memories confirmed as human-authored/curated enter the long-term store; assistant-generated or unverified content stays out. off disables the filter (not recommended).",
+      fRequireEvidence: "Require extraction evidence",
+      fRequireEvidenceHint: "When on, memories the extraction model produced without quoting evidence from the conversation are rejected — the conservative default.",
       fStrategy: "Recall strategy",
       fStrategyHint: "keyword = pure keyword (default, no embedding calls); hybrid = keyword + vector fusion (requires an Embedding endpoint below; auto-falls back to keyword if unset).",
       fMaxResults: "Max recall results",
       fScoreThreshold: "Score threshold (0 = off)",
+      fRelevanceMargin: "Relevance margin (0–1)",
+      fRelevanceMarginHint: "How strict the injection gate is: 0.5 (default) injects only clearly relevant memories; lower values inject more noise — keep it high for conservative behavior.",
+      fRecallMinImportance: "Min importance to inject (0 = off)",
+      fRecallMinImportanceHint: "Memories below this importance are never injected; 0 = no filter.",
+      fMaxInjectPerTurn: "Max memories injected per turn",
+      fMaxInjectPerTurnHint: "Hard cap on injected memory blocks per turn (default 4) to keep prompts clean; 0 = unlimited (not recommended).",
       fRecallTimeout: "Recall timeout (ms)",
       fEmbBase: "Embedding Base URL (blank = keyword only)",
       fEmbKey: "Embedding API Key (write-only)",
@@ -188,6 +204,8 @@ window.__ModuleLoader__.load({
       fEmbDims: "Vector dimensions",
       fEmbTimeout: "Embedding timeout (ms)",
       fSceneMax: "Memories for scene grouping",
+      fScenesEnabled: "Scene grouping (L2 scenes)",
+      fScenesEnabledHint: "Default off: recall uses the curated baseline + contextual search; enabling generates scene blocks at the nightly review.",
       fPersonaMax: "Memories for persona",
       fSceneBatch: "Max memories per scene",
       fDecay: "Forgetting decay",
@@ -268,6 +286,12 @@ window.__ModuleLoader__.load({
         "• Recall injection: pre-turn injection (off = tools still allow manual search)",
         "• Tools: memory_search / memory_correct / memory_forget model-visible tools",
         "",
+        "[Conservative policy (hermes defaults)]",
+        "• Extraction provenanceFilter=strict + requireEvidence=true: only human-confirmed memories with evidence enter the store",
+        "• Recall is gated by relevance margin (0.5), importance floor, and a 4-memories-per-turn injection cap",
+        "• Scene grouping (L2) is off by default — recall uses the curated baseline + contextual search",
+        "• Skill synthesis is off by default; enable it under Self-evolution if wanted",
+        "",
         "[Usage]",
         "• Type \"/\" in the chat input to open the command menu: /memory status, /memory list, /memory search <q>, /memory forget <id>, /memory correct <id> <text>",
         "• The model auto-uses memory tools (memory_search etc.) — no manual action needed",
@@ -294,7 +318,7 @@ window.__ModuleLoader__.load({
       groupHousekeeping: "Growth governance",
       groupReview: "Nightly review (daily full evolution)",
       save: "Save",
-      reset: "Reset",
+      reset: "Reset to defaults",
       saved: "Saved — applied immediately",
       saving: "Saving…",
       error: "Save failed",
@@ -321,10 +345,20 @@ window.__ModuleLoader__.load({
       fDedup: "Dedup (token overlap)",
       fFallback: "Fallback to summary on bad JSON",
       fFlushDrain: "Drain extraction before headless exit",
+      fProvenance: "Extraction provenance filter",
+      fProvenanceHint: "strict (recommended) = only memories confirmed as human-authored/curated enter the long-term store; assistant-generated or unverified content stays out. off disables the filter (not recommended).",
+      fRequireEvidence: "Require extraction evidence",
+      fRequireEvidenceHint: "When on, memories the extraction model produced without quoting evidence from the conversation are rejected — the conservative default.",
       fStrategy: "Recall strategy",
       fStrategyHint: "keyword = pure keyword (default, no embedding calls); hybrid = keyword + vector fusion (requires an Embedding endpoint below; auto-falls back to keyword if unset).",
       fMaxResults: "Max recall results",
       fScoreThreshold: "Score threshold (0 = off)",
+      fRelevanceMargin: "Relevance margin (0–1)",
+      fRelevanceMarginHint: "How strict the injection gate is: 0.5 (default) injects only clearly relevant memories; lower values inject more noise — keep it high for conservative behavior.",
+      fRecallMinImportance: "Min importance to inject (0 = off)",
+      fRecallMinImportanceHint: "Memories below this importance are never injected; 0 = no filter.",
+      fMaxInjectPerTurn: "Max memories injected per turn",
+      fMaxInjectPerTurnHint: "Hard cap on injected memory blocks per turn (default 4) to keep prompts clean; 0 = unlimited (not recommended).",
       fRecallTimeout: "Recall timeout (ms)",
       fEmbBase: "Embedding Base URL (blank = keyword only)",
       fEmbKey: "Embedding API Key (write-only)",
@@ -332,6 +366,8 @@ window.__ModuleLoader__.load({
       fEmbDims: "Vector dimensions",
       fEmbTimeout: "Embedding timeout (ms)",
       fSceneMax: "Memories for scene grouping",
+      fScenesEnabled: "Scene grouping (L2 scenes)",
+      fScenesEnabledHint: "Default off: recall uses the curated baseline + contextual search; enabling generates scene blocks at the nightly review.",
       fPersonaMax: "Memories for persona",
       fSceneBatch: "Max memories per scene",
       fDecay: "Forgetting decay",
@@ -409,15 +445,21 @@ window.__ModuleLoader__.load({
       { path: ["extract", "dedup"], label: "fDedup", type: "checkbox", group: "groupExtract" },
       { path: ["extract", "fallbackOnBadJson"], label: "fFallback", type: "checkbox", group: "groupExtract" },
       { path: ["extract", "flushDrain"], label: "fFlushDrain", type: "checkbox", group: "groupExtract" },
+      { path: ["extract", "provenanceFilter"], label: "fProvenance", type: "select", options: ["strict", "off"], includeBlank: false, fallback: "strict", hint: "fProvenanceHint", group: "groupExtract" },
+      { path: ["extract", "requireEvidence"], label: "fRequireEvidence", type: "checkbox", group: "groupExtract" },
       { path: ["recall", "strategy"], label: "fStrategy", type: "select", options: ["keyword", "hybrid"], hint: "fStrategyHint", group: "groupRecall" },
       { path: ["recall", "maxResults"], label: "fMaxResults", type: "number", group: "groupRecall" },
       { path: ["recall", "scoreThreshold"], label: "fScoreThreshold", type: "number", group: "groupRecall" },
+      { path: ["recall", "relevanceMargin"], label: "fRelevanceMargin", type: "number", hint: "fRelevanceMarginHint", group: "groupRecall" },
+      { path: ["recall", "minImportance"], label: "fRecallMinImportance", type: "number", hint: "fRecallMinImportanceHint", group: "groupRecall" },
+      { path: ["recall", "maxInjectPerTurn"], label: "fMaxInjectPerTurn", type: "number", hint: "fMaxInjectPerTurnHint", group: "groupRecall" },
       { path: ["recall", "timeoutMs"], label: "fRecallTimeout", type: "number", group: "groupRecall" },
       { path: ["recall", "embedding", "baseUrl"], label: "fEmbBase", type: "text", group: "groupRecall" },
       { path: ["recall", "embedding", "apiKey"], label: "fEmbKey", type: "password", secret: true, group: "groupRecall" },
       { path: ["recall", "embedding", "model"], label: "fEmbModel", type: "text", group: "groupRecall" },
       { path: ["recall", "embedding", "dimensions"], label: "fEmbDims", type: "number", group: "groupRecall" },
       { path: ["recall", "embedding", "timeoutMs"], label: "fEmbTimeout", type: "number", group: "groupRecall" },
+      { path: ["consolidate", "scenesEnabled"], label: "fScenesEnabled", type: "checkbox", group: "groupConsolidate" },
       { path: ["consolidate", "sceneMaxMemories"], label: "fSceneMax", type: "number", group: "groupConsolidate" },
       { path: ["consolidate", "personaMaxMemories"], label: "fPersonaMax", type: "number", group: "groupConsolidate" },
       { path: ["consolidate", "sceneBatchSize"], label: "fSceneBatch", type: "number", group: "groupConsolidate" },
@@ -462,11 +504,10 @@ window.__ModuleLoader__.load({
       var [showHelp, setShowHelp] = react.useState(false);
 
       react.useEffect(function () {
-        scope.load();
         var alive = true;
         var sync = function () { if (alive) setSnapshot(scope.getSnapshot()); };
         var un = typeof scope.subscribe === "function" ? scope.subscribe(sync) : null;
-        return function () { alive = false; if (un) un(); if (scope.dispose) scope.dispose(); };
+        return function () { alive = false; if (un) un(); };
       }, [scope]);
       react.useEffect(function () {
         if (ready) setDraft(Object.assign({}, valueToDraft(snapshot.value)));
@@ -483,6 +524,13 @@ window.__ModuleLoader__.load({
 
       function fieldDraft(f) {
         if (f.type === "checkbox") return draft[f.key] !== void 0 ? draft[f.key] : Boolean(getPath(value, f.path));
+        // Select fields may carry a schema-default fallback so an unset (or never-initialized
+        // empty-draft) value still renders a valid option — valueToDraft writes "" for unset
+        // selects, so treat both undefined and "" as unset here.
+        if (f.type === "select" && (draft[f.key] === void 0 || draft[f.key] === "") && f.fallback !== void 0) {
+          var cur = getPath(value, f.path);
+          return cur === void 0 || cur === null || cur === "" ? String(f.fallback) : String(cur);
+        }
         return draft[f.key] !== void 0 ? draft[f.key] : String(getPath(value, f.path) ?? "");
       }
       function setField(f, v) {
@@ -498,7 +546,7 @@ window.__ModuleLoader__.load({
         var detail = response && response.result && response.result.error || {};
         var msg = String(detail.message || detail.code || "unknown");
         if (/changed since it was read|revision conflict/i.test(msg)) {
-          scope.load(); // refresh the snapshot (draft is left untouched)
+          // The shared settings mirror refreshes snapshots automatically.
           setError(t("conflict"));
           return;
         }
@@ -526,6 +574,8 @@ window.__ModuleLoader__.load({
           }
           if (f.type === "select") {
             if (String(d) === String(current ?? "")) continue;
+            // An unset field rendering its schema fallback equals the default: no write needed
+            if (String(current ?? "") === "" && f.fallback !== void 0 && String(d) === String(f.fallback)) continue;
             ops.push(String(d) ? { op: "set", path: f.path, value: d } : { op: "unset", path: f.path });
             continue;
           }
@@ -542,8 +592,7 @@ window.__ModuleLoader__.load({
           if (!response.result.ok) { handleMutateFailure(response); return; }
           setBusy(false);
           setNotice(t("saved"));
-          // Note: do not rebuild the draft from the response — it may be partial data, and missing fields would render as false (turning every switch off)
-          scope.load();
+          // The shared settings mirror folds the mutation response into the scope snapshot.
         }).catch(function (e) {
           setBusy(false); setError(t("error") + ": " + String(e && e.message || e));
         });
@@ -559,7 +608,10 @@ window.__ModuleLoader__.load({
           if (!response.result.ok) { handleMutateFailure(response); return; }
           setBusy(false);
           setNotice(t("saved"));
-          scope.load();
+          // Refresh the draft from the authoritative (default-resolved) settings snapshot so
+          // controls immediately show schema defaults instead of stale pre-reset values.
+          var fresh = scope.getSnapshot();
+          if (fresh.status === "ready" && fresh.value !== void 0) setDraft(Object.assign({}, valueToDraft(fresh.value)));
         }).catch(function (e) {
           setBusy(false); setError(t("error") + ": " + String(e && e.message || e));
         });
@@ -687,7 +739,6 @@ window.__ModuleLoader__.load({
       var [closedDetailId, setClosedDetailId] = react.useState(null);
 
       react.useEffect(function () {
-        scope.load();
         var alive = true;
         var sync = function () { if (alive) setSnapshot(scope.getSnapshot()); };
         var un = typeof scope.subscribe === "function" ? scope.subscribe(sync) : null;
@@ -698,7 +749,7 @@ window.__ModuleLoader__.load({
             ops: [{ op: "set", path: ["action"], value: JSON.stringify({ op: "noop" }) }]
           });
         } catch (e) { /* noop */ }
-        return function () { alive = false; if (un) un(); if (scope.dispose) scope.dispose(); };
+        return function () { alive = false; if (un) un(); };
       }, [scope]);
 
       var data = null;
@@ -738,8 +789,9 @@ window.__ModuleLoader__.load({
       }
       function refresh() {
         setBusy(true); setNotice(null); setError(null);
-        scope.load();
-        setTimeout(function () { setBusy(false); }, 400);
+        sendAction({ op: "noop" }).catch(function (e) {
+          setError(String(e && e.message || e));
+        }).finally(function () { setBusy(false); });
       }
       function forget(m) {
         if (!window.confirm(t("browserForgetConfirm") + "\n" + m.content.slice(0, 60))) return;
@@ -892,6 +944,12 @@ window.__ModuleLoader__.load({
       ctx.effect(function () { return ctx.locale.register(NS, { zh: zh, en: en }); }, "dsh-self-improved: dictionaries");
       var scope = ctx.settingsScope.bind({ namespace: "dsh-self-improved" });
       var browserScope = ctx.settingsScope.bind({ namespace: "dsh-self-improved-browser" });
+      ctx.effect(function () {
+        return function () {
+          scope.dispose();
+          browserScope.dispose();
+        };
+      }, "dsh-self-improved: settings scopes");
       var api = ctx.connection.api;
       // Single settings section with two tabs: Config / Memory
       ctx.slots.inject("settings.section", function () {

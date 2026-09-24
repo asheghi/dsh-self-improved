@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { MemoryStore } from "../lib/storage.js";
 import { RecallService, renderRecallBlock } from "../lib/recall.js";
 
-const dir = join(process.env.TEST_DIR ?? "E:\\dshPro\\.dsh-test", "m3-unit");
+const dir = join(process.env.TEST_DIR ?? "/tmp/dsh-mem-test", "m3-unit");
 rmSync(dir, { recursive: true, force: true });
 const store = new MemoryStore(dir);
 
@@ -89,6 +89,33 @@ check("degrades to empty when embedding fails (no throw)", degradedOk);
 
 // 7) Empty query
 check("empty query returns empty", (await recall.search("  ", { maxResults: 3 })).length === 0);
+
+// 8) scoreThreshold applied compatibly with BM25 direction (negative allowed)
+// Direction: bm25 is negative for matches; smaller (more negative) = stronger.
+// A negative threshold acts as an upper bound: keep hits with score <= threshold.
+const kwScoped = new RecallService(
+  store,
+  { ...settings, strategy: "keyword", scoreThreshold: -0.001 },
+  null,
+);
+const thrHit = await kwScoped.search("prefers PowerShell", { maxResults: 3 });
+check("lenient negative threshold keeps strong BM25 hits", thrHit.some((h) => h.id === m1.id), JSON.stringify(thrHit.map((h) => h.score)));
+const cutoffStore = new MemoryStore(join(dir, "cutoff"));
+cutoffStore.insertMemory({ kind: "fact", content: "Alpha beta gamma distinct tokens xqz", importance: 9 });
+const thrStrict = new RecallService(
+  cutoffStore,
+  { strategy: "keyword", maxResults: 5, scoreThreshold: -999_999, timeoutMs: 3000, relevanceMargin: 0 },
+  null,
+);
+const strictBelow = await thrStrict.search("alpha beta gamma distinct tokens xqz", {});
+check("negative threshold drops rows above the bm25 bound (direction preserved)", strictBelow.length === 0, JSON.stringify(strictBelow.map((h) => h.score)));
+const thrStrength = new RecallService(
+  cutoffStore,
+  { strategy: "keyword", maxResults: 5, scoreThreshold: 9_999_999, timeoutMs: 3000, relevanceMargin: 0 },
+  null,
+);
+check("positive legacy threshold = strength floor (drops everything here)", (await thrStrength.search("alpha beta", {})).length === 0);
+cutoffStore.close();
 
 store.close();
 console.log(failed === 0 ? "\nALL PASS ✅" : `\n${failed} FAILED ❌`);

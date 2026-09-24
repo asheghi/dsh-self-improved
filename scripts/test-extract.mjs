@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { MemoryStore } from "../lib/storage.js";
 import { Extractor } from "../lib/extract.js";
 
-const dir = join(process.env.TEST_DIR ?? "E:\\dshPro\\.dsh-test", "m2-unit");
+const dir = join(process.env.TEST_DIR ?? "/tmp/dsh-mem-test", "m2-unit");
 rmSync(dir, { recursive: true, force: true });
 const store = new MemoryStore(dir);
 
@@ -35,6 +35,7 @@ function seedSession(id, texts) {
     ts: Date.now(),
     text: t,
     sessionId: id,
+    sourceKind: i % 2 ? "model" : "user",
   }));
   store.appendConversationSlice(id, recs);
   store.markPending(id, recs[recs.length - 1].seq);

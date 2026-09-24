@@ -24,13 +24,13 @@ function err(text: string): CommandOutcome {
 export function handleMemoryCommand(
   store: MemoryStore,
   rawInput: string,
-  opts?: { evolve?: () => Promise<Record<string, unknown>> },
+  opts?: { evolve?: () => Promise<Record<string, unknown>>; skillsPrefix?: string },
 ): CommandOutcome {
   const args = rawInput.trim().split(/\s+/).filter(Boolean);
   const json = args.includes("--json");
   const sub = (args[0] ?? "help").toLowerCase();
   if (json && sub === "browser") {
-    return ok(JSON.stringify(browserSnapshot(store)));
+    return ok(JSON.stringify(browserSnapshot(store, opts?.skillsPrefix)));
   }
   switch (sub) {
     case "evolve": {
@@ -64,19 +64,72 @@ export function handleMemoryCommand(
       if (!id || !content) return err("Usage: /memory correct <id> <new content>");
       const old = store.getMemory(id);
       if (!old) return err(`Not found: ${id}`);
-      const rec = store.insertMemory({ kind: old.kind, content, importance: old.importance, supersedes: old.id });
+      const rec = store.insertMemory(
+        { kind: old.kind, content, importance: old.importance, supersedes: old.id },
+        {
+          // Direct command → user-initiated correction: trusted, and it INHERITS
+          // the old row's scope/project/session so context-bound corrections stay
+          // in their original scope.
+          provenance: "user",
+          source: "user-direct",
+          scope: old.meta?.scope ?? "global",
+          projectId: old.meta?.projectId ?? null,
+          sessionId: old.meta?.sessionId ?? null,
+          confidence: 0.9,
+        },
+      );
       store.setMemoryStatus(id, "corrected");
       return ok(`Corrected, new id: ${rec.id}`);
     }
     case "status": {
       const active = store.getActiveMemories(10_000).length;
+      const quarantined = store.listMemories({ status: "quarantined", limit: 10_000 }).length;
       const total = store.listMemories({ limit: 10_000 }).length;
+      const pinned = store.listBaseline().length;
       const pending = store.pendingSessions().length;
       const scenes = store.listScenes(100).length;
       const persona = store.getPersona();
       return ok(
-        `Memories: ${active} active / ${total} total; pending extraction sessions: ${pending}; scenes: ${scenes}; persona v${persona?.ver ?? "-"}`,
+        `Memories: ${active} active / ${total} total (${quarantined} quarantined); baseline: ${pinned} pinned; pending extraction sessions: ${pending}; scenes: ${scenes}; persona v${persona?.ver ?? "-"}`,
       );
+    }
+    case "pin": {
+      const id = args[1];
+      if (!id) return err("Usage: /memory pin <memory-id> [slot]");
+      const slot = Number(args[2]);
+      const assigned = Number.isInteger(slot)
+        ? store.pinBaselineSlot(id, slot)
+        : store.pinBaseline(id);
+      if (assigned === null) return err(`Cannot pin: memory not found or all slots in use (id=${id})`);
+      return ok(`Pinned to baseline slot ${assigned}`);
+    }
+    case "unpin": {
+      const slot = Number(args[1]);
+      if (!Number.isInteger(slot)) return err("Usage: /memory unpin <slot>");
+      return store.unpinBaseline(slot) ? ok(`Unpinned slot ${slot}`) : err(`Slot ${slot} is not pinned`);
+    }
+    case "baseline": {
+      const entries = store.listBaseline();
+      if (entries.length === 0) return ok("No baseline entries pinned. Pin with /memory pin <id>.");
+      return ok(entries.map((e) => `${e.slot}. ${e.memory?.content.slice(0, 100) ?? "(missing memory)"} [${e.memory?.id.slice(0, 8) ?? e.memoryId}]`).join("\n"));
+    }
+    case "accept-legacy": {
+      const id = args[1];
+      const target = id ? store.getMemory(id) : undefined;
+      if (id && !target) return err(`Not found: ${id}`);
+      let accepted = 0;
+      for (const m of target ? [target] : store.listMemories({ limit: 10_000 })) {
+        if (!m.meta?.legacy) continue;
+        // Bulk promotion deliberately leaves quarantined instructions untouched;
+        // an operator must name one exact id to restore such a row.
+        if (!target && (m.status === "quarantined" || m.status === "migrated")) continue;
+        store.updateMeta(m.id, { provenance: "user", source: "user-direct", confidence: 0.6 });
+        if (target && m.status === "quarantined") store.setMemoryStatus(m.id, "active");
+        accepted++;
+      }
+      return target
+        ? ok(accepted > 0 ? `Accepted legacy memory ${id} as user-proven` : "Nothing to accept (already accepted or not legacy)")
+        : ok(`Accepted ${accepted} legacy memories as user-proven`);
     }
     default:
       return ok(
@@ -84,6 +137,8 @@ export function handleMemoryCommand(
           "/memory search <keyword>\n" +
           "/memory list\n" +
           "/memory browser --json\n" +
+          "/memory baseline | pin <id> [slot] | unpin <slot>\n" +
+          "/memory accept-legacy [id]\n" +
           "/memory forget <id>\n" +
           "/memory correct <id> <new content>\n" +
           "/memory status",
@@ -92,7 +147,7 @@ export function handleMemoryCommand(
 }
 
 /** Memory browser snapshot (for the settings-page frontend; content truncation + count caps keep the payload small) */
-export function browserSnapshot(store: MemoryStore): Record<string, unknown> {
+export function browserSnapshot(store: MemoryStore, skillsPrefix = "dsi-"): Record<string, unknown> {
   const memories = store.listMemories({ limit: 300 }).map((m) => ({
     id: m.id,
     kind: m.kind,
@@ -103,28 +158,37 @@ export function browserSnapshot(store: MemoryStore): Record<string, unknown> {
     createdAt: m.createdAt,
     updatedAt: m.updatedAt,
     supersedes: m.supersedes ?? null,
+    // Additive meta fields (browser keeps rendering rows without them too)
+    provenance: m.meta?.provenance ?? null,
+    source: m.meta?.source ?? null,
+    scope: m.meta?.scope ?? null,
+    projectId: m.meta?.projectId ?? null,
+    legacy: m.meta?.legacy ?? false,
   }));
+  const baseline = store.listBaseline().map((b) => ({ slot: b.slot, memoryId: b.memoryId }));
   const scenes = store.listScenes(50).map((s) => ({ id: s.id, title: s.title, updatedAt: s.updatedAt }));
   const persona = store.getPersona();
   return {
     memories,
+    baseline,
     scenes,
     persona: persona ? { ver: persona.ver, content: persona.content.slice(0, 500), createdAt: persona.createdAt } : null,
-    skills: listSkills(),
+    skills: listSkills(100, skillsPrefix),
     pending: store.pendingSessions().length,
     updatedAt: Date.now(),
   };
 }
 
-/** List the skills in the skill repository (name + description + when to use + whether plugin-synthesized) */
-export function listSkills(limit = 100): Array<{
+/** List the skills in the skill repository (name + description + when to use + whether plugin-synthesized).
+ *  The synthesized flag follows the CONFIGURED synthesis prefix, not a hardcoded one. */
+export function listSkills(limit = 100, prefix = "dsi-", skillsRoot = ""): Array<{
   name: string;
   description: string;
   whenToUse: string;
   excerpt: string;
   synthesized: boolean;
 }> {
-  const root = defaultSkillsDir();
+  const root = skillsRoot.trim() || defaultSkillsDir();
   let dirNames: string[] = [];
   try {
     dirNames = readdirSync(root, { withFileTypes: true })
@@ -159,7 +223,7 @@ export function listSkills(limit = 100): Array<{
       description,
       whenToUse,
       excerpt,
-      synthesized: name.startsWith("dsi-"),
+      synthesized: !!(prefix || "").trim() && name.startsWith((prefix || "").trim()),
     });
   }
   return out;
@@ -170,7 +234,7 @@ export function listSkills(limit = 100): Array<{
 export function installMemoryCommands(
   ctx: Context,
   store: MemoryStore,
-  opts?: { evolve?: () => Promise<Record<string, unknown>>; isEnabled?: () => boolean },
+  opts?: { evolve?: () => Promise<Record<string, unknown>>; isEnabled?: () => boolean; skillsPrefix?: string },
 ): (() => void) | null {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const commands = (ctx as any).get?.("commands");
@@ -180,7 +244,7 @@ export function installMemoryCommands(
     description: "Manage the dsh-self-improved memory store (search/list/forget/correct/status/evolve)",
     // Key: the command system only takes over parameterized input (e.g. /memory status) after input is declared;
     // otherwise parameterized input is treated as "the command does not accept arguments" and falls back to a plain message sent to the LLM.
-    input: { hint: "search <term> | list | status | forget <id> | correct <id> <content> | evolve | browser" },
+    input: { hint: "search <term> | list | status | baseline | pin <id> [slot] | unpin <slot> | accept-legacy [id] | forget <id> | correct <id> <content> | evolve | browser" },
     handler: async (invocation: { rawInput?: string }) => {
       // Fallback: even if unregistration has a timing window, refuse to execute while the plugin is disabled
       if (opts?.isEnabled && !opts.isEnabled()) {

@@ -6,7 +6,7 @@ import { rmSync, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { MemoryStore } from "../lib/storage.js";
 
-const dir = join(process.env.TEST_DIR ?? "E:\\dshPro\\.dsh-test", "m1-unit");
+const dir = join(process.env.TEST_DIR ?? "/tmp/dsh-mem-test", "m1-unit");
 rmSync(dir, { recursive: true, force: true });
 
 const store = new MemoryStore(dir);

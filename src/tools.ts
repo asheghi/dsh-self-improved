@@ -5,9 +5,28 @@
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import type { Context } from "@deepseek-ai/cordis";
 import type { MemoryStore } from "./storage.js";
+import { projectKeyFromCwd } from "./capture.js";
 
 export function registerMemoryTools(ctx: Context, store: MemoryStore, defaultLimit: number): () => void {
   const disposers: Array<() => void> = [];
+  // Tool-call scope resolution: like automatic recall, tool-driven lookup stays
+  // project-aware (global rows + the caller's project only). The registry hands
+  // every execute() a ToolRunContext carrying the calling agent; its session
+  // cwd maps to the same stable project key used by capture/injection, and the
+  // agent id doubles as the self-echo session filter. A missing context
+  // (tests / registry-less dispatch) falls back to the unscoped explicit path.
+  const scopeOf = (exec: unknown): { projectId?: string | null; excludeSessionId?: string } => {
+    const agent = (exec as { agent?: { id?: unknown; session?: { header?: { cwd?: unknown } } } } | undefined)?.agent;
+    if (!agent || typeof agent !== "object") return {};
+    // DEFAULT PROJECT ISOLATION holds here too: an empty cwd resolves to the
+    // literal 'default' key, never to "no scoping".
+    const cwd = agent.session?.header?.cwd;
+    const excludeSessionId = typeof agent.id === "string" && agent.id ? agent.id : undefined;
+    return {
+      projectId: projectKeyFromCwd(typeof cwd === "string" ? cwd : ""),
+      ...(excludeSessionId ? { excludeSessionId } : {}),
+    };
+  };
   disposers.push(ctx.tools.register(defineTool({
     name: "memory_search",
     description:
@@ -34,17 +53,20 @@ export function registerMemoryTools(ctx: Context, store: MemoryStore, defaultLim
       },
       render: (_args, value) => renderMemoryHits(value),
     },
-    async execute(args) {
+    async execute(args, exec) {
       const limit = typeof args.limit === "number" ? args.limit : defaultLimit;
-      const hits = store.searchMemories(String(args.query), { limit });
-      if (typeof args.kind === "string" && args.kind) {
-        return {
-          hits: hits
-            .filter((h) => h.kind === args.kind)
-            .map((h) => ({ id: h.id, kind: h.kind, content: h.content, importance: h.importance })),
-        };
-      }
-      return { hits: hits.map((h) => ({ id: h.id, kind: h.kind, content: h.content, importance: h.importance })) };
+      const scope = scopeOf(exec);
+      const hits = store.searchMemories(String(args.query), { limit, ...scope });
+      const filtered = typeof args.kind === "string" && args.kind
+        ? hits.filter((h) => h.kind === args.kind)
+        : hits;
+      // Access accounting: only hits actually RETURNED to the model count — a
+      // kind filter applied after the query means filtered-out rows were never
+      // rendered and must not consume an access bump.
+      if (filtered.length > 0) store.recordAccess(filtered.map((h) => h.id));
+      return {
+        hits: filtered.map((h) => ({ id: h.id, kind: h.kind, content: h.content, importance: h.importance })),
+      };
     },
   })));
 
@@ -100,7 +122,7 @@ export function registerMemoryTools(ctx: Context, store: MemoryStore, defaultLim
   disposers.push(ctx.tools.register(defineTool({
     name: "memory_correct",
     description:
-      "Correct a memory: writes the new content (its supersedes field points to the old memory) and marks the old memory as corrected. Use when the user explicitly corrects something you remembered.",
+      "Stage a correction candidate when the user explicitly corrects a memory. Tool-authored arguments stay untrusted for automatic recall; the user must confirm via the direct /memory correct command or the memory browser before the corrected content is trusted.",
     parameters: {
       memory_id: { type: "string", description: "The id of the old memory to correct", required: true },
       new_content: { type: "string", description: "The corrected content (one sentence)", required: true },
@@ -110,23 +132,44 @@ export function registerMemoryTools(ctx: Context, store: MemoryStore, defaultLim
       schema: {
         type: "object",
         additionalProperties: false,
-        properties: { new_id: { type: "string" }, error: { type: "string" } },
+        properties: { new_id: { type: "string" }, pending: { type: "boolean" }, note: { type: "string" }, error: { type: "string" } },
       },
-      render: (_args, value) => [{ type: "text", text: value.new_id ? `Memory corrected, new id: ${value.new_id}` : `Correction failed: ${value.error}` }],
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      render: (_args, value) => [{ type: "text", text: renderCorrectionOutcome(value) }],
     },
     async execute(args) {
       const old = store.getMemory(String(args.memory_id));
       if (!old) return { error: "Memory not found" };
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const kind = (args.kind as any) || old.kind;
-      const record = store.insertMemory({
-        kind,
-        content: String(args.new_content),
-        importance: old.importance,
-        supersedes: old.id,
-      });
-      store.setMemoryStatus(old.id, "corrected");
-      return { new_id: record.id };
+      const requestedKind = typeof args.kind === "string" ? args.kind : "";
+      const validKinds = new Set(["fact", "preference", "event", "instruction", "persona"]);
+      if (requestedKind && !validKinds.has(requestedKind)) return { error: `Invalid memory kind: ${requestedKind}` };
+      const kind = (requestedKind || old.kind) as typeof old.kind;
+      const record = store.insertMemory(
+        {
+          kind,
+          content: String(args.new_content),
+          importance: old.importance,
+          supersedes: old.id,
+        },
+        {
+          // Tool arguments are model-authored and cannot prove a direct human assertion.
+          // Stage the candidate with derived provenance; the ORIGINAL row stays active
+          // and recallable until the user confirms the correction through the direct
+          // /memory command or the browser action (which promote the candidate and
+          // retire the old row coherently).
+          provenance: "derived",
+          source: "tool-correct",
+          scope: old.meta?.scope ?? "global",
+          projectId: old.meta?.projectId ?? null,
+          sessionId: old.meta?.sessionId ?? null,
+          confidence: 0.5,
+        },
+      );
+      return {
+        new_id: record.id,
+        pending: true,
+        note: "Correction candidate staged with UNTRUSTED provenance. The original memory remains active in recall until the user confirms the correction with /memory correct or the memory browser.",
+      };
     },
   })));
 
@@ -149,6 +192,19 @@ export function registerMemoryTools(ctx: Context, store: MemoryStore, defaultLim
     },
   })));
   return () => { for (const d of disposers) d(); };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function renderCorrectionOutcome(value: any): string {
+  if (value?.error) return `Correction failed: ${value.error}`;
+  if (value?.new_id) {
+    return [
+      `Correction candidate staged: ${value.new_id}`,
+      "The candidate carries tool-authored (derived) provenance and is NOT used in automatic recall.",
+      `The original memory stays active until the USER confirms the correction via /memory correct or the memory browser.`,
+    ].join(" ");
+  }
+  return "Correction failed: unknown error";
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
