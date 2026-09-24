@@ -257,6 +257,7 @@ window.__ModuleLoader__.load({
       browserCorrect: "Correct",
       browserForget: "Forget",
       browserCorrectPrompt: "Correct to:",
+      browserCorrectCancel: "Cancel",
       browserCorrected: "Corrected",
       browserForgetConfirm: "Forget this memory?",
       browserForgotten: "Forgotten"
@@ -419,6 +420,7 @@ window.__ModuleLoader__.load({
       browserCorrect: "Correct",
       browserForget: "Forget",
       browserCorrectPrompt: "Correct to:",
+      browserCorrectCancel: "Cancel",
       browserCorrected: "Corrected",
       browserForgetConfirm: "Forget this memory?",
       browserForgotten: "Forgotten"
@@ -737,6 +739,10 @@ window.__ModuleLoader__.load({
       var [query, setQuery] = react.useState("");
       var [notice, setNotice] = react.useState(null);
       var [closedDetailId, setClosedDetailId] = react.useState(null);
+      // Inline correction editor (replaces window.prompt, which the host page may suppress)
+      var [editingId, setEditingId] = react.useState(null);
+      var [editDraft, setEditDraft] = react.useState("");
+      var [open, setOpen] = react.useState({ persona: false, memories: true, scenes: false, skills: false });
 
       react.useEffect(function () {
         var alive = true;
@@ -799,13 +805,49 @@ window.__ModuleLoader__.load({
         sendAction({ op: "forget", id: m.id }).then(function () { setNotice(t("browserForgotten")); }).catch(function (e) { setError(String(e && e.message || e)); }).finally(function () { setBusy(false); });
       }
       function correct(m) {
-        var next = window.prompt(t("browserCorrectPrompt"), m.content);
-        if (next === null || !next.trim()) return;
+        // Open the inline editor for this row (no window.prompt: it can be suppressed and return null silently)
+        setNotice(null); setError(null);
+        setEditingId(m.id);
+        setEditDraft(m.content);
+      }
+      function cancelCorrect() {
+        setEditingId(null);
+        setEditDraft("");
+      }
+      function saveCorrect(m) {
+        var next = editDraft.trim();
+        if (!next || next === m.content) { cancelCorrect(); return; }
         setBusy(true); setNotice(null); setError(null);
-        sendAction({ op: "correct", id: m.id, content: next.trim() }).then(function () { setNotice(t("browserCorrected")); }).catch(function (e) { setError(String(e && e.message || e)); }).finally(function () { setBusy(false); });
+        sendAction({ op: "correct", id: m.id, content: next }).then(function () {
+          setNotice(t("browserCorrected"));
+          cancelCorrect();
+        }).catch(function (e) { setError(String(e && e.message || e)); }).finally(function () { setBusy(false); });
       }
 
       var listNodes = filtered.slice(0, 200).map(function (m) {
+        if (editingId === m.id) {
+          return h("div", { key: m.id, className: "__dsi_browserRow" },
+            h("div", { className: "__dsi_browserMain" },
+              h("span", { className: "__dsi_browserKind" }, (KIND_LABEL[m.kind] || m.kind) + " · " + t("browserCorrectPrompt")),
+              h("textarea", {
+                className: "__dsi_input",
+                style: { height: "auto", minHeight: 60, resize: "vertical" },
+                autoFocus: true,
+                value: editDraft,
+                disabled: busy,
+                onChange: function (e) { setEditDraft(e.target.value); },
+                onKeyDown: function (e) {
+                  if (e.key === "Escape") { e.preventDefault(); cancelCorrect(); }
+                  else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); saveCorrect(m); }
+                }
+              })
+            ),
+            h("span", { className: "__dsi_browserOps" },
+              h("button", { type: "button", className: "__dsi_btn", onClick: function () { saveCorrect(m); }, disabled: busy || !editDraft.trim() }, t("save")),
+              h("button", { type: "button", className: "__dsi_btn", onClick: cancelCorrect, disabled: busy }, t("browserCorrectCancel"))
+            )
+          );
+        }
         return h("div", { key: m.id, className: "__dsi_browserRow" },
           h("div", { className: "__dsi_browserMain" },
             h("span", { className: "__dsi_browserKind" }, KIND_LABEL[m.kind] || m.kind),
@@ -845,8 +887,7 @@ window.__ModuleLoader__.load({
           ) : null);
       });
 
-      // Collapsible panels (persona/memories/scenes/skills)
-      var [open, setOpen] = react.useState({ persona: false, memories: true, scenes: false, skills: false });
+      // Collapsible panels (persona/memories/scenes/skills); hook state declared above early returns
       function toggle(k) {
         setOpen(function (p) { var n = Object.assign({}, p); n[k] = !n[k]; return n; });
       }
