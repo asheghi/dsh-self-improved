@@ -13,7 +13,8 @@ import { Extractor, renderPrompt } from "../lib/extract.js";
 import { installRecallInjection } from "../lib/inject.js";
 import { gate as dedupeGate } from "../lib/dedupe.js";
 import { registerMemoryTools } from "../lib/tools.js";
-import { toSlice } from "../lib/capture.js";
+import { isDelegatedHeader, toSlice } from "../lib/capture.js";
+import { sanitizePersonaContent } from "../lib/consolidate.js";
 import { runMigration } from "./migrate-hermes.mjs";
 
 const root = join(process.env.TEST_DIR ?? "/tmp/dsh-mem-test", "hermes");
@@ -47,6 +48,22 @@ const oldPrompt = renderPrompt(
   10_000,
 );
 check("old slices without sourceKind stay untrusted", !oldPrompt.includes("old slice without sourceKind") && oldPrompt.includes("trusted human slice"), oldPrompt);
+
+// Delegated-session hardening: the SessionHeader is the deterministic signal.
+check("header marks origin:subagent delegated", isDelegatedHeader({ origin: "subagent" }) === true);
+check("header marks delegationDepth>0 delegated", isDelegatedHeader({ delegationDepth: 2 }) === true);
+check("header marks parentSession delegated", isDelegatedHeader({ parentSession: "session-p" }) === true);
+check("top-level header (no fields) is human", isDelegatedHeader({ delegationDepth: 0 }) === false);
+check("missing header is human", isDelegatedHeader(null) === false);
+
+// In a delegated session even a source.kind=user turn is the COORDINATOR's task
+// brief — it must never be captured as a direct-human 'user' slice.
+const coordSlice = toSlice("delegated-test", { type: "user/message", seq: 4, time: 0, data: { content: "coordinator task brief: implement provenance hardening", source: { kind: "user" } } }, { delegated: true });
+check("delegated human-kind turn captured as coordinator", coordSlice?.type === "tool" && coordSlice?.injected === true && coordSlice?.sourceKind === "coordinator", JSON.stringify(coordSlice));
+const relaySlice = toSlice("delegated-test", { type: "user/message", seq: 5, time: 0, data: { content: "plugin relay text", source: { kind: "plugin", plugin: "x" } } }, { delegated: true });
+check("delegated plugin turn keeps its source kind and is injected", relaySlice?.type === "tool" && relaySlice?.injected === true && relaySlice?.sourceKind === "plugin", JSON.stringify(relaySlice));
+const coordPrompt = renderPrompt([coordSlice, { ...coordSlice, type: "user" }, humanSlice], 10_000);
+check("coordinator slices are unextractable", !coordPrompt.includes("coordinator task brief") && coordPrompt.includes("direct human text"), coordPrompt);
 
 // =====================================================================
 // A) Legacy DB migration → quarantine + duplicate collapse + non-injectable
@@ -293,6 +310,43 @@ check("extraction prompt excludes injected + tool slices",
   promptProbe.includes("real user request") && !promptProbe.includes("tool stdout") && !promptProbe.includes("system injected"),
   promptProbe.slice(0, 120),
 );
+
+// =====================================================================
+// D2) Persona sanitization: duplicated / truncated completions
+// =====================================================================
+{
+  // Observed v56 shape: a first document ending in an empty "## Known Conventions"
+  // followed by a second, re-emitted document — saved as ONE persona version.
+  const duplicated = [
+    "## Basic Info",
+    "- Runs a headless Ubuntu home server [fact]",
+    "",
+    "## Preferences & Habits",
+    "- Uses the home server for AI workloads [fact]",
+    "",
+    "## Working Style",
+    "- Offloads heavier AI tasks to the home server [fact]",
+    "",
+    "## Known Conventions",
+    "## Basic Info",
+    "- Runs a headless Ubuntu home server [fact]",
+    "",
+    "## Working Style",
+    "- Offloads heavier AI tasks to the home server [fact]",
+  ].join("\n");
+  const cleaned = sanitizePersonaContent(duplicated);
+  check("persona sanitizer cuts a repeated document at the first repeated heading",
+    (cleaned.match(/^## Basic Info/mg) ?? []).length === 1 && !cleaned.endsWith("## Known Conventions"), cleaned);
+  // v55 shape: truncated document whose final heading has an empty body
+  check("persona sanitizer drops dangling trailing headings",
+    sanitizePersonaContent("## Basic Info\n- Owns an Asus G16 laptop [fact]\n\n## Known Conventions").endsWith("- Owns an Asus G16 laptop [fact]"));
+  check("persona sanitizer keeps a complete document untouched",
+    sanitizePersonaContent("## Basic Info\n- A [fact]\n\n## Preferences & Habits\n- B [preference]") ===
+    "## Basic Info\n- A [fact]\n\n## Preferences & Habits\n- B [preference]");
+  check("persona sanitizer ignores headings inside code fences",
+    sanitizePersonaContent("## Known Conventions\n- x [fact]\n```bash\n# comment only\n```\n- y [fact]") !== "");
+  check("persona sanitizer preserves empty input as empty", sanitizePersonaContent("") === "");
+}
 
 // =====================================================================
 // E) Injection: session-scoped cache, stacking cap, generic greeting

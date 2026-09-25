@@ -27,9 +27,11 @@ export type MemoryStatus = "active" | "decayed" | "forgotten" | "corrected" | "q
 /**
  * Provenance of the content, decided before insertion:
  * user / assistant / derived = legitimate memory input;
+ * coordinator = text authored by a delegating coordinator (task brief) captured in
+ * a delegated subagent session — preserved for audit but NEVER injectable;
  * system / tool / skill / unknown = must never be injected (legacy or captured system text).
  */
-export type MemoryProvenance = "user" | "assistant" | "derived" | "system" | "tool" | "skill" | "unknown" | "persona";
+export type MemoryProvenance = "user" | "assistant" | "derived" | "system" | "tool" | "skill" | "unknown" | "persona" | "coordinator";
 export type MemorySource =
   | "llm-extract"
   | "user-direct"

@@ -33,8 +33,55 @@ Output only one JSON object: {"scenes":[{"title":"title","summary":"body Markdow
 
 export const PERSONA_SYSTEM_PROMPT = `You are a user persona analyst. Based on user-related memories in the memory store, maintain a concise user persona (Markdown):
 - Structure: ## Basic Info / ## Preferences & Habits / ## Working Style / ## Known Conventions
+- Output EXACTLY ONE document with each of the four sections at most once, in that order. Never write a second draft, a revised copy, or repeat a section.
 - Only write content backed by evidence, tagging the source kind (fact/preference); leave a section empty when there is nothing for it.
 - Output plain Markdown text only — no JSON, no explanations.`;
+
+/**
+ * Why personas could duplicate (observed on version 56): the content is assembled
+ * by joining every text block of the completion stream with no structural check.
+ * A provider that re-emits a corrected/retried completion (or the model writing a
+ * first draft and then a "final" one) yields two complete persona documents
+ * back-to-back inside ONE text block — v56 was exactly that: a first document
+ * ending in an empty "## Known Conventions" followed by a second, richer copy.
+ * Also seen: a truncated first document whose final section heading has an empty
+ * body ("## Known Conventions" with nothing under it — v55's shape).
+ *
+ * Defensive fix assembled here (deterministic, LLM-independent):
+ *  1) cut the text at the first REPEATED `##` section heading (the first document wins);
+ *  2) strip dangling section headings that carry no content (truncation artifact).
+ * The saved persona always has each section heading at most once.
+ */
+export function sanitizePersonaContent(raw: string): string {
+  const text = raw.replace(/\r\n/g, "\n").trim();
+  if (!text) return "";
+  const lines = text.split("\n");
+  const seen = new Set<string>();
+  let inFence = false;
+  let kept: string[] = [];
+  for (const line of lines) {
+    if (/^(```|~~~)/.test(line.trim())) inFence = !inFence;
+    if (!inFence) {
+      const heading = /^(#+)\s+(.+?)\s*$/.exec(line);
+      if (heading) {
+        const key = `${heading[1].length}:${heading[2].toLowerCase()}`;
+        if (seen.has(key)) break; // second (repeated) document begins here
+        seen.add(key);
+      }
+    }
+    kept.push(line);
+  }
+  // Drop trailing dangling headings (a section heading — or run of them — with no content lines after it)
+  while (kept.length > 0) {
+    const last = kept[kept.length - 1].trim();
+    if (last === "" || /^#+\s+/.test(last)) {
+      kept = kept.slice(0, -1);
+      continue;
+    }
+    break;
+  }
+  return kept.join("\n").trimEnd();
+}
 
 export class Consolidator {
   constructor(
@@ -121,7 +168,9 @@ export class Consolidator {
       "## New memories\n" + memories.map((m) => `- [${m.kind}] ${m.content}`).join("\n"),
     ].join("\n");
     const signal = AbortSignal.timeout(180_000);
-    const content = (await this.callLlm({ system: PERSONA_SYSTEM_PROMPT, user: input, signal })).trim();
+    // Sanitize the assembled stream text: a retried/duplicated completion must not
+    // land as two persona documents (see sanitizePersonaContent).
+    const content = sanitizePersonaContent(await this.callLlm({ system: PERSONA_SYSTEM_PROMPT, user: input, signal }));
     if (!content) {
       console.warn("[dsh-self-improved] persona synthesis returned empty output");
       return undefined;

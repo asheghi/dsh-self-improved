@@ -27,11 +27,14 @@ export function installCapture(
 
   ctx.on("session/flush", async (session) => {
     if (!controller.enabled()) return;
+    // Delegated-session classification is decided once per session from its
+    // immutable header and applied to every slice captured below.
+    const captureCtx: SessionCaptureContext = { delegated: isDelegatedHeader(session.header) };
     const floor = lastWritten.get(session.id) ?? 0;
     const records: ConversationSliceRecord[] = [];
     for (const event of session.events) {
       if (event.seq <= floor) continue;
-      const slice = toSlice(session.id, event);
+      const slice = toSlice(session.id, event, captureCtx);
       if (slice) records.push(slice);
     }
     if (records.length > 0) {
@@ -65,18 +68,44 @@ function isDirectHumanMessage(data: Record<string, unknown> | undefined): boolea
   return sourceKindOf(data) === "user";
 }
 
-/** Convert a session event into a slice record; non-text events (such as turn/start, tool/call) return null */
-export function toSlice(sessionId: string, event: SessionEventLike): ConversationSliceRecord | null {
+/**
+ * Convert a session event into a slice record; non-text events (such as turn/start, tool/call) return null.
+ *
+ * `captureCtx` carries the session-level delegation classification: in a delegated
+ * session, even a source.kind === 'user' turn is the COORDINATOR's task brief or a
+ * parent-relayed message, never a human utterance — it is captured as a
+ * non-extractable 'coordinator' slice (type tool/injected), so an L1 extractor can
+ * never mistake coordinator-authored text for the human operator's voice.
+ */
+export function toSlice(
+  sessionId: string,
+  event: SessionEventLike,
+  captureCtx: SessionCaptureContext = { delegated: false },
+): ConversationSliceRecord | null {
   const ts = typeof event.time === "number" ? event.time : Date.now();
   const data = event.data as Record<string, unknown> | undefined;
   switch (event.type) {
     case "user/message": {
       const sourceKind = sourceKindOf(data);
-      const directHuman = isDirectHumanMessage(data);
+      const directHuman = isDirectHumanMessage(data) && !captureCtx.delegated;
       // Unknown and plugin-defined producers are untrusted by default. They remain
       // captured as non-extractable audit slices rather than being mistaken for humans.
       const text = textOfContent(data?.content);
       if (!text) return null;
+      if (captureCtx.delegated) {
+        // The delegation prompt and any later relayed parent text inside a child
+        // session: explicit coordinator classification (verbatim task brief text,
+        // NOT spoken user phrasing).
+        return {
+          type: "tool",
+          seq: event.seq,
+          ts,
+          text,
+          sessionId,
+          injected: true,
+          sourceKind: sourceKind === "user" ? "coordinator" : sourceKind,
+        };
+      }
       return { type: directHuman ? "user" : "tool", seq: event.seq, ts, text, sessionId, injected: !directHuman, sourceKind };
     }
     case "assistant/message": {
@@ -114,3 +143,37 @@ function textOfContent(content: unknown): string {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type SessionEventLike = { type: string; seq: number; time?: number; data?: any };
+
+/**
+ * The capture context of one session: enough header facts to decide whether the
+ * session's user-role turns were spoken by the human operator or written by a
+ * delegating coordinator.
+ */
+export interface SessionCaptureContext {
+  /** True when the session was spawned by a delegation tool call (subagent/send_message/fork/workflow). */
+  delegated: boolean;
+}
+
+/**
+ * Distinguishing signal (deterministic, from the persisted SessionHeader):
+ * the harness SubAgent service stamps every delegate child session with
+ * `origin: 'subagent'`, `delegationDepth >= 1`, and the `parentSession` id of
+ * the delegating session, while a top-level operator session has `delegationDepth 0`
+ * (zero/absent, no `origin`). Because this decision reads only the immutable
+ * session header, resume/restart cannot reclassify a session, and the one tool
+ * that sponsors the prompt (`subagent`, subagent_fork, send_message, workflow
+ * agents) is caught uniformly — including nested (depth ≥ 2) sessions.
+ * In a delegated session the delegator's task brief arrives as that session's
+ * FIRST user-role message (source.kind === 'user' like any other turn), so the
+ * message source kind alone is NOT sufficient — the header flag is.
+ */
+export function isDelegatedHeader(header: unknown): boolean {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const h = header as null | Record<string, any>;
+  if (!h || typeof h !== "object") return false;
+  // Origin stamped by the subagent service is the primary, explicit signal.
+  if (h.origin === "subagent") return true;
+  const depth = typeof h.delegationDepth === "number" ? h.delegationDepth : 0;
+  if (depth > 0) return true;
+  return typeof h.parentSession === "string" && h.parentSession.length > 0;
+}
