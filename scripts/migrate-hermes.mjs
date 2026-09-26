@@ -2,8 +2,9 @@
 /**
  * One-shot Hermes migration for an existing memory store.
  *
- * What it does (idempotent — safe to re-run; a second run makes no changes):
- *  1. Backs up memory.db → memory.db.pre-hermes.bak (before any destructive-ish step).
+ * What it does (safe to re-run: memory rows change only when legacy near-duplicates exist):
+ *  1. Opening the store backs up a pre-hermes memory.db to memory.db.pre-hermes.bak before any DDL
+ *     (skipped when the store is already migrated or a backup exists; backup failure only warns).
  *  2. Opens the store, which applies the additive v1 migration: provenance backfill
  *     (every pre-upgrade row becomes provenance=unknown/source=legacy → never injected
  *     until /memory accept-legacy promotes it) and kind=instruction quarantine.
@@ -14,7 +15,10 @@
  *  5. Writes a JSON summary to memory/migration-log/.
  *
  * Usage:
- *   node scripts/migrate-hermes.mjs --dir ~/.dsh/memory [--dry-run] [--fixtureName memdb] [--jaccard 0.92]
+ *   node scripts/migrate-hermes.mjs --dir ~/.dsh/memory [--dry-run|--no-dry-run] [--jaccard 0.92]
+ *
+ * The npm script (`pnpm run migrate:hermes`) bakes in --dry-run; append --no-dry-run
+ * after `--` for the real, backup-creating run.
  *
  * --dry-run analyzes a transactionally consistent temporary SQLite snapshot;
  * the source database, sidecars, schema version, and filesystem remain unchanged.
@@ -30,6 +34,7 @@ function parseArgs(argv) {
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--dry-run") args.dryRun = true;
+    else if (a === "--no-dry-run") args.dryRun = false;
     else if (a === "--dir") args.dir = argv[++i] ?? "";
     else if (a === "--jaccard") args.jaccard = Number(argv[++i]) || 0.92;
   }
@@ -69,7 +74,7 @@ export async function runMigration(dir, { dryRun = false, jaccardThreshold = 0.9
   const store = new MemoryStore(workingDir);
   try {
     const rows = store.listMemories({ limit: 1_000_000 });
-    // ③ Duplicate collapse among LEGACY rows only. Pre-hermes source is meta.legacy:
+    // 3) Duplicate collapse among LEGACY rows only. Pre-hermes source is meta.legacy:
     // trusted post-migration memories created after the upgrade are never mutated
     // by a re-run of the standalone script.
     const collapsible = (r) =>
@@ -95,7 +100,7 @@ export async function runMigration(dir, { dryRun = false, jaccardThreshold = 0.9
           migratedOut.push({ loser: loser.id, winner: winner.id, similarity: sim });
           mutated++;
           // The current pivot was demoted; stop comparing through it (its remaining
-          // pairs belong to the winner's iteration — the old loop kept scanning with
+          // pairs belong to the winner's iteration (the old loop kept scanning with
           // the demoted pivot and demoted pairs twice, corrupting supersedes chains).
           if (loser === c) break;
         }

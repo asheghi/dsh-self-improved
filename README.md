@@ -1,136 +1,162 @@
 # dsh-self-improved
 
-**Long-term memory & self-evolving plugin** for DeepSeek Harness (fully local).
+**Give your DeepSeek Harness agent a memory: fully local.**
 
-> Status: M0–M6 complete and deployed to a real environment (web profile), **upgraded with the Hermes-conservative memory policy** on top (see "What changed" below). Design/research docs stay local only (see `.gitignore`).
+![license](https://img.shields.io/badge/license-MIT-green) ![node](https://img.shields.io/badge/node-%E2%89%A522.16-blue)
 
-## What it is
+`dsh-self-improved` is a plugin for **DeepSeek Harness (DSH)**: **cross-session long-term memory** and **self-evolution** in local SQLite + JSONL storage.
 
-Adds the two missing capabilities to DSH — "cross-session memory + self-evolution":
+## Why would I need this?
 
-- **Memory**: automatically distills key points from conversations (facts / preferences / events / instructions) into a local memory store; before each new turn, relevant memories are injected to the model — the AI "remembers you".
-- **Self-evolution**: memories are consolidated, decayed and corrected; successful workflows can be distilled into reusable skills; the user persona keeps evolving with conversations.
+Without it, every new DSH session starts blank:
 
-The architecture follows the four-layer memory pyramid of TencentDB Agent Memory (L0 capture → L1 extraction → L2 scene grouping → L3 persona), but **reuses DSH-native services** (`ctx.llm` / `session` events / `agent/pre-step` injection / `dsh-skill` / `storageDomain`) with a fully local SQLite store (FTS5 + sqlite-vec). No data is uploaded anywhere.
+- **You repeat yourself.** Stack, server, conventions, preferences: re-explained every session.
+- **Good decisions evaporate.** The agent re-litigates settled questions and re-makes settled mistakes.
+- **No persona builds up.**
 
-## What changed (Hermes-conservative upgrade)
+With it, the agent walks in already knowing what you taught it before, and what worked can be distilled into reusable skills (opt-in).
 
-The older "M0–M6 behavior all unchanged" claim no longer holds — the memory policy itself has been made deliberately conservative (Hermes-style), with high-signal-by-default behavior:
+## What you get
 
-- **High-signal model, not high-volume.** Only memories that are (a) confirmed as coming from *direct human* input, (b) backed by quoted evidence in the conversation, and (c) not task/session-local become durable memories. Assistant-generated or unverified prose does **not** silently enter the store.
-  - `extract.provenanceFilter: "strict"` (default) + `extract.requireEvidence: true` (default). Setting these to `off`/`false` reopens the old permissive pipeline (not recommended).
-- **Curated baseline vs contextual recall.** Recall injection distinguishes a small **system-curated baseline** (pinned, human-corroborated profile facts) from **scoped contextual recall** (only memories matching the current question — project/session-scoped, ranked by relevance). Generic prompts ("hi", "continue") inject **nothing**.
-- **Injection gating.** `recall.relevanceMargin` (default 0.5), `recall.minImportance` (default 0 = off), and `recall.maxInjectPerTurn` (default 4) keep injected blocks short and relevant.
-- **Automatic consistent backup / quarantine for upgrades.** First run on an existing store performs an additive migration: every pre-upgrade row is tagged `(provenance=unknown, source=legacy)` and **never injected** until explicitly Human-confirmed (`accept-legacy`); legacy `instruction` rows are quarantined. Legacy near-duplicates are collapsed to `status=migrated` (preserved, invisible) — **nothing is deleted**.
-  - Run the dry-run migration explicitly, e.g. via the package script (see "Operations"): `pnpm run migrate:hermes`.
-- **Direct confirmation path for corrections.** Corrections you make (via `/memory correct <id> <text>`, the memory browser "Correct" action, or the `memory_correct` tool) are applied immediately and mark the memory human-confirmed — corrections are the fastest way to promote/curate content.
-- **Skill synthesis is default-off.** `evolve.skillSynthesis.enabled` defaults to `false`; enable it under Self-evolution (UI or settings) if you want successful patterns distilled into `dsh-skill` entries.
-- **Generated-skill archive script.** Old dsi-* synthesized skills that accumulated duplicates can be audited and archived (see "Operations" below).
-
-## Operations
-
-### Dry-run migration (`scripts/migrate-hermes.mjs`)
-
-Analyzes an existing memory store against the new policy using a disposable SQLite snapshot; the live database is not touched:
-
-```bash
-pnpm run migrate:hermes -- --dir ~/.dsh/memory --dry-run   # dry run: analysis only, source db untouched
-pnpm run migrate:hermes -- --dir ~/.dsh/memory            # real run: backs up memory.db.pre-hermes.bak first
-```
-
-Always run the dry-run first and review its JSON report; the real run never deletes anything (rows are collapsed to `supersedes` links and a JSON summary is written to `memory/migration-log/`), but it does mutate statuses/FTS, so treat the automatic backup as the rollback point.
-
-### Generated-skill audit & archive (dry-run by default)
-
-Audits old generated (`dsi-*`) skills for exact-name duplicates and high body-overlap (token jaccard ≥ 0.8, matching the synthesis-time dedupe), and on explicit `--apply` MOVES redundant skills into `<root>/.dsi-archive/<timestamp>/` — never deletes — while fixing retained skills whose frontmatter name disagrees with their directory:
-
-```bash
-pnpm run skills:audit -- --root ~/.dsh/skills            # dry run (default)
-pnpm run skills:audit -- --root ~/.dsh/skills --apply    # archive redundant dsi-* skills under .dsi-archive/
-```
-
-Only directories starting with the generated prefix (default `dsi-`) and containing `SKILL.md` are classified — unrelated system/user skills are never reported or touched. It is idempotent: a second `--apply` finds nothing further.
-
-## Roadmap
-
-| Milestone | Scope | Status |
+| Capability | What it does | Where it shows up |
 |---|---|---|
-| M0 | Probe: event capture / recall injection / tool registration / settings namespace | ✅ Verified (isolated headless) |
-| M1 | Memory store: SQLite + FTS5 + jieba + sqlite-vec; L0 capture to disk; memory/search tools | ✅ Verified (unit + headless integration) |
-| M2 | Extraction pipeline: `ctx.llm` L1 extraction + strict JSON validation/fallback + dedup + throttled pump | ✅ Unit-tested; running in production |
-| M3 | Recall injection: `agent/pre-step` injection + keyword/vector/hybrid retrieval (RRF) | ✅ Unit-tested + end-to-end verified |
-| M4 | Self-evolution: L2/L3 consolidation (scenes + versioned persona), decay, correct/forget tools, skill synthesis → dsh-skill | ✅ Unit-tested; synthesized skills in production |
-| M5 | UI/ops: settings panel (auto-rendered) + hot runtime toggles + `/memory` command + memory browser | ✅ Complete, deployed to web profile |
-| M6 | Growth governance (caps/cleanup) + scheduling (nightly review / free maintenance / startup backfill) | ✅ Complete: governance caps, nightly review (default 22:00), 15-min loop is maintenance-only, master switch stops all timers |
+| **Cross-session memory** | Distills facts / preferences / events into durable memories | Injected before each turn |
+| **Relevant recall** | Only memories matching the current question, scoped to project and session | Labeled block in context; generic prompts inject nothing |
+| **Evolving persona** | Strongest confirmed memories become a versioned profile | Curated baseline in the system prompt |
+| **Skill synthesis** | Successful workflows become `dsh-skill` skills | `dsi-*` in your skills root; off by default |
+| **Self-maintenance** | Decay and growth caps, zero LLM cost | Every maintenance round |
+| **History search** | Full-text search over memories and past conversations | `memory_search` / `conversation_search` tools |
+| **Your control** | Correct or forget any memory instantly | `/memory` + Settings → Evolving Memory |
 
-> Qualification: M0–M6 milestones shipped as described, but the **memory policy has since been tightened** (Hermes-conservative provenance/evidence gates, curated baseline, injection caps, skill synthesis default-off) — see "What changed" for what differs from the original permissive pipeline.
+## How it works
+
+Hangs off DSH's native extension points (`session/flush`, `agent/pre-step`, `systemPrompt`, `ctx.llm`, settings namespaces, `dsh-skill`). Four-layer pipeline (L0 capture → L1 extraction → L2 consolidation → L3 persona), inspired by [TencentDB Agent Memory](https://github.com/TencentCloud/TencentDB-Agent-Memory):
+
+```mermaid
+flowchart LR
+    subgraph HOST["DSH host"]
+        SESS["session/flush<br/>(conversation events)"]
+        PRE["agent/pre-step"]
+        SYS["system prompt"]
+        LLM["ctx.llm<br/>(your configured model)"]
+    end
+
+    subgraph P["dsh-self-improved · all local"]
+        CAP["L0 · Capture<br/>conversation slices → JSONL"]
+        DB[("SQLite store<br/>FTS5 + sqlite-vec")]
+        EXT["L1 · Extract<br/>provenance + evidence gate"]
+        CONS["L2 · Consolidate<br/>scene grouping (optional)"]
+        PERS["L3 · Persona<br/>versioned user profile"]
+        DEC["Decay + governance<br/>(zero LLM cost)"]
+        REC["Recall retrieval<br/>keyword / hybrid RRF"]
+        INJ["Recall block<br/>≤4 per turn · ≤800 chars"]
+        SKILL["Skill synthesis<br/>(off by default)"]
+    end
+
+    SKILLSK["dsh-skill<br/>dsi-* skills"]
+
+    SESS --> CAP --> DB
+    DB -- "pump: after flush + every 15 min" --> EXT
+    EXT -- "extract prompt" --> LLM
+    LLM -- "memory drafts" --> EXT
+    EXT -- "verified memories" --> DB
+    DB --> CONS --> PERS
+    DB --> DEC
+    DB -- "nightly 22:00 / manual" --> SKILL --> SKILLSK
+    PRE --> REC -- "scoped search" --> DB
+    REC -- "ranked hits" --> INJ -- "labeled context block" --> SYS
+    PERS -- "curated baseline (≤2400 chars)" --> SYS
+```
+
+1. **Capture**: session flush events persist as JSONL slices tagged with project scope; delegated sessions are never treated as your statements.
+2. **Extract**: an LLM pass distills pending slices into memories that pass the strict gate (direct-human provenance, verbatim evidence, not task-local), JSON-validated and deduplicated.
+3. **Consolidate**: the nightly review builds scenes (optional) and a versioned persona from your strongest confirmed memories.
+4. **Recall**: before each turn, keyword/hybrid retrieval (RRF, optional embeddings) renders matching memories as a labeled, fallible block; the curated profile renders in the system prompt.
+5. **Maintain**: decay retires stale memories; caps bound growth; optional skill synthesis writes `dsh-skill` entries.
+
+### A turn, end to end
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as You
+    participant A as DSH agent
+    participant R as RecallService
+    participant S as Memory store
+    participant M as Model
+
+    U->>A: message
+    A->>R: agent/pre-step (step 1 only)
+    R->>S: scoped search (project + session, self-echo guarded)
+    S-->>R: ranked memories (relevance margin + caps applied)
+    R-->>A: labeled recall block + curated profile
+    A->>M: request with injected context
+    M-->>U: answer that "remembers you"
+    Note over A,S: on session/flush: new slices captured, extraction queued
+    Note over S: nightly: consolidate persona/scenes, decay, optional skills
+```
+
+### When things run
+
+| Trigger | What runs | LLM cost |
+|---|---|---|
+| Every turn (session flush) | capture slices, queue extraction | 0 |
+| Right after flush + every 15 min | extraction pump, decay, governance caps | one small call, when new content exists |
+| Nightly (default **22:00**), ~60s after boot, or `/memory evolve` | full review: drain extraction + consolidation + skills (optional) + decay/governance | moderate |
+| Before each model call | recall retrieval + injection | 0 (keyword) / one embedding call (hybrid) |
+| `/memory` commands, memory browser | local store queries only | 0 |
+
+## Memory policy
+
+High-signal by default (Hermes-conservative). A memory becomes durable only if it comes from direct human input (assistant prose, tool output, and injected text are filtered out), carries a verbatim evidence quote, and is not task or session local.
+
+Recall = a small curated baseline (pinned, human-corroborated profile facts, in the system prompt) + contextual recall: only memories matching the current question, capped by relevance margin, importance floor, and 4 blocks per turn.
+
+Nothing is deleted silently: upgrading an existing store quarantines pre-upgrade rows (`provenance=unknown`) until you confirm them (`accept-legacy`). Corrections via `/memory correct` or the browser's Correct action apply immediately and mark the memory human-confirmed; the `memory_correct` tool only stages a candidate until you confirm it.
+
+## Privacy
+
+- Store: `$DSH_HOME/memory` (configurable). The plugin itself calls no network services; model and embedding traffic follows your DSH configuration.
+- Master switch off = dormant: extraction, recall, the `/memory` command, and memory tools stop; memories are kept and everything resumes when re-enabled.
 
 ## Installation
 
-> **Since 0.1.1**: the package declares `dsh.bundle`, so **`dsh plugin add` / plugin-marketplace one-click install auto-mounts it** (dsh registers it as a profile layer automatically) — **no manual `cordis.patch.yml` edits needed**. Just restart dsh after installing.
-
-### Option 1: npm (recommended; same as marketplace one-click)
-
 ```bash
-dsh plugin --profile web add dsh-self-improved
-# or find dsh-self-improved in the plugin marketplace and click install
-# restart dsh — it auto-mounts
+dsh plugin --profile web add github:asheghi/dsh-self-improved
 ```
 
-### Option 2: from GitHub (source snapshot, prepare builds lib/ automatically)
+Restart dsh after installing. The npm/marketplace name `dsh-self-improved` resolves to a different project, not this one.
 
-```bash
-# 1) One-time environment prep (only if you hit store mismatch / blocked build):
-#    - point the store back to the directory consistent with node_modules:
-#      pnpm config set store-dir E:\dshPro\.pnpm-store --global   # or set store-dir=... in a profile-level .npmrc
-#    - allow prepare builds for git-installed packages (pnpm >= 10 blocks by default); in pnpm-workspace.yaml:
-#      allowBuilds:
-#        dsh-self-improved: true
+Install pitfalls (pnpm store and build prep, peerDependencies double instance, duplicate loader entry id): [TROUBLESHOOTING.md](./TROUBLESHOOTING.md).
 
-# 2) Install (dsh plugin forwards to pnpm in the profile; github:owner/repo fetches the snapshot and runs prepare=tsc)
-dsh plugin --profile web add github:madage/dsh-self-improved
-
-# 3) Restart dsh (auto-mounts since 0.1.1; if it still doesn't load, add the manual insert below)
-```
-
-> Manual mount (legacy versions or special layouts only): add to the `insert` list of `$DSH_HOME/profiles/web/cordis.patch.yml`:
-> ```yaml
-> - insert:
->     - id: dsh-self-improved
->       name: dsh-self-improved
-> ```
-
-### Option 3: local development (file: link)
+### Local development (file: link)
 
 ```bash
 # build, then copy lib/ + client.js + package.json into
 # $DSH_HOME/profiles/web/node_modules/dsh-self-improved/
 # add "dsh-self-improved": "file:node_modules/dsh-self-improved" to package.json dependencies
-# add the cordis.patch.yml insert (above) → restart
+# add the cordis.patch.yml insert (see TROUBLESHOOTING.md), then restart
 ```
 
-### ⚠️ Install notice: peerDependencies double-instance pitfall (located & fixed)
+## Operations
 
-**Symptom**: after install, **new sessions work but resuming an old session errors** — `deployment:persona already registered`, with a hint "register through that agent's agent.ctx instead".
+### Dry-run migration (`scripts/migrate-hermes.mjs`)
 
-**Root cause (not a plugin bug)**: pnpm's default `autoInstallPeers` installs the plugin's `@deepseek-ai/*` peerDependencies as **physical copies** inside the profile's `node_modules`, creating two independent module instances of the same package as the ones embedded in the dsh main install (e.g. `dsh-scope`). DSH's scoping (preset/persona layers) binds identity via `Symbol("dsh.scope")`; with two instances the persona registration lands in the global layer and collides with the host's `deployment:persona` → resume fails. New sessions happen to succeed because the global layer is not yet occupied on first registration.
+```bash
+pnpm run migrate:hermes -- --dir ~/.dsh/memory --dry-run      # analysis only, source db untouched
+pnpm run migrate:hermes -- --dir ~/.dsh/memory --no-dry-run   # real run; a pre-hermes store is backed up to memory.db.pre-hermes.bak first
+```
 
-**Fix (verified)**:
-1. Replace the redundant `@deepseek-ai/*` physical copies in the profile with **symlinks** to the packages embedded in the dsh main install (dsh's self-healing layout `$DSH_HOME/profiles/node_modules`);
-2. Set `auto-install-peers=false` in a profile-level `.npmrc` (or turn off `autoInstallPeers` in `pnpm-workspace.yaml`).
+Dry-run first. The real run never deletes anything (rows collapse to `supersedes` links; summary in `memory/migration-log/`). A pre-hermes store is backed up to `memory.db.pre-hermes.bak` before any schema change (kept if a backup already exists); that backup is the rollback point.
 
-**Note for users (keep when publishing)**:
-> dsh-self-improved's peerDependencies may be auto-installed as physical copies in the profile; use the dsh self-healing symlink layout, or set `auto-install-peers=false` in the profile's `.npmrc`.
+### Generated-skill audit (dry-run by default)
 
-### ⚠️ Install notice: duplicate loader entry id (bundle re-mount, instant boot crash)
+```bash
+pnpm run skills:audit -- --root ~/.dsh/skills            # dry run (default)
+pnpm run skills:audit -- --root ~/.dsh/skills --apply    # archive redundant skills
+```
 
-**Symptom**: dsh **fails to start** (window flashes and closes), and `dsh --profile web --dump-config` shows the same entry `id` twice.
-
-**Root cause**: packages declaring `dsh.bundle` (this plugin since 0.1.1, `dsh-plugin-marketplace`, etc.) are **automatically** added to `dsh.profile.bundles` and their bundled `cordis.patch.yml` inserts one entry; if the profile-level `cordis.patch.yml` **also manually inserts the same id** → the loader throws `duplicate loader entry id` at boot.
-
-**Fix (verified)**: reset the profile-level `cordis.patch.yml` to `[]` — bundle assembly is fully owned by `dsh.profile.bundles`; do **not** manually insert bundle plugins at the profile layer.
-
-**Debug tip**: if dsh crashes at startup, run `dsh --profile web --dump-config` and count each entry id; more than one occurrence is this problem.
+Audits `dsi-*` skills for duplicates and high body overlap; `--apply` moves redundant ones into `<root>/.dsi-archive/<timestamp>/`, never deletes, and fixes retained skills whose frontmatter name disagrees with their directory. Idempotent; only `dsi-*` directories with `SKILL.md` are classified.
 
 ## Configuration
 
@@ -150,42 +176,35 @@ dsh-self-improved:
     time: "22:00"      # HH:MM, 24h
 ```
 
-Notes:
+- Conservative defaults are settings, not hardcode; all editable in the settings UI ("Evolving Memory" → Config): `extract.provenanceFilter: "strict"`, `extract.requireEvidence: true`, `recall.relevanceMargin: 0.5`, `recall.minImportance: 0`, `recall.maxInjectPerTurn: 4`, `consolidate.scenesEnabled: false`, `evolve.skillSynthesis.enabled: false`.
+- `/memory` commands are zero-LLM.
 
-- **Master switch off = plugin fully dormant**: all background timers stop (15-min maintenance loop / nightly review / startup backfill), `/memory` and memory tools are unregistered; stored memories are kept and everything resumes when re-enabled.
-- **Conservative defaults come from settings**, not hardcoding: `extract.provenanceFilter: "strict"`, `extract.requireEvidence: true`, `recall.relevanceMargin: 0.5`, `recall.minImportance: 0`, `recall.maxInjectPerTurn: 4`, `consolidate.scenesEnabled: false`, `evolve.skillSynthesis.enabled: false` — all editable in the settings UI ("Evolving Memory" → Config).
-- **Scheduling**: the 15-minute loop only does extraction + free maintenance (decay/governance, no LLM cost); full evolution (scenes/persona/skills) runs at the nightly review (default 22:00), ~60s after startup, or via manual `/memory evolve`.
-- **`/memory` commands are zero-LLM**: they query the local memory store directly; the command declares `input`, so parameterized input is handled by the command system (trigger via the command menu, `/`).
-- The memory browser (Settings → "Self-evolving memory" → "Memory" tab) lets you view/filter/correct/forget memories, the persona, scenes and synthesized skills.
+## Repository layout
 
-## Compliance
+| Path | What it is |
+|---|---|
+| `src/*.ts` | TypeScript sources: the plugin's server side |
+| `lib/` | Compiled output (`tsc`); what npm ships |
+| `client.js` | Web UI half: "Evolving Memory" settings + memory browser (no build step) |
+| `scripts/` | Ops scripts and test runners |
+| `cordis.patch.yml` | Bundle mount declaration (auto-applied via `dsh.bundle`) |
 
-- The plugin's **architecture is inspired by** [TencentDB Agent Memory](https://github.com/TencentCloud/TencentDB-Agent-Memory) (MIT); it is an **independent implementation** with no affiliation with Tencent.
-- The plugin and all its dependencies are MIT-licensed and run fully locally.
+Tests: `pnpm run test:all`; runners in `scripts/test-*.mjs`.
 
-## Acknowledgements
+## Compliance and acknowledgements
 
-This project references the following open-source projects; many thanks to their authors and communities:
-
-- **[TencentDB Agent Memory](https://github.com/TencentCloud/TencentDB-Agent-Memory)** (Tencent Cloud) — the four-layer memory pyramid (L0 capture → L1 extraction → L2 scene grouping → L3 persona) and memory-management ideas are the direct inspiration for this plugin's pipeline;
-- **[self-improving-agent](https://github.com/pskoett/self-improving-agent)** (author **pskoett**) — a self-evolution skill in the OpenClaw ecosystem: distilling lessons, corrections and reusable flows from experience; this plugin's self-evolution module (memory consolidation / forgetting / correction + skill synthesis) takes design inspiration from it.
+- Architecture inspired by [TencentDB Agent Memory](https://github.com/TencentCloud/TencentDB-Agent-Memory) (Tencent Cloud): the four-layer memory pyramid is the direct inspiration for this pipeline; independent implementation, no affiliation with Tencent.
+- Self-evolution design inspired by [self-improving-agent](https://github.com/pskoett/self-improving-agent) (pskoett).
 
 ## Docs
 
-- `README.md` — this file (English)
-- `README.zh.md` — 中文版说明
-- `docs/` (install/verify checklists, testing guide, design docs, DSH research) — **local only**, excluded via `.gitignore`
-
-Unit tests: `pnpm run test:all` (storage / extract / recall / evolve / commands / hermes policy / skill-audit fixtures — all PASS); individual runners live in `scripts/test-*.mjs`.
+- `README.md`: this file
+- `ROADMAP.md`: milestones and plan history
+- `TROUBLESHOOTING.md`: install pitfalls and fixes
+- `docs/` (design docs, testing guide, DSH research): local only, excluded via `.gitignore`
 
 ## License
 
-MIT License — see [LICENSE](./LICENSE) for the full text.
+MIT License. See [LICENSE](./LICENSE) for the full text.
 
-Summary:
-
-- **Grant**: anyone may obtain a copy of the software and associated docs and use, copy, modify, merge, publish, distribute, sublicense and/or sell it;
-- **Condition**: the above copyright notice and permission notice must be included in all copies or substantial portions;
-- **Disclaimer**: the software is provided "AS IS" without warranty of any kind; in no event shall the authors or copyright holders be liable for any claim, damages or other liability.
-
-Copyright (c) 2026 mashao. `package.json` declares `license: MIT`.
+Copyright (c) 2026 mashao.
