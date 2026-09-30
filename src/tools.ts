@@ -7,7 +7,32 @@ import type { Context } from "@deepseek-ai/cordis";
 import type { MemoryStore } from "./storage.js";
 import { projectKeyFromCwd } from "./capture.js";
 
-export function registerMemoryTools(ctx: Context, store: MemoryStore, defaultLimit: number): () => void {
+export interface OperationalToolDefaults {
+  /** Confidence floor for the operational lane (live getter keeps hot-apply working) */
+  confidenceFloor: number | (() => number);
+  /** Default max results when args.limit omits one (live getter keeps hot-apply working) */
+  maxResults?: number | (() => number);
+}
+
+const resolveLive = (v: number | (() => number) | undefined, fallback: number): number => {
+  const out = typeof v === "function" ? v() : v;
+  return typeof out === "number" && Number.isFinite(out) ? out : fallback;
+};
+
+/** Clamp a model-supplied limit into [0, 50]: negative/oversized/NaN args can never widen the query (SQLite LIMIT -1 means unlimited) */
+const clampLimit = (value: unknown, fallback: number): number => {
+  const requested = Number(value);
+  return Number.isFinite(requested) ? Math.floor(Math.max(0, Math.min(requested, 50))) : fallback;
+};
+
+export function registerMemoryTools(
+  ctx: Context,
+  store: MemoryStore,
+  defaultLimit: number,
+  operationalDefaults?: OperationalToolDefaults,
+): () => void {
+  const opFloor = (): number => resolveLive(operationalDefaults?.confidenceFloor, 0.8);
+  const opMax = (): number => Math.max(1, resolveLive(operationalDefaults?.maxResults, defaultLimit));
   const disposers: Array<() => void> = [];
   // Tool-call scope resolution: like automatic recall, tool-driven lookup stays
   // project-aware (global rows + the caller's project only). The registry hands
@@ -38,6 +63,11 @@ export function registerMemoryTools(ctx: Context, store: MemoryStore, defaultLim
         description: "Memory kind filter: fact / preference / event / instruction (optional)",
       },
       limit: { type: "integer", description: "Maximum number of results to return" },
+      operational: {
+        type: "boolean",
+        description:
+          "When true, return only derived operational knowledge (project-scoped, episode-evidenced) instead of trusted memories",
+      },
     },
     output: {
       schema: {
@@ -54,8 +84,38 @@ export function registerMemoryTools(ctx: Context, store: MemoryStore, defaultLim
       render: (_args, value) => renderMemoryHits(value),
     },
     async execute(args, exec) {
-      const limit = typeof args.limit === "number" ? args.limit : defaultLimit;
       const scope = scopeOf(exec);
+      // Phase 4: explicit operational=true enters the derived lane ONLY. Without
+      // the explicit flag the existing trusted path is unchanged (derived rows
+      // stay invisible via injectableOnly).
+      if (args.operational === true) {
+        // SCOPE REQUIREMENT: the operational lane is derived project knowledge —
+        // without the calling agent's project scope there is no legitimate
+        // 'default' projection, and falling back would expose another
+        // project's rows without self-echo protection. A real agent with an
+        // empty cwd still resolves to 'default' via scopeOf.
+        if (!("projectId" in scope)) {
+          return { hits: [], error: "operational recall requires the calling agent's project scope" };
+        }
+        const limit = clampLimit(args.limit, opMax());
+        const opHits = store.searchOperationalMemories(String(args.query), {
+          projectId: scope.projectId ?? "default",
+          excludeSessionId: scope.excludeSessionId,
+          limit,
+          confidenceFloor: opFloor(),
+        });
+        if (opHits.length > 0) store.recordAccess(opHits.map((h) => h.id));
+        return {
+          hits: opHits.map((h) => ({
+            id: h.id,
+            kind: h.kind,
+            content: h.content,
+            confidence: h.confidence,
+            provenance: "derived",
+          })),
+        };
+      }
+      const limit = clampLimit(args.limit, defaultLimit);
       // Provenance alignment with automatic recall (recall.ts uses injectableOnly):
       // the tool lane must not hand the model rows that injection withholds
       // (derived/system/tool/coordinator/quarantined candidates).
@@ -217,7 +277,9 @@ function renderMemoryHits(value: any): Array<{ type: "text"; text: string }> {
   const lines = hits.map(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (h: any, i: number) =>
-      `${i + 1}. [${h.kind}] ${h.content} (importance ${h.importance}/10, id: ${h.id})`,
+      h.provenance === "derived"
+        ? `${i + 1}. [${h.kind}|operational|derived] ${h.content} (confidence ${h.confidence}, id: ${h.id})`
+        : `${i + 1}. [${h.kind}] ${h.content} (importance ${h.importance}/10, id: ${h.id})`,
   );
   return [{ type: "text", text: lines.join("\n") }];
 }

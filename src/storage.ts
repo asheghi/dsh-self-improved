@@ -939,6 +939,88 @@ export class MemoryStore {
     }));
   }
 
+  /**
+   * Operational-memory search (Phase 4, SEPARATE recall lane). Only rows written
+   * by episode review (provenance='derived' + source='episode-review', project
+   * scope, non-expired, confidence floor, carrying episode/call evidence) are
+   * eligible. This lane never touches the trusted recall paths: derived rows
+   * remain invisible to searchMemories/injectableOnly/baseline/persona.
+   * FAIL CLOSED: empty projectId or empty trimmed query → [].
+   */
+  searchOperationalMemories(
+    query: string,
+    options: { projectId: string; excludeSessionId?: string; limit?: number; confidenceFloor?: number },
+  ): Array<{
+    id: string;
+    kind: MemoryKind;
+    content: string;
+    importance: number;
+    score: number;
+    confidence: number;
+    evidence: Array<MemoryEvidence>;
+  }> {
+    const projectId = options.projectId;
+    // FAIL CLOSED: an empty project key or empty query yields nothing (never unscoped)
+    if (!projectId || !projectId.trim() || !query.trim()) return [];
+    const terms = this.ftsTerms(query);
+    if (terms.length === 0) return [];
+    const limit = Math.max(0, Math.min(Math.floor(options.limit ?? 10), 50));
+    const floor = options.confidenceFloor ?? 0;
+    // Over-fetch (bounded) so rows failing the post-fetch evidence validation can
+    // be filtered out while the requested count is still filled.
+    const fetchLimit = limit * 3;
+    const rows = this.db
+      .prepare(
+        `
+        SELECT m.id, m.kind, m.content, m.importance,
+               bm25(memories_fts) AS score,
+               mm.confidence AS confidence,
+               mm.evidence AS evidence_json
+        FROM memories_fts
+        JOIN memories m ON m.id = memories_fts.content_rowid
+        JOIN memories_meta mm ON mm.memory_id = m.id
+        WHERE memories_fts MATCH ?
+          AND m.status = 'active'
+          AND mm.provenance = 'derived'
+          AND mm.source = 'episode-review'
+          AND mm.scope = 'project'
+          AND mm.project_id = ?
+          AND mm.evidence != '[]'
+          AND (mm.expires_at IS NULL OR mm.expires_at > ?)
+          AND mm.confidence >= ?
+          ${
+            options.excludeSessionId
+              ? "AND NOT EXISTS (SELECT 1 FROM memories_meta mms WHERE mms.memory_id = m.id AND mms.session_id = ?)"
+              : ""
+          }
+        ORDER BY score
+        LIMIT ?`,
+      )
+      .all(...(options.excludeSessionId
+        ? [terms.join(" OR "), projectId, Date.now(), floor, options.excludeSessionId, fetchLimit]
+        : [terms.join(" OR "), projectId, Date.now(), floor, fetchLimit])) as Array<Record<string, unknown>>;
+    // Evidence eligibility is the SERIALIZED structure, not a non-empty string:
+    // every returned row must carry at least one evidence entry with BOTH a
+    // non-empty episodeId and a non-empty callId; malformed JSON drops out too.
+    return rows
+      .filter((row) => {
+        const evidence = parseEvidence(String(row.evidence_json ?? "[]"));
+        return evidence.some(
+          (e) => typeof e.episodeId === "string" && e.episodeId.trim() !== "" && typeof e.callId === "string" && e.callId.trim() !== "",
+        );
+      })
+      .slice(0, limit)
+      .map((row) => ({
+      id: String(row.id),
+      kind: row.kind as MemoryKind,
+      content: String(row.content),
+      importance: Number(row.importance),
+      score: Number(row.score),
+      confidence: Number(row.confidence),
+      evidence: parseEvidence(String(row.evidence_json ?? "[]")),
+    }));
+  }
+
   /** jieba tokenization → FTS5 quoted terms (punctuation stripped, FTS syntax injection impossible) */
   private ftsTerms(query: string, maxTerms = 24): string[] {
     const raw = tokenize(query)
@@ -1337,14 +1419,24 @@ export class MemoryStore {
 
   // ---------- Curated global baseline ----------
 
+  /** Trusted-provenance gate for baseline pins: only user/persona rows may be pinned */
+  private isBaselineEligible(memoryId: string): boolean {
+    const record = this.getMemory(memoryId);
+    if (!record) return false;
+    const provenance = record.meta?.provenance;
+    return provenance === "user" || provenance === "persona";
+  }
+
   /**
    * Pin a memory into the first free baseline slot (bounded manual curation).
    * Uniqueness: memory_id holds at most one pin — re-pinning returns the existing
    * slot. When all maxSlots are full this returns null (nothing is auto-evicted;
    * manual replacement via pinBaselineSlot stays available). Returns the slot.
+   * HARD GATE: derived/episode-review rows (and any non-user/persona provenance)
+   * can NEVER be pinned into the global baseline.
    */
   pinBaseline(memoryId: string, maxSlots = 15): number | null {
-    if (!this.getMemory(memoryId)) return null;
+    if (!this.isBaselineEligible(memoryId)) return null;
     const existing = this.db.prepare("SELECT slot FROM baseline WHERE memory_id = ?").get(memoryId) as
       | { slot: number }
       | undefined;
@@ -1369,7 +1461,7 @@ export class MemoryStore {
    * no duplicate memory_id can ever exist and no slot silently loses content.
    */
   pinBaselineSlot(memoryId: string, slot: number): number | null {
-    if (!this.getMemory(memoryId)) return null;
+    if (!this.isBaselineEligible(memoryId)) return null;
     if (!Number.isInteger(slot) || slot < 1) return null;
     const current = this.db.prepare("SELECT slot FROM baseline WHERE memory_id = ?").get(memoryId) as
       | { slot: number }

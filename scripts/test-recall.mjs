@@ -207,6 +207,129 @@ cutoffStore.close();
   check("slow embedding returns non-empty results", slowHits.length > 0);
 }
 
+// =====================================================================
+// 12) Phase 4: operational-memory recall (separate derived lane)
+// =====================================================================
+{
+  const opDir = join("/tmp/dsh-mem-test", "op-recall");
+  rmSync(opDir, { recursive: true, force: true });
+  const opStore = new MemoryStore(opDir);
+  const insOp = (s) =>
+    opStore.insertMemory(
+      { kind: "fact", content: s.content, importance: 6 },
+      {
+        provenance: "derived",
+        source: "episode-review",
+        scope: s.scope ?? "project",
+        projectId: s.projectId ?? null,
+        sessionId: s.sessionId ?? null,
+        confidence: s.confidence ?? 0.85,
+        expiresAt: s.expiresAt ?? null,
+        evidence: s.evidence ?? [{ episodeId: "e1", callId: "c1", sessionId: s.sessionId ?? "s1", snippet: "ran pnpm install successfully" }],
+      },
+    );
+  const topA = insOp({ content: "pnpm project alpha wiring evidence", projectId: "proj-a", sessionId: "s-src-1" });
+  const projB = insOp({ content: "pnpm project beta wiring evidence", projectId: "proj-b", sessionId: "s-src-2" });
+  const query = "pnpm project wiring evidence";
+
+  // Fail-closed boundaries
+  check("fail closed: empty projectId", opStore.searchOperationalMemories(query, { projectId: "" }).length === 0);
+  check("fail closed: empty query", opStore.searchOperationalMemories("  ", { projectId: "proj-a" }).length === 0);
+  check("returns the matching project's row", opStore.searchOperationalMemories(query, { projectId: "proj-a" }).some((h) => h.id === topA.id));
+  // Cross-project isolation + no unscoped query at all
+  check("no cross-project results", !opStore.searchOperationalMemories(query, { projectId: "proj-b" }).some((h) => h.id === topA.id));
+  check("without projectId nothing is returned", opStore.searchOperationalMemories(query, {}).length === 0);
+
+  // Self-echo: exclude the source session
+  const selfOut = opStore.searchOperationalMemories(query, { projectId: "proj-a", excludeSessionId: "s-src-1" });
+  check("self-echo: excludeSessionId drops the source session's rows", !selfOut.some((h) => h.id === topA.id), JSON.stringify(selfOut.map((h) => h.id)));
+
+  // Expiry: past expires_at invisible to the operational lane, still explicit-searchable
+  const popped = insOp({ content: "expired pnpm evidence snippet zeta", projectId: "proj-a", expiresAt: Date.now() - 1000 });
+  check("expired operational rows are not returned", !opStore.searchOperationalMemories("expired pnpm evidence zeta", { projectId: "proj-a" }).some((h) => h.id === popped.id));
+  check("expired operational row still explicit-searchable via searchMemories", opStore.searchMemories("expired pnpm evidence zeta", { limit: 10 }).some((h) => h.id === popped.id));
+
+  // Forgotten rows invisible
+  opStore.setMemoryStatus(projB.id, "forgotten");
+  check("forgotten operational rows are not returned", !opStore.searchOperationalMemories(query, { projectId: "proj-b" }).some((h) => h.id === projB.id));
+
+  // Confidence floor
+  const lowConf = insOp({ content: "low confidence pnpm evidence psi", projectId: "proj-a", confidence: 0.5 });
+  check("confidence floor hides weak rows", !opStore.searchOperationalMemories("low confidence evidence psi", { projectId: "proj-a", confidenceFloor: 0.8 }).some((h) => h.id === lowConf.id));
+  check("lower floor admits the weak row", opStore.searchOperationalMemories("low confidence evidence psi", { projectId: "proj-a", confidenceFloor: 0.4 }).some((h) => h.id === lowConf.id));
+
+  // Evidence REQUIRED
+  const noEvidence = insOp({ content: "qzx iso claim omega", projectId: "proj-a", evidence: [] });
+  check("evidence-required: rows with [] evidence are not returned", opStore.searchOperationalMemories("qzx iso omega", { projectId: "proj-a" }).length === 0);
+
+  // RecallService.searchOperational: topical gate + never-throws
+  const opRecall = new RecallService(opStore, { strategy: "keyword", maxResults: 5, scoreThreshold: 0, timeoutMs: 3000, relevanceMargin: 0 }, null);
+  const opHits = opRecall.searchOperational(query, { projectId: "proj-a", confidenceFloor: 0.8 });
+  check("searchOperational hits the project row", opHits.some((h) => h.id === topA.id), JSON.stringify(opHits.map((h) => h.id)));
+  check("searchOperational drops self-echo", !opRecall.searchOperational(query, { projectId: "proj-a", excludeSessionId: "s-src-1", confidenceFloor: 0.8 }).some((h) => h.id === topA.id));
+  check("searchOperational: generic greeting returns []", opRecall.searchOperational("hi there thanks", { projectId: "proj-a", confidenceFloor: 0 }).length === 0);
+
+  // Rendering: both fences, labeled; trusted content stays in its fence
+  const both = renderRecallBlock(
+    [{ id: "t1", kind: "preference", content: "User likes quiet notifications", importance: 7, score: 1 }],
+    5,
+    undefined,
+    { hits: [{ id: "o1", kind: "fact", content: "pnpm install is cached in this project", confidence: 0.85 }], maxResults: 2 },
+  );
+  check("renderRecallBlock renders BOTH fences", both.includes("<long-term-memory-recall>") && both.includes("<operational-memory-recall>"), both);
+  const trustedEnd = both.indexOf("</long-term-memory-recall>");
+  const opStart = both.indexOf("<operational-memory-recall>");
+  check("trusted fence closes BEFORE operational fence opens", trustedEnd !== -1 && opStart > trustedEnd, both.slice(0, 200));
+  check("operational hits labeled [operational|derived] with confidence", both.includes("[operational|derived] pnpm install is cached in this project (confidence 0.85)"), both);
+  check("trusted content stays inside the trusted fence", both.includes("[preference] User likes quiet notifications (importance 7/10)"));
+  check("empty operational hits → no operational fence", !renderRecallBlock([], 5, undefined, { hits: [], maxResults: 2 }).includes("operational-memory-recall"));
+  // Trusted ranking unaffected: derived rows invisible to the injectable lanes
+  const trustedSearch = opStore.searchMemories(query, { limit: 10, injectableOnly: true });
+  check("injectableOnly search excludes derived operational rows", !trustedSearch.some((h) => h.id === topA.id), JSON.stringify(trustedSearch.map((h) => h.id)));
+  check("pinBaseline refuses derived rows", opStore.pinBaseline(topA.id, 5) === null);
+  check("pinBaselineSlot refuses derived rows", opStore.pinBaselineSlot(topA.id, 1) === null);
+  check("pinBaseline still accepts trusted rows", (() => {
+    const trusted = opStore.insertMemory({ kind: "preference", content: "Trusted pin candidate row static", importance: 9 }, { provenance: "user" });
+    const slot = opStore.pinBaseline(trusted.id, 5);
+    check("trusted pin got a slot", slot === 1, String(slot));
+    return slot === 1;
+  })());
+
+  // Independent caps exercised through the injection path: oversized operational
+  // fence dropped whole, trusted fence kept intact.
+  {
+    const mod = await import("../lib/inject.js");
+    const handlers = {};
+    const fakeCtx = { on(name, fn) { handlers[name] = fn; } };
+    const trustedHit = { id: "t1", kind: "preference", content: "User likes quiet notifications", importance: 7, score: 1 };
+    const hugeContent = "y".repeat(400);
+    const stubRecall = {
+      async search() { return [trustedHit]; },
+      searchOperational() { return [{ id: "o1", kind: "fact", content: hugeContent, confidence: 0.9, score: 1 }]; },
+    };
+    let injectedIds = [];
+    mod.installRecallInjection(fakeCtx, stubRecall, {
+      enabled: () => true,
+      maxHits: 5,
+      maxChars: 600,
+      sessionIdOf: () => "cap-session",
+      projectKeyOf: () => "proj-a",
+      operational: { enabled: () => true, maxResults: 2, maxChars: 300, confidenceFloor: 0.8 },
+      onInjected: (ids) => { injectedIds = ids; },
+    });
+    const out = await handlers["agent/pre-step"](
+      { step: 1 },
+      async () => ({ kind: "enter", messages: [{ role: "user", content: [{ type: "text", text: "user asks about quiet notifications caps" }] }] }),
+    );
+    const block = out.messages.filter((m) => m.source?.plugin === "dsh-self-improved").map((m) => m.content[0].text).join("\n");
+    check("when over the operational cap the whole operational fence drops", !block.includes("operational-memory-recall"), block.slice(0, 120));
+    check("trusted fence survives the operational drop", block.includes("<long-term-memory-recall>") && block.includes("User likes quiet notifications"));
+    check("only the trusted hit counts as injected access", JSON.stringify(injectedIds) === JSON.stringify(["t1"]), JSON.stringify(injectedIds));
+  }
+
+  opStore.close();
+}
+
 store.close();
 console.log(failed === 0 ? "\nALL PASS ✅" : `\n${failed} FAILED ❌`);
 process.exit(failed === 0 ? 0 : 1);

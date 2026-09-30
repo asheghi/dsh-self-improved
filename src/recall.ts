@@ -113,6 +113,15 @@ export function topicalTokens(query: string, tokenizeFn: (s: string) => string):
   return out;
 }
 
+/** Phase 4: one operational (episode-review-derived) hit, separately recalled */
+export interface OperationalHit {
+  id: string;
+  kind: string;
+  content: string;
+  confidence: number;
+  score: number;
+}
+
 export class RecallService {
   constructor(
     private readonly store: MemoryStore,
@@ -120,6 +129,32 @@ export class RecallService {
     private readonly embedding: EmbeddingProvider | null = null,
     private readonly tokenizeFn: (s: string) => string = (s) => tokenize(s),
   ) {}
+
+  /**
+   * Phase 4 operational-recall lane: keyword (FTS/BM25) search restricted to
+   * derived/episode-review project rows with episode evidence. Synchronous store
+   * call; a generic (no-topical-token) query returns zero; NEVER throws.
+   */
+  searchOperational(
+    query: string,
+    options: { projectId: string; excludeSessionId?: string; maxResults?: number; confidenceFloor: number },
+  ): OperationalHit[] {
+    try {
+      if (!query.trim()) return [];
+      // Topical-token gate (same as trusted recall): greeting/generic queries recall nothing
+      if (topicalTokens(query, this.tokenizeFn).length === 0) return [];
+      const hits = this.store.searchOperationalMemories(query, {
+        projectId: options.projectId,
+        excludeSessionId: options.excludeSessionId,
+        limit: options.maxResults ?? 2,
+        confidenceFloor: options.confidenceFloor,
+      });
+      return hits.map((h) => ({ id: h.id, kind: h.kind, content: h.content, confidence: h.confidence, score: h.score }));
+    } catch (error) {
+      console.warn("[dsh-self-improved] operational recall degraded:", String(error));
+      return [];
+    }
+  }
 
   /** Curated baseline entries (bounded, slot-ordered); only trusted active rows are admitted */
   getBaselineEntries(): Array<{ slot: number; id: string; kind: string; content: string; importance: number }> {
@@ -367,11 +402,44 @@ function rrfFuse(lists: RecallHit[][], limit: number): RecallHit[] {
 }
 
 /**
+ * Neutralize the reserved recall fence markers inside untrusted memory content:
+ * interpolated content must never be able to close/open a recall fence and forge
+ * sections. Handles spacing variants inside the marker tokens (e.g. "</ operational").
+ */
+const RECALL_MARKER_RE = /<\/?\s*(?:operational-memory-recall|long-term-memory-recall)\s*>\s*/gi;
+
+export function sanitizeRecallText(text: string): string {
+  return String(text ?? "").replace(RECALL_MARKER_RE, "[recall marker removed]");
+}
+
+/**
  * Render the injection block (pure function). Clearly delimited (markers), marked
  * fallible, explicitly subordinate to the current user instructions, and never a
  * trailing user request.
  */
 export function renderRecallBlock(
+  hits: RecallHit[],
+  maxHits = 5,
+  baseline?: Array<{ slot: number; id: string; kind: string; content: string; importance: number }>,
+  operational?: { hits: Array<{ id: string; kind: string; content: string; confidence: number }>; maxResults: number },
+): string {
+  const trusted = renderTrustedRecallBlock(hits, maxHits, baseline);
+  // Phase 4: the operational fence is SEPARATE — the trusted fence closes before it opens.
+  if (!operational || operational.hits.length === 0) return trusted;
+  const opLines = [
+    "<operational-memory-recall>",
+    "Observed operational knowledge (derived from past tool executions in this project; fallible, project-local, may be stale). Verify against the current state before relying on it.",
+  ];
+  for (const h of operational.hits.slice(0, operational.maxResults)) {
+    opLines.push(`- [operational|derived] ${sanitizeRecallText(h.content)} (confidence ${Number(h.confidence.toFixed(2))})`);
+  }
+  opLines.push("</operational-memory-recall>");
+  if (!trusted) return opLines.join("\n");
+  return trusted + "\n" + opLines.join("\n");
+}
+
+/** Trusted-only block (baseline + contextual links); operational never mixes in. */
+function renderTrustedRecallBlock(
   hits: RecallHit[],
   maxHits = 5,
   baseline?: Array<{ slot: number; id: string; kind: string; content: string; importance: number }>,
@@ -389,7 +457,7 @@ export function renderRecallBlock(
     lines.push("Relevant memories (skim if useful; verify anything uncertain against the current conversation):");
     for (const h of contextual) {
       const scopeTag = h.pinned ? "|pinned" : h.scope && h.scope !== "global" ? "|project" : "";
-      lines.push(`- [${kindLabel(h.kind)}${scopeTag}] ${h.content} (importance ${h.importance}/10)`);
+      lines.push(`- [${kindLabel(h.kind)}${scopeTag}] ${sanitizeRecallText(h.content)} (importance ${h.importance}/10)`);
     }
   }
   return [

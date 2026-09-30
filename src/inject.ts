@@ -20,6 +20,8 @@ import { createUserMessage } from "@deepseek-ai/dsh-llm";
 import type { RecallService } from "./recall.js";
 import { renderRecallBlock } from "./recall.js";
 
+type OperationalHitPayload = { id: string; kind: string; content: string; confidence: number };
+
 export interface InjectController {
   enabled(): boolean;
   maxHits: number;
@@ -36,6 +38,17 @@ export interface InjectController {
   maxInjectPerTurn?: number;
   /** Called with the ids of memories actually injected (access tracking; host wires store.recordAccess) */
   onInjected?: (ids: string[]) => void;
+  /**
+   * Phase 4 operational-recall lane (independent, separately fenced + capped;
+   * disabled/absent = behavior exactly as before). Its own enable gate, result
+   * cap, char cap and confidence floor; trusted recall is never touched.
+   */
+  operational?: {
+    enabled(): boolean;
+    maxResults: number;
+    maxChars: number;
+    confidenceFloor: number;
+  };
 }
 
 const CACHE_MAX = 128;
@@ -137,48 +150,133 @@ export function installRecallInjection(ctx: Context, recall: RecallService, cont
       // recall" — cross-project leakage is impossible at the query boundary.
       const projectKey = controller.projectKeyOf?.(payload) || "default";
       const cacheKey = `${projectKey}:${sessionId || "no-session"}:${hashText(query)}`;
-      const cached = injectedCache.get(cacheKey);
-      if (cached) {
+      // The cache holds ONLY the trusted (long-term) rendered block. The
+      // operational lane is ALWAYS recomputed fresh so runtime changes —
+      // operationalRecallEnabled=false, forgetting the row, expiry, confidence
+      // floor — take effect on the very next identical (project, session, query)
+      // turn instead of being served stale from the cache.
+      const trustedCached = injectedCache.has(cacheKey);
+      // Legacy no-registry fallback: a cached trusted block is never re-appended
+      // as a second user message from the cache path (unchanged semantics).
+      {
         const registry = payload.agent?.ctx?.systemPrompt;
-        return registry && typeof registry.context === "function" ? enterWithContext(payload, decision, cached) : decision;
+        if (trustedCached && !(registry && typeof registry.context === "function")) return decision;
+      }
+      let trustedBlock = trustedCached ? injectedCache.get(cacheKey) ?? "" : "";
+      let trustedHits: Array<{ id: string; kind: string; content: string; importance: number; score: number }> = [];
+      if (!trustedCached) {
+        const hits = await recall.search(query, {
+          maxResults: controller.maxHits,
+          projectId: projectKey,
+          excludeSessionId: sessionId || undefined,
+        });
+        // Lifecycle: re-check abort AFTER the recall await and before registering context
+        if (payload.signal?.aborted) {
+          if (controller.debug) console.log("[dsh-self-improved] injection aborted after recall; skipping");
+          return decision;
+        }
+        if (controller.debug) console.log("[dsh-self-improved] recall hits:", trustedHits.length);
+
+        trustedHits = hits;
+        trustedBlock = renderRecallBlock(trustedHits, controller.maxHits);
+        if (controller.maxChars && trustedBlock.length > controller.maxChars) {
+          // Trusted char cap: unchanged from the pre-operational logic (a
+          // still-oversized trusted block ends up empty instead of flooding
+          // the context).
+          const cap = controller.maxChars;
+          while (trustedBlock.length > cap && trustedHits.length > 1) {
+            trustedHits = trustedHits.slice(0, -1);
+            trustedBlock = renderRecallBlock(trustedHits, controller.maxHits);
+          }
+          if (trustedBlock.length > cap) trustedBlock = "";
+        }
       }
 
-      const hits = await recall.search(query, {
-        maxResults: controller.maxHits,
-        projectId: projectKey,
-        excludeSessionId: sessionId || undefined,
-      });
-      // Lifecycle: re-check abort AFTER the recall await and before registering context
-      if (payload.signal?.aborted) {
-        if (controller.debug) console.log("[dsh-self-improved] injection aborted after recall; skipping");
-        return decision;
+      // Phase 4: operational lane runs AFTER the trusted lane, with its OWN
+      // caps/enable gate. Fails soft (searchOperational never throws).
+      let opsForRender: OperationalHitPayload[] = [];
+      let opFence = "";
+      const renderOpFence = (ops: OperationalHitPayload[], maxResults: number): string =>
+        renderRecallBlock([], controller.maxHits, undefined, { hits: ops, maxResults });
+      if (controller.operational?.enabled()) {
+        const ops = recall.searchOperational(query, {
+          projectId: projectKey,
+          excludeSessionId: sessionId || undefined,
+          maxResults: controller.operational.maxResults,
+          confidenceFloor: controller.operational.confidenceFloor,
+        });
+        opsForRender = ops.map((h) => ({ id: h.id, kind: h.kind, content: h.content, confidence: h.confidence }));
+        opFence = renderOpFence(opsForRender, controller.operational.maxResults);
+        // Independent operational cap (declared maxChars now enforced): drop the
+        // weakest operational hits one by one; a still-oversized fence drops
+        // whole. The trusted block is never touched here.
+        const opCap = controller.operational.maxChars;
+        while (opFence.length > opCap && opsForRender.length > 1) {
+          opsForRender = opsForRender.slice(0, -1);
+          opFence = renderOpFence(opsForRender, controller.operational.maxResults);
+        }
+        if (opFence.length > opCap) {
+          opFence = "";
+          opsForRender = [];
+        }
       }
-      if (controller.debug) console.log("[dsh-self-improved] recall hits:", hits.length);
-      let hitsForRender = hits;
-      let block = renderRecallBlock(hitsForRender, controller.maxHits);
-      if (controller.maxChars && block.length > controller.maxChars) {
-        // Shrink by dropping the weakest contextual hits (rank order) instead of slicing
-        // mid-text, which would leave the wrapper tags unbalanced.
+
+      let block = trustedBlock && opFence ? `${trustedBlock}\n${opFence}` : trustedBlock || opFence;
+      if (controller.maxChars) {
+        // Overall combined cap: drop the weakest OPERATIONAL hits first, then
+        // trusted hits (only possible on the fresh trusted path; a cached
+        // trusted block is already within its own cap).
         const cap = controller.maxChars;
-        while (block.length > cap && hitsForRender.length > 1) {
-          hitsForRender = hitsForRender.slice(0, -1);
-          block = renderRecallBlock(hitsForRender, controller.maxHits);
+        while (block.length > cap && opsForRender.length > 0) {
+          opsForRender = opsForRender.slice(0, -1);
+          opFence = opsForRender.length > 0 ? renderOpFence(opsForRender, controller.operational!.maxResults) : "";
+          block = trustedBlock && opFence ? `${trustedBlock}\n${opFence}` : trustedBlock || opFence;
+        }
+        if (block.length > cap) {
+          if (!trustedCached) {
+            // Shrink by dropping the weakest contextual hits (rank order) instead of slicing
+            // mid-text, which would leave the wrapper tags unbalanced.
+            while (block.length > cap && trustedHits.length > 1) {
+              trustedHits = trustedHits.slice(0, -1);
+              trustedBlock = renderRecallBlock(trustedHits, controller.maxHits);
+              block = trustedBlock && opFence ? `${trustedBlock}\n${opFence}` : trustedBlock || opFence;
+            }
+          } else {
+            // Cached trusted block cannot be re-shrunk (no hits at hand); the
+            // operational fence already shrunk — drop it whole if still over.
+            opFence = "";
+            opsForRender = [];
+            block = trustedBlock;
+          }
         }
         if (block.length > cap) block = "";
       }
       if (!block) return decision;
 
-      // Cache (LRU-cap: evict the oldest, never wipe fresh entries wholesale)
-      while (injectedCache.size >= CACHE_MAX) {
-        const oldest = injectedCache.keys().next().value;
-        if (oldest === undefined) break;
-        injectedCache.delete(oldest);
+      // Cache (LRU-cap: evict the oldest, never wipe fresh entries wholesale) —
+      // trusted block only, AFTER any combined-cap shrink, so the next identical
+      // turn replays exactly this trusted text.
+      if (!trustedCached) {
+        while (injectedCache.size >= CACHE_MAX) {
+          const oldest = injectedCache.keys().next().value;
+          if (oldest === undefined) break;
+          injectedCache.delete(oldest);
+        }
+        injectedCache.set(cacheKey, trustedBlock);
       }
-      injectedCache.set(cacheKey, block);
 
       // Access tracking: only hits actually rendered into the block (after char
       // trimming) count as recall access; dropped hits were never shown.
-      if (onInjected && hitsForRender.length > 0) onInjected(hitsForRender.map((h) => h.id));
+      // Trusted accounting is unchanged: a cached trusted block re-enters
+      // without re-bumping its ids. Operational ids are recorded only when the
+      // operational fence actually rendered.
+      if (onInjected) {
+        const ids = [
+          ...(trustedCached ? [] : trustedBlock ? trustedHits.map((h) => h.id) : []),
+          ...opsForRender.map((h) => h.id),
+        ];
+        if (ids.length > 0) onInjected(ids);
+      }
 
       return enterWithContext(payload, decision, block);
     },

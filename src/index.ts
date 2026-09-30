@@ -113,6 +113,12 @@ export interface EpisodeLearningConfig {
   confidenceFloor: number;
   /** Expiry of derived operational memories in days (7–365, default 90) */
   expiryDays: number;
+  /** Phase 4: separately-gated operational recall injection (off = rollout default) */
+  operationalRecallEnabled: boolean;
+  /** Operational hits per injection (1–10, default 2) */
+  maxRecallResults: number;
+  /** Character cap of the operational fence itself (100–5000, default 600) */
+  maxRecallChars: number;
 }
 
 export interface Config {
@@ -289,6 +295,9 @@ export const Config = z.object({
     reviewEnabled: z.boolean().default(true),
     confidenceFloor: z.number().min(0).max(1).default(0.8),
     expiryDays: z.number().min(7).max(365).default(90),
+    operationalRecallEnabled: z.boolean().default(false),
+    maxRecallResults: z.number().min(1).max(10).default(2),
+    maxRecallChars: z.number().min(100).max(5000).default(600),
   }),
 });
 
@@ -363,7 +372,7 @@ export function apply(ctx: Context, config: Config): void {
     return extractLlm({ system, user, sessionId, signal });
   }, embeddingProvider);
   // Episode-learning runtime state (hot-applied by scope.watch below)
-  const episodeState = { enabled: config.episodeLearning.enabled, captureArguments: config.episodeLearning.captureArguments, maxChars: config.episodeLearning.resultExcerptChars, reviewEnabled: config.episodeLearning.reviewEnabled, confidenceFloor: config.episodeLearning.confidenceFloor, expiryDays: config.episodeLearning.expiryDays };
+  const episodeState = { enabled: config.episodeLearning.enabled, captureArguments: config.episodeLearning.captureArguments, maxChars: config.episodeLearning.resultExcerptChars, reviewEnabled: config.episodeLearning.reviewEnabled, confidenceFloor: config.episodeLearning.confidenceFloor, expiryDays: config.episodeLearning.expiryDays, operationalRecallEnabled: config.episodeLearning.operationalRecallEnabled, maxRecallResults: config.episodeLearning.maxRecallResults, maxRecallChars: config.episodeLearning.maxRecallChars };
   installCapture(ctx, store, { enabled: () => readModule("capture") }, () => {
     if (!extractSettings.enabled) return;
     const result = extractor.pump();
@@ -593,7 +602,10 @@ export function apply(ctx: Context, config: Config): void {
   const syncTools = (): void => {
     const want = readModule("tools");
     if (want && !toolsDispose) {
-      toolsDispose = registerMemoryTools(ctx, store, config.searchLimit);
+      toolsDispose = registerMemoryTools(ctx, store, config.searchLimit, {
+        confidenceFloor: () => episodeState.confidenceFloor,
+        maxResults: () => episodeState.maxRecallResults,
+      });
       log("tools enabled");
     } else if (!want && toolsDispose) {
       toolsDispose();
@@ -633,6 +645,13 @@ export function apply(ctx: Context, config: Config): void {
     sessionIdOf: sessionIdForPayload,
     maxInjectPerTurn: config.recall.maxInjectPerTurn,
     onInjected: (ids: string[]) => store.recordAccess(ids),
+    // Phase 4: operational lane (live getters so settings hot-apply reaches each pre-step)
+    operational: {
+      enabled: () => readModule("recall") && episodeState.enabled && episodeState.operationalRecallEnabled,
+      get maxResults() { return episodeState.maxRecallResults; },
+      get maxChars() { return episodeState.maxRecallChars; },
+      get confidenceFloor() { return episodeState.confidenceFloor; },
+    },
   };
   installRecallInjection(ctx, recall, injectionCtl);
   log("recall injection installed (strategy:", rec.recallSettings.strategy, ", project scoping on)");
@@ -678,6 +697,9 @@ export function apply(ctx: Context, config: Config): void {
     episodeState.confidenceFloor = next.episodeLearning.confidenceFloor;
     episodeState.expiryDays = next.episodeLearning.expiryDays;
     episodeState.maxChars = next.episodeLearning.resultExcerptChars;
+    episodeState.operationalRecallEnabled = next.episodeLearning.operationalRecallEnabled;
+    episodeState.maxRecallResults = next.episodeLearning.maxRecallResults;
+    episodeState.maxRecallChars = next.episodeLearning.maxRecallChars;
     config.episodeLearning.retentionDays = next.episodeLearning.retentionDays;
     extractSettings.enabled = readModule("extract");
     extractSettings.intervalMinutes = next.extract.intervalMinutes;
