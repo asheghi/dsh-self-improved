@@ -40,9 +40,23 @@ export type MemorySource =
   | "browser-correct"
   | "tool-correct"
   | "baseline-pin"
+  | "episode-review"
   | "legacy"
   | "persona";
 export type MemoryScope = "global" | "project" | "session";
+
+/**
+ * Evidence entry stored with memory meta. Episode-review rows additionally
+ * point at the source episode and the exact successful step call.
+ */
+export interface MemoryEvidence {
+  sessionId?: string;
+  seq?: number;
+  snippet?: string;
+  /** Episode-learning linkage (Phase 3): source episode + successful call id */
+  episodeId?: string;
+  callId?: string;
+}
 
 export interface MemoryMetaInput {
   provenance?: MemoryProvenance;
@@ -52,7 +66,7 @@ export interface MemoryMetaInput {
   sessionId?: string | null;
   confidence?: number;
   expiresAt?: number | null;
-  evidence?: Array<{ sessionId?: string; seq?: number; snippet?: string }>;
+  evidence?: Array<MemoryEvidence>;
 }
 
 export interface MemoryMeta {
@@ -63,7 +77,7 @@ export interface MemoryMeta {
   sessionId: string | null;
   confidence: number;
   expiresAt: number | null;
-  evidence: Array<{ sessionId?: string; seq?: number; snippet?: string }>;
+  evidence: Array<MemoryEvidence>;
   readCount: number;
   lastReadAt: number | null;
   /** Present only for legacy rows backfilled by the store migration */
@@ -579,6 +593,130 @@ export class MemoryStore {
       throw error;
     }
     return this.getMemory(record.id) ?? record;
+  }
+
+  /**
+   * ATOMIC episode-review persistence: insert the derived memories AND mark the
+   * episode reviewed in ONE BEGIN IMMEDIATE transaction, or nothing at all.
+   * Gates (refused → rollback, return false; no state change):
+   *  - the episode must still be terminal & unreviewed ('succeeded'/'failed',
+   *    reviewed_at NULL) when the transaction runs — a concurrent review pass,
+   *    demotion to ambiguous, or deletion invalidates the batch;
+   *  - EVERY evidence entry must reference an existing episode_steps row of
+   *    THIS episode with is_error = 0 (successful calls only).
+   * opts.validateOnly = validation only, no writes (dryRun path).
+   * On any throw: ROLLBACK + rethrow (caller counts an error; episode stays
+   * unreviewed for the next pass).
+   */
+  commitEpisodeLearnings(
+    input: {
+      episodeId: string;
+      // 'rejected' verdicts persist reject_reason and leave no memories.
+      status: "reviewed" | "rejected";
+      summary: string | null;
+      confidence: number | null;
+      rejectReason: string | null;
+      memories: Array<{
+        content: string;
+        confidence: number;
+        expiresAt?: number | null;
+        evidence: Array<{ episodeId: string; callId: string; snippet: string }>;
+      }>;
+    },
+    opts: { validateOnly?: boolean } = {},
+  ): boolean {
+    const loadEpisode = (): { status: string; reviewed_at: number | null; session_id: string | null; project_id: string | null } | undefined =>
+      this.db
+        .prepare(`SELECT status, reviewed_at, session_id, project_id FROM episodes WHERE id = ?`)
+        .get(input.episodeId) as
+        | { status: string; reviewed_at: number | null; session_id: string | null; project_id: string | null }
+        | undefined;
+    const verifyEvidence = (memory: {
+      evidence: Array<{ episodeId: string; callId: string; snippet: string }>;
+    }): boolean => {
+      const stmt = this.db.prepare(
+        `SELECT 1 FROM episode_steps WHERE episode_id = ? AND call_id = ? AND is_error = 0`,
+      );
+      for (const ev of memory.evidence) {
+        if (!stmt.get(input.episodeId, ev.callId)) return false;
+      }
+      return true;
+    };
+    if (opts.validateOnly === true) {
+      const row = loadEpisode();
+      if (!row || (row.status !== "succeeded" && row.status !== "failed") || row.reviewed_at !== null) return false;
+      for (const memory of input.memories) {
+        if (!verifyEvidence(memory)) return false;
+      }
+      return true;
+    }
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const row = loadEpisode();
+      if (
+        !row ||
+        (row.status !== "succeeded" && row.status !== "failed") ||
+        row.reviewed_at !== null ||
+        !input.memories.every(verifyEvidence)
+      ) {
+        this.db.exec("ROLLBACK");
+        return false;
+      }
+      const now = Date.now();
+      for (const memory of input.memories) {
+        const record: MemoryRecord = {
+          id: randomUUID(),
+          kind: "fact",
+          content: memory.content,
+          importance: 6,
+          accessCount: 0,
+          createdAt: now,
+          updatedAt: now,
+          status: "active",
+        };
+        // Mirror insertMemory's row set exactly: main row + seq + FTS + meta.
+        this.db
+          .prepare(
+            `INSERT INTO memories (id, kind, content, importance, access_count, created_at, updated_at, status, supersedes)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          )
+          .run(record.id, record.kind, record.content, record.importance, 0, now, now, "active", record.supersedes ?? null);
+        this.db.prepare(`INSERT INTO memories_seq (memory_id, seq) VALUES (?, ?)`).run(record.id, this.nextMemSeq());
+        this.db
+          .prepare(`INSERT INTO memories_fts (search_text, kind, content_rowid) VALUES (?, ?, ?)`)
+          .run(tokenize(record.content), record.kind, record.id);
+        this.upsertMeta(record.id, {
+          provenance: "derived",
+          source: "episode-review",
+          scope: "project",
+          projectId: row.project_id ?? null,
+          sessionId: row.session_id ?? null,
+          confidence: memory.confidence,
+          expiresAt: memory.expiresAt ?? null,
+          evidence: memory.evidence.map((e) => ({
+            episodeId: e.episodeId,
+            callId: e.callId,
+            sessionId: row.session_id ?? undefined,
+            snippet: e.snippet,
+          })),
+          readCount: 0,
+          lastReadAt: null,
+          legacy: false,
+        });
+      }
+      this.db
+        .prepare(
+          `UPDATE episodes SET status = ?, summary = ?, confidence = ?, reject_reason = ?,
+              reviewed_at = ?, updated_at = ?
+           WHERE id = ? AND status IN ('succeeded', 'failed') AND reviewed_at IS NULL`,
+        )
+        .run(input.status, input.summary ?? "", input.confidence ?? 0, input.rejectReason ?? null, now, now, input.episodeId);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      try { this.db.exec("ROLLBACK"); } catch { /* already rolled back */ }
+      throw error;
+    }
+    return true;
   }
 
   /**
@@ -1963,10 +2101,10 @@ type MemorySearchOptions2 = {
 
 const ACCESS_DEDUP_MS = 3_600_000;
 
-function parseEvidence(raw: string): Array<{ sessionId?: string; seq?: number; snippet?: string }> {
+function parseEvidence(raw: string): Array<MemoryEvidence> {
   try {
     const arr = JSON.parse(raw) as unknown;
-    return Array.isArray(arr) ? (arr as Array<{ sessionId?: string; seq?: number; snippet?: string }>).slice(0, 5) : [];
+    return Array.isArray(arr) ? (arr as Array<MemoryEvidence>).slice(0, 5) : [];
   } catch {
     return [];
   }

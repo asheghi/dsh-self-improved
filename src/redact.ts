@@ -78,6 +78,15 @@ const FREE_TEXT_PATTERNS: FreeTextPattern[] = [
   { re: new RegExp(`\\bsecret=\\s*${VALUE4}`, "gi"), as: "[REDACTED]" },
   { re: new RegExp(`\\bauthorization:\\s*${VALUE4}`, "gi"), as: "[REDACTED]" },
   { re: new RegExp(`\\bcookie:\\s*${VALUE4}`, "gi"), as: "[REDACTED]" },
+  // Generic labeled-colon/equals credential forms (after the specific Basic/
+  // Bearer forms above so whole-form matches win): `password: x`,
+  // `TOKEN = abc123`, `secret:xyz` — any non-space run ≥4 chars. May overlap
+  // (double-redact) the URL-userinfo pattern; the overlap is benign.
+  {
+    re: /\b(password|passwd|pwd|secret|api[_-]?key|token|authorization)\s*[:=]\s*\S{4,}/gi,
+    as: "[REDACTED]",
+  },
+  { re: /\b(bearer|basic)\s+[A-Za-z0-9+/=._-]{8,}/gi, as: "[REDACTED]" },
   { re: /eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g, as: "[REDACTED]" },
   { re: /gh[pousr]_[A-Za-z0-9]{20,}/g, as: "[REDACTED]" },
   { re: /github_pat_[A-Za-z0-9_]{20,}/g, as: "[REDACTED]" },

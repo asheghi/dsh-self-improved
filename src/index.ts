@@ -19,6 +19,7 @@ import "@deepseek-ai/dsh-session-query";
 import { MemoryStore, defaultMemoryDir } from "./storage.js";
 import { installCapture, projectKeyFromCwd } from "./capture.js";
 import { closeStalePendingEpisodes, repairEpisodeConsistency, assembleSessionEpisodes } from "./episodes.js";
+import { runEpisodeReview } from "./episode-review.js";
 import { registerMemoryTools } from "./tools.js";
 import { Extractor, type ExtractSettings } from "./extract.js";
 import { RecallService, createOpenAiEmbedding, renderCuratedProfile, type RecallSettings } from "./recall.js";
@@ -106,6 +107,12 @@ export interface EpisodeLearningConfig {
   resultExcerptChars: number;
   /** Episodes + audit rows older than this many days are purged (bounded growth; 7–365, default 90) */
   retentionDays: number;
+  /** Phase 3: LLM outcome review of assembled episodes (off = no memories learned, episodes stay unreviewed) */
+  reviewEnabled: boolean;
+  /** Minimum reviewer confidence for a memory to be stored (0–1, default 0.8) */
+  confidenceFloor: number;
+  /** Expiry of derived operational memories in days (7–365, default 90) */
+  expiryDays: number;
 }
 
 export interface Config {
@@ -279,6 +286,9 @@ export const Config = z.object({
     captureArguments: z.boolean().default(true),
     resultExcerptChars: z.number().min(200).max(50000).default(4000),
     retentionDays: z.number().min(7).max(365).default(90),
+    reviewEnabled: z.boolean().default(true),
+    confidenceFloor: z.number().min(0).max(1).default(0.8),
+    expiryDays: z.number().min(7).max(365).default(90),
   }),
 });
 
@@ -353,7 +363,7 @@ export function apply(ctx: Context, config: Config): void {
     return extractLlm({ system, user, sessionId, signal });
   }, embeddingProvider);
   // Episode-learning runtime state (hot-applied by scope.watch below)
-  const episodeState = { enabled: config.episodeLearning.enabled, captureArguments: config.episodeLearning.captureArguments, maxChars: config.episodeLearning.resultExcerptChars };
+  const episodeState = { enabled: config.episodeLearning.enabled, captureArguments: config.episodeLearning.captureArguments, maxChars: config.episodeLearning.resultExcerptChars, reviewEnabled: config.episodeLearning.reviewEnabled, confidenceFloor: config.episodeLearning.confidenceFloor, expiryDays: config.episodeLearning.expiryDays };
   installCapture(ctx, store, { enabled: () => readModule("capture") }, () => {
     if (!extractSettings.enabled) return;
     const result = extractor.pump();
@@ -380,6 +390,7 @@ export function apply(ctx: Context, config: Config): void {
     embeddingProvider,
   );
   const skillLlm = makeLlmCall(ctx, config, "memory-skill", 3000);
+  const episodeReviewLlm = makeLlmCall(ctx, config, "episode-review", 2000);
   let lastEvolveTs = 0;
   /**
    * Run one evolution round.
@@ -456,7 +467,21 @@ export function apply(ctx: Context, config: Config): void {
       console.warn("[dsh-self-improved] review pump error:", String(e));
       return { sessions: 0, memories: 0, skipped: 0, errors: 1 };
     });
+    const episodeReviewPromise =
+      episodeState.enabled && episodeState.reviewEnabled
+        ? runEpisodeReview(
+            store,
+            async ({ system, user, signal }) => episodeReviewLlm({ system, user, signal }),
+            {
+              confidenceFloor: episodeState.confidenceFloor,
+              expiryDays: episodeState.expiryDays,
+            },
+          )
+            .then((s) => { log("episode review:", JSON.stringify(s)); return s; })
+            .catch((e) => console.warn("[dsh-self-improved] episode review error:", String(e)))
+        : null;
     const summary = await runEvolution(true, true);
+    if (episodeReviewPromise) await episodeReviewPromise;
     log(`review(${reason}) done:`, JSON.stringify({ pumped, ...summary }));
     return { pumped, ...summary };
   };
@@ -649,6 +674,9 @@ export function apply(ctx: Context, config: Config): void {
     state.modules = { ...next.modules };
     episodeState.enabled = next.episodeLearning.enabled;
     episodeState.captureArguments = next.episodeLearning.captureArguments;
+    episodeState.reviewEnabled = next.episodeLearning.reviewEnabled;
+    episodeState.confidenceFloor = next.episodeLearning.confidenceFloor;
+    episodeState.expiryDays = next.episodeLearning.expiryDays;
     episodeState.maxChars = next.episodeLearning.resultExcerptChars;
     config.episodeLearning.retentionDays = next.episodeLearning.retentionDays;
     extractSettings.enabled = readModule("extract");

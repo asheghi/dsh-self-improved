@@ -85,7 +85,14 @@ check("bearer case-insensitive", redactFreeText("BEARER abcdefgh123456") === "[R
 check("short bearer value untouched", redactFreeText("Bearer abc, y") === "Bearer abc, y", redactFreeText("Bearer abc, y"));
 check("password= redacted", redactFreeText("login password=hunter22222 done") === "login [REDACTED] done", redactFreeText("login password=hunter22222 done"));
 check("pwd= and passwd= redacted", redactFreeText("passwd=verylong1 pwd=verylong2") === "[REDACTED] [REDACTED]", redactFreeText("passwd=verylong1 pwd=verylong2"));
+// The generic labeled-colon/equals rule sits after the specific `key=value`
+// forms, so the trailing comma is preserved by the older VALUE4 matches.
 check("api key variants redacted", redactFreeText("api_key=aaaaaaaaaaaa1, api-key=bbbbbbbbbbbb2") === "[REDACTED], [REDACTED]", redactFreeText("api_key=aaaaaaaaaaaa1, api-key=bbbbbbbbbbbb2"));
+// New generic labeled-colon pattern (fix 6): any credential label with : or = and a ≥4-char non-space value.
+check("password: colon form redacted", redactFreeText("password: hunter2xyz done") === "[REDACTED] done", redactFreeText("password: hunter2xyz done"));
+check("secret: xyz redacted", redactFreeText("secret: aabbccdd1") === "[REDACTED]");
+check("labelled bearer xyz redacted", redactFreeText("bearer aabbccdd11 tail") === "[REDACTED] tail", redactFreeText("bearer aabbccdd11 tail"));
+check("labeled short value untouched", redactFreeText("token: ab") === "token: ab", redactFreeText("token: ab"));
 check("secret= redacted", redactFreeText("secret=zzzzzzzzzzzz1") === "[REDACTED]");
 check("authorization: header redacted", redactFreeText("Authorization: SuperToken12345") === "[REDACTED]", redactFreeText("Authorization: SuperToken12345"));
 // Basic-auth short run MUST be redacted (labeled forms have a 4-char floor, no 6-char exemption).
