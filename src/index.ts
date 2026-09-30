@@ -18,6 +18,7 @@ import "@deepseek-ai/dsh-session-query";
 
 import { MemoryStore, defaultMemoryDir } from "./storage.js";
 import { installCapture, projectKeyFromCwd } from "./capture.js";
+import { closeStalePendingEpisodes, repairEpisodeConsistency, assembleSessionEpisodes } from "./episodes.js";
 import { registerMemoryTools } from "./tools.js";
 import { Extractor, type ExtractSettings } from "./extract.js";
 import { RecallService, createOpenAiEmbedding, renderCuratedProfile, type RecallSettings } from "./recall.js";
@@ -91,6 +92,22 @@ export interface RecallConfig {
   embedding: EmbeddingConfig;
 }
 
+/**
+ * Episode learning (Phases 1+2 slice): capture + redaction + assembly. Only these
+ * three fields in THIS slice; the plan adds review/recall/skill fields in later
+ * phases (see docs/episode-learning-implementation-plan.md).
+ */
+export interface EpisodeLearningConfig {
+  /** Master switch for episode capture/assembly (off = no episode events captured) */
+  enabled: boolean;
+  /** In this slice capture is gated together with this flag (episodeCtl.enabled); off = nothing captured */
+  captureArguments: boolean;
+  /** Redacted argument/result bound in characters (also the residual-exposure bound) */
+  resultExcerptChars: number;
+  /** Episodes + audit rows older than this many days are purged (bounded growth; 7–365, default 90) */
+  retentionDays: number;
+}
+
 export interface Config {
   /** L1 master switch: turn off/on at any time, hot-switched, no restart */
   enabled: boolean;
@@ -122,6 +139,8 @@ export interface Config {
   };
   /** M6 nightly review schedule: run one full evolution at a fixed time every day (extraction drain + consolidation + skills + governance) */
   review: { enabled: boolean; time: string };
+  /** Episode learning (capture/assembly; later phases add review/recall/skill fields) */
+  episodeLearning: EpisodeLearningConfig;
 }
 
 // Shared LLM caller (used by extraction/consolidation/skill synthesis; reuses the DSH model stack).
@@ -255,6 +274,12 @@ export const Config = z.object({
     enabled: z.boolean().default(true),
     time: z.string().default("22:00"),
   }),
+  episodeLearning: z.object({
+    enabled: z.boolean().default(false),
+    captureArguments: z.boolean().default(true),
+    resultExcerptChars: z.number().min(200).max(50000).default(4000),
+    retentionDays: z.number().min(7).max(365).default(90),
+  }),
 });
 
 export function apply(ctx: Context, config: Config): void {
@@ -274,6 +299,21 @@ export function apply(ctx: Context, config: Config): void {
   // ② Memory store (M1): SQLite + FTS5 + sqlite-vec skeleton
   const dir = config.storageRoot.trim() || defaultMemoryDir();
   const store = new MemoryStore(dir);
+  // Episode-side consistency repair is idempotent (same discipline as repairConsistency)
+  try {
+    repairEpisodeConsistency(store);
+  } catch (error) {
+    console.warn("[dsh-self-improved] episode consistency repair failed:", String(error));
+  }
+  // Startup recovery: stranded episode events (e.g. a previous process died
+  // between append and assembly, or assembly was skipped) are re-assembled.
+  for (const sessionId of store.sessionsWithPendingEpisodeEvents(500)) {
+    try {
+      assembleSessionEpisodes(store, sessionId);
+    } catch (error) {
+      console.warn("[dsh-self-improved] startup episode assembly failed:", sessionId, String(error));
+    }
+  }
   log("memory store ready:", dir);
 
   // Hermes-style durable baseline: a small curated profile belongs in the
@@ -312,11 +352,16 @@ export function apply(ctx: Context, config: Config): void {
     }
     return extractLlm({ system, user, sessionId, signal });
   }, embeddingProvider);
+  // Episode-learning runtime state (hot-applied by scope.watch below)
+  const episodeState = { enabled: config.episodeLearning.enabled, captureArguments: config.episodeLearning.captureArguments, maxChars: config.episodeLearning.resultExcerptChars };
   installCapture(ctx, store, { enabled: () => readModule("capture") }, () => {
     if (!extractSettings.enabled) return;
     const result = extractor.pump();
     if (extractSettings.flushDrain) return result;
     result.catch((error) => console.warn("[dsh-self-improved] extract pump error:", String(error)));
+  }, {
+    enabled: () => readModule("capture") && episodeState.enabled && episodeState.captureArguments,
+    maxChars: () => episodeState.maxChars,
   });
   log("capture + extract installed");
 
@@ -439,6 +484,28 @@ export function apply(ctx: Context, config: Config): void {
         .then(() => runEvolution(false, false))
         .then((s) => {
           if (s.skipped) log("maintenance round (no heavy work)");
+          // Stale pending episodes: never assembled in-window → ambiguous (never learned from)
+          if (state.enabled && episodeState.enabled) {
+            // Starvation recovery: stranded pending events get re-assembled here too
+            try {
+              for (const sessionId of store.sessionsWithPendingEpisodeEvents(500)) {
+                assembleSessionEpisodes(store, sessionId);
+              }
+            } catch (e) {
+              console.warn("[dsh-self-improved] maintenance episode assembly error:", String(e));
+            }
+            const closed = closeStalePendingEpisodes(store, 30 * 60_000);
+            if (closed > 0) log("stale pending episodes closed:", closed);
+            // Retention: bound episode/evidence growth to retentionDays
+            try {
+              const cutoff = Date.now() - config.episodeLearning.retentionDays * 86_400_000;
+              const purged = store.purgeEpisodes({ olderThanTs: cutoff });
+              const total = purged.episodes + purged.steps + purged.events;
+              if (total > 0) log("episode retention purge:", JSON.stringify(purged));
+            } catch (e) {
+              console.warn("[dsh-self-improved] episode retention purge error:", String(e));
+            }
+          }
         })
         .catch((e) => console.warn("[dsh-self-improved] extract pump error:", String(e)));
     }, config.extract.intervalMinutes * 60_000);
@@ -580,6 +647,10 @@ export function apply(ctx: Context, config: Config): void {
   scope.watch((next) => {
     state.enabled = next.enabled;
     state.modules = { ...next.modules };
+    episodeState.enabled = next.episodeLearning.enabled;
+    episodeState.captureArguments = next.episodeLearning.captureArguments;
+    episodeState.maxChars = next.episodeLearning.resultExcerptChars;
+    config.episodeLearning.retentionDays = next.episodeLearning.retentionDays;
     extractSettings.enabled = readModule("extract");
     extractSettings.intervalMinutes = next.extract.intervalMinutes;
     extractSettings.batchMaxChars = next.extract.batchMaxChars;

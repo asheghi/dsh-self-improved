@@ -296,6 +296,67 @@ export class MemoryStore {
     if (personaCols.length > 0 && !personaCols.some((c) => c.name === "mem_watermark")) {
       db.exec("ALTER TABLE persona_versions ADD COLUMN mem_watermark INTEGER");
     }
+    this.ensureEpisodeSchema(db);
+  }
+
+  /**
+   * Episode-learning tables (schema v2). STRICT + additive only; every statement
+   * is CREATE TABLE IF NOT EXISTS, so it is safe to run from both ensureSchema and
+   * the v2 migration recovery path (an interrupted migration re-runs cleanly).
+   * Result pairing in episode_steps happens ONLY via call_id, never by position.
+   */
+  private ensureEpisodeSchema(db: DatabaseSync): void {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS episode_events (
+        session_id TEXT NOT NULL, kind TEXT NOT NULL, call_id TEXT,
+        turn INTEGER NOT NULL, step INTEGER, seq INTEGER NOT NULL, at INTEGER NOT NULL,
+        payload TEXT NOT NULL, created_at INTEGER NOT NULL, episode_id TEXT,
+        PRIMARY KEY (session_id, kind, call_id, seq)
+      ) STRICT;
+      CREATE INDEX IF NOT EXISTS idx_episode_events_session ON episode_events(session_id, episode_id);
+      CREATE TABLE IF NOT EXISTS episodes (
+        id           TEXT PRIMARY KEY,
+        session_id   TEXT NOT NULL,
+        project_id   TEXT NOT NULL,
+        turn         INTEGER NOT NULL,
+        status       TEXT NOT NULL DEFAULT 'pending',
+        started_at   INTEGER NOT NULL,
+        ended_at     INTEGER,
+        updated_at   INTEGER NOT NULL,
+        first_seq    INTEGER,
+        last_seq     INTEGER,
+        reviewed_at  INTEGER,
+        summary      TEXT,
+        confidence   REAL,
+        fingerprint  TEXT,
+        delegated    INTEGER NOT NULL DEFAULT 0,
+        reject_reason TEXT
+      ) STRICT;
+      CREATE INDEX IF NOT EXISTS idx_episodes_project_status ON episodes(project_id, status, updated_at);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_episodes_session_turn ON episodes(session_id, turn);
+      CREATE INDEX IF NOT EXISTS idx_episodes_reviewed ON episodes(reviewed_at);
+      CREATE INDEX IF NOT EXISTS idx_episodes_fingerprint ON episodes(fingerprint);
+      CREATE TABLE IF NOT EXISTS episode_steps (
+        episode_id         TEXT NOT NULL,
+        ordinal            INTEGER NOT NULL,
+        call_id            TEXT NOT NULL,
+        tool_name          TEXT NOT NULL,
+        arguments_redacted TEXT NOT NULL,
+        result_excerpt     TEXT NOT NULL,
+        is_error           INTEGER NOT NULL,
+        error_name         TEXT,
+        error_code         TEXT,
+        call_seq           INTEGER,
+        result_seq         INTEGER,
+        call_at            INTEGER,
+        result_at          INTEGER,
+        args_truncated     INTEGER NOT NULL DEFAULT 0,
+        result_truncated   INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (episode_id, ordinal),
+        UNIQUE (episode_id, call_id)
+      ) STRICT;
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_episode_steps_call ON episode_steps(episode_id, call_id);
+    `);
   }
 
   /**
@@ -320,6 +381,7 @@ export class MemoryStore {
     if (applied) {
       // Keep user_version in sync for external tooling even when schema_state says done
       this.db.exec("PRAGMA user_version = 1");
+      this.ensureSchemaV2();
       return;
     }
 
@@ -346,6 +408,41 @@ export class MemoryStore {
       this.db.exec("ROLLBACK");
       throw error;
     }
+    this.ensureSchemaV2();
+  }
+
+  /**
+   * Idempotent v2 marker (episode learning tables). The episode DDL itself is
+   * created by ensureSchema (CREATE TABLE IF NOT EXISTS), so the v2 transaction
+   * only records the schema_state marker; because every statement idempotent,
+   * an interrupted earlier attempt (tables present, marker absent, e.g. deleted
+   * manually or killed mid-transaction) re-runs cleanly. Memories/meta rows are
+   * never touched by this migration.
+   */
+  private ensureSchemaV2(): void {
+    let applied = false;
+    try {
+      const row = this.db.prepare("SELECT value FROM schema_state WHERE key = 'v2'").get() as
+        | { value?: string }
+        | undefined;
+      applied = Boolean(row?.value);
+    } catch {
+      applied = false;
+    }
+    if (applied) {
+      this.db.exec("PRAGMA user_version = 2");
+      return;
+    }
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.ensureEpisodeSchema(this.db);
+      this.markMigration("v2", "episode learning tables (episodes/episode_steps/episode_events)");
+      this.db.exec("PRAGMA user_version = 2");
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   private markMigration(key: string, description: string): void {
@@ -365,6 +462,19 @@ export class MemoryStore {
   /** Whether the store has ever run the Hermes migration (used to gate one-shot scripts) */
   migrationApplied(): boolean {
     return this.migrationAppliedAt() > 0;
+  }
+
+  /** Schema_state marker version: v1&&v2 → 2, v1 → 1, unset → 0 */
+  schemaVersion(): number {
+    try {
+      const rows = this.db.prepare("SELECT key FROM schema_state").all() as Array<{ key: string }>;
+      const keys = new Set(rows.map((r) => String(r.key)));
+      if (keys.has("v1") && keys.has("v2")) return 2;
+      if (keys.has("v1")) return 1;
+      return 0;
+    } catch {
+      return 0;
+    }
   }
 
   migrationAppliedAt(): number {
@@ -1244,6 +1354,605 @@ export class MemoryStore {
     }
     return deleted;
   }
+
+  // ---------- Episode learning (schema v2) ----------
+
+  /** Per-session delegated classification stated by capture (in-process; decided from the immutable header each flush) */
+  private sessionEpisodeDelegated = new Map<string, boolean>();
+
+  /** Whether the session was last classified as delegated by episode capture */
+  episodeDelegated(sessionId: string): boolean {
+    return this.sessionEpisodeDelegated.get(sessionId) ?? false;
+  }
+
+  /**
+   * Append raw (already REDACTED-and-bounded) episode event rows for one session.
+   * Idempotent: INSERT OR IGNORE keyed on (session_id, kind, call_id, seq).
+   * The project scope is recorded so delayed assembly keeps correct scoping.
+   */
+  appendEpisodeEvents(sessionId: string, projectId: string, delegated: boolean, rows: EpisodeEventInput[]): void {
+    if (rows.length === 0) return;
+    if (delegated || !this.sessionEpisodeDelegated.has(sessionId)) {
+      this.sessionEpisodeDelegated.set(sessionId, delegated);
+    }
+    this.setSessionProject(sessionId, projectId);
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const stmt = this.db
+        .prepare(
+          `INSERT OR IGNORE INTO episode_events
+             (session_id, kind, call_id, turn, step, seq, at, payload, created_at, episode_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+        );
+      const now = Date.now();
+      for (const r of rows) {
+        stmt.run(sessionId, r.kind, r.callId, r.turn, r.step, r.seq, r.at, r.payload, now);
+      }
+      this.db.exec("COMMIT");
+    } catch (error) {
+      try { this.db.exec("ROLLBACK"); } catch { /* already rolled back */ }
+      throw error;
+    }
+  }
+
+  /** Unclaimed (episode_id IS NULL) episode events, ordered by seq */
+  getPendingEpisodeEvents(sessionId: string, limit = 2000): EpisodeEventRecord[] {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM episode_events WHERE session_id = ? AND episode_id IS NULL ORDER BY seq LIMIT ?`,
+      )
+      .all(sessionId, limit) as Array<Record<string, unknown>>;
+    return rows.map((r) => toEpisodeEventRecord(r));
+  }
+
+  /** Distinct sessions that still hold unclaimed episode events (recovery/retention sweep). */
+  sessionsWithPendingEpisodeEvents(limit = 500): string[] {
+    const rows = this.db
+      .prepare(`SELECT DISTINCT session_id FROM episode_events WHERE episode_id IS NULL LIMIT ?`)
+      .all(limit) as Array<{ session_id: string }>;
+    return rows.map((r) => String(r.session_id));
+  }
+
+  /** Highest turn among ALL episode events of a session (claimed + unclaimed).
+   * Turn-closure detection must read the full ledger, not just the pending
+   * prefix: a 2000-row open turn must not hide later-turn closure forever. */
+  maxEventTurn(sessionId: string): number {
+    const row = this.db
+      .prepare(`SELECT COALESCE(MAX(turn), 0) AS m FROM episode_events WHERE session_id = ?`)
+      .get(sessionId) as { m: number };
+    return Number(row.m);
+  }
+
+  /** All episode events of one turn (claimed or not) — closed turns are re-derived from the full set so flush-straddling pairs are never lost. */
+  getTurnEpisodeEvents(sessionId: string, turn: number): EpisodeEventRecord[] {
+    const rows = this.db
+      .prepare(`SELECT * FROM episode_events WHERE session_id = ? AND turn = ? ORDER BY seq`)
+      .all(sessionId, turn) as Array<Record<string, unknown>>;
+    return rows.map((r) => toEpisodeEventRecord(r));
+  }
+
+  /** Highest captured episode-event seq for a session (cursor floor for capture) */
+  lastEpisodeSeq(sessionId: string): number {
+    const row = this.db
+      .prepare("SELECT COALESCE(MAX(seq), 0) AS m FROM episode_events WHERE session_id = ?")
+      .get(sessionId) as { m: number };
+    return Number(row.m);
+  }
+
+  /**
+   * Claim a closed turn's episode events into an episode (durable linkage for
+   * audit; includes turn-end rows and toolCallId-less result rows).
+   */
+  claimEpisodeEvents(sessionId: string, callIds: string[], turn: number, episodeId: string): number {
+    let changes = 0;
+    const chunks = callIds.length === 0 ? [[]] : chunkList(callIds, 400);
+    for (const chunk of chunks) {
+      const placeholders = chunk.map(() => "?").join(",");
+      const res = this.db
+        .prepare(
+          `UPDATE episode_events SET episode_id = ?
+           WHERE session_id = ? AND turn = ? AND episode_id IS NULL
+             AND (kind = 'turn-end' OR call_id IS NULL OR call_id = '' OR call_id IN (${placeholders}))`,
+        )
+        .run(
+          episodeId,
+          sessionId,
+          turn,
+          ...(chunk.length === 0 ? [] : chunk),
+        );
+      changes += Number(res.changes);
+    }
+    return changes;
+  }
+
+  /**
+   * Upsert one (session_id, turn) episode. NEVER reclassifies: when the row is
+   * frozen (reviewed/rejected) or already terminal, it is returned untouched;
+   * only new rows and pending rows are updated. Runs INSIDE a caller transaction
+   * when invoked via commitEpisode.
+   */
+  upsertEpisode(input: EpisodeUpsertInput): { id: string; created: boolean } {
+    const now = Date.now();
+    const existing = this.getEpisodeBySessionTurn(input.sessionId, input.turn);
+    if (existing) {
+      const frozen =
+        existing.reviewedAt != null || existing.status === "reviewed" || existing.status === "rejected";
+      if (frozen || existing.status !== "pending") {
+        return { id: existing.id, created: false };
+      }
+      const firstSeq = minNullable(input.firstSeq, existing.firstSeq);
+      const lastSeq = maxNullable(input.lastSeq, existing.lastSeq);
+      this.db
+        .prepare(
+          `UPDATE episodes SET status = ?, project_id = ?, started_at = ?, ended_at = ?, updated_at = ?,
+             first_seq = ?, last_seq = ?, fingerprint = ?, delegated = ?
+           WHERE id = ?`,
+        )
+        .run(
+          input.status,
+          input.projectId,
+          Math.min(input.startedAt, existing.startedAt),
+          input.endedAt ?? existing.endedAt,
+          now,
+          firstSeq,
+          lastSeq,
+          input.fingerprint ?? existing.fingerprint,
+          input.delegated || existing.delegated ? 1 : 0,
+          existing.id,
+        );
+      return { id: existing.id, created: false };
+    }
+    const id = randomUUID();
+    this.db
+      .prepare(
+        `INSERT INTO episodes
+           (id, session_id, project_id, turn, status, started_at, ended_at, updated_at, first_seq, last_seq,
+            reviewed_at, summary, confidence, fingerprint, delegated, reject_reason)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?, NULL)`,
+      )
+      .run(
+        id,
+        input.sessionId,
+        input.projectId,
+        input.turn,
+        input.status,
+        input.startedAt,
+        input.endedAt,
+        now,
+        input.firstSeq,
+        input.lastSeq,
+        input.fingerprint,
+        input.delegated ? 1 : 0,
+      );
+    return { id, created: true };
+  }
+
+  /**
+   * Commit one closed turn atomically: episode upsert + step rows + event claims
+   * all commit together or not at all (acid replay safety).
+   */
+  commitEpisode(
+    input: EpisodeUpsertInput,
+    steps: EpisodeStepInput[],
+    claimCallIds: string[],
+  ): { id: string; created: boolean } {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      // Gate: re-read the target episode inside the transaction; reviewed/rejected
+      // rows are frozen — inserting steps/claims into them must be refused.
+      const existing = this.getEpisodeBySessionTurn(input.sessionId, input.turn);
+      if (existing && (existing.reviewedAt != null || existing.status === "reviewed" || existing.status === "rejected")) {
+        console.warn("[dsh-self-improved] commitEpisode refused (frozen episode):", existing.id, existing.status);
+        this.db.exec("ROLLBACK");
+        return { id: existing.id, created: false };
+      }
+      const { id, created } = this.upsertEpisode(input);
+      const stmt = this.db
+        .prepare(
+          `INSERT OR IGNORE INTO episode_steps
+             (episode_id, ordinal, call_id, tool_name, arguments_redacted, result_excerpt, is_error,
+              error_name, error_code, call_seq, result_seq, call_at, result_at, args_truncated, result_truncated)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        );
+      for (const s of steps) {
+        stmt.run(
+          id,
+          s.ordinal,
+          s.callId,
+          s.toolName,
+          s.argumentsRedacted,
+          s.resultExcerpt,
+          s.isError,
+          s.errorName,
+          s.errorCode,
+          s.callSeq,
+          s.resultSeq,
+          s.callAt,
+          s.resultAt,
+          s.argsTruncated,
+          s.resultTruncated,
+        );
+      }
+      this.claimEpisodeEvents(input.sessionId, claimCallIds, input.turn, id);
+      this.db.exec("COMMIT");
+      return { id, created };
+    } catch (error) {
+      try { this.db.exec("ROLLBACK"); } catch { /* already rolled back */ }
+      throw error;
+    }
+  }
+
+  getEpisode(id: string): EpisodeRecord | undefined {
+    const row = this.db.prepare("SELECT * FROM episodes WHERE id = ?").get(id) as
+      | Record<string, unknown>
+      | undefined;
+    return row ? toEpisodeRecord(row) : undefined;
+  }
+
+  getEpisodeBySessionTurn(sessionId: string, turn: number): EpisodeRecord | undefined {
+    const row = this.db
+      .prepare("SELECT * FROM episodes WHERE session_id = ? AND turn = ?")
+      .get(sessionId, turn) as Record<string, unknown> | undefined;
+    return row ? toEpisodeRecord(row) : undefined;
+  }
+
+  listEpisodes(
+    options: { projectId?: string; status?: EpisodeStatus; limit?: number; unreviewedOnly?: boolean } = {},
+  ): EpisodeRecord[] {
+    const where: string[] = [];
+    const params: Array<string | number> = [];
+    if (options.projectId) { where.push("project_id = ?"); params.push(options.projectId); }
+    if (options.status) { where.push("status = ?"); params.push(options.status); }
+    if (options.unreviewedOnly) { where.push("reviewed_at IS NULL"); }
+    const whereSql = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
+    const rows = this.db
+      .prepare(`SELECT * FROM episodes ${whereSql} ORDER BY updated_at DESC LIMIT ?`)
+      .all(...params, options.limit ?? 50) as Array<Record<string, unknown>>;
+    return rows.map((r) => toEpisodeRecord(r));
+  }
+
+  /** Counts per episode status in a project (or store-wide) */
+  episodeCounts(projectId?: string): Record<
+    "pending" | "succeeded" | "failed" | "ambiguous" | "reviewed" | "rejected",
+    number
+  > {
+    const rows = (projectId
+      ? this.db
+          .prepare(
+            `SELECT status, COUNT(*) n FROM episodes WHERE project_id = ? GROUP BY status`,
+          )
+          .all(projectId)
+      : this.db.prepare(`SELECT status, COUNT(*) n FROM episodes GROUP BY status`).all()) as Array<{
+      status: string;
+      n: number;
+    }>;
+    const counts = { pending: 0, succeeded: 0, failed: 0, ambiguous: 0, reviewed: 0, rejected: 0 };
+    for (const r of rows) {
+      const key = r.status as keyof typeof counts;
+      if (key in counts) counts[key] = Number(r.n);
+    }
+    return counts;
+  }
+
+  getEpisodeSteps(episodeId: string): EpisodeStepRecord[] {
+    const rows = this.db
+      .prepare(`SELECT * FROM episode_steps WHERE episode_id = ? ORDER BY ordinal`)
+      .all(episodeId) as Array<Record<string, unknown>>;
+    return rows.map((r) => toEpisodeStepRecord(r));
+  }
+
+  /** Record a review outcome (reviewed/rejected); ambiguous/pending rows are never learned from.
+   * Gate: only terminal, never-reviewed episodes ('succeeded'/'failed' with reviewed_at NULL)
+   * can be reviewed — anything else refuses and returns false. */
+  setEpisodeReview(
+    id: string,
+    review: { summary: string; confidence: number; status: "reviewed" | "rejected"; rejectReason?: string | null },
+  ): boolean {
+    const now = Date.now();
+    const res = this.db
+      .prepare(
+        `UPDATE episodes SET summary = ?, confidence = ?, status = ?, reject_reason = ?, reviewed_at = ?, updated_at = ?
+         WHERE id = ? AND status IN ('succeeded', 'failed') AND reviewed_at IS NULL`,
+      )
+      .run(review.summary, review.confidence, review.status, review.rejectReason ?? null, now, now, id);
+    return res.changes > 0;
+  }
+
+  /** Generic episode status update (consistency repair paths); never touches reviewed/rejected rows. */
+  private updateEpisodeStatusId(id: string, status: EpisodeStatus, endedAtFromUpdatedAt: boolean): boolean {
+    const row = this.getEpisode(id);
+    if (!row || row.reviewedAt != null || row.status === "reviewed" || row.status === "rejected") return false;
+    const endedAt = endedAtFromUpdatedAt ? (row.endedAt ?? row.updatedAt) : row.endedAt;
+    const res = this.db
+      .prepare(`UPDATE episodes SET status = ?, ended_at = ?, updated_at = ? WHERE id = ?`)
+      .run(status, endedAt, Date.now(), id);
+    return res.changes > 0;
+  }
+
+  /**
+   * Late-evidence revalidation: a terminal (succeeded/failed) episode with
+   * reviewed_at NULL whose turn just received NEW unclaimed event rows is demoted
+   * to ambiguous ('late-evidence') — completion proof may have changed. Reviewed/
+   * rejected rows and ambiguous/pending rows are never touched here.
+   * Returns the episode id when demoted, null otherwise.
+   */
+  revalidateEpisodeLateEvidence(sessionId: string, turn: number): string | null {
+    const row = this.getEpisodeBySessionTurn(sessionId, turn);
+    if (!row || row.reviewedAt != null) return null;
+    if (row.status !== "succeeded" && row.status !== "failed") return null;
+    const res = this.db
+      .prepare(
+        `UPDATE episodes SET status = 'ambiguous', summary = NULL, confidence = NULL,
+            reject_reason = 'late-evidence', updated_at = ?
+          WHERE id = ? AND status IN ('succeeded', 'failed') AND reviewed_at IS NULL`,
+      )
+      .run(Date.now(), row.id);
+    return Number(res.changes) > 0 ? row.id : null;
+  }
+
+  /**
+   * Close stale pending episodes (no deterministic evidence of completion within
+   * the window): status pending AND updated_at < now-olderThanMs → ambiguous,
+   * ended_at falls back to the last update time. Ambiguous episodes are never
+   * learned from. Returns the number closed.
+   */
+  closeStalePendingEpisodes(olderThanMs: number): number {
+    const cutoff = Date.now() - olderThanMs;
+    const res = this.db
+      .prepare(
+        `UPDATE episodes SET status = 'ambiguous',
+           ended_at = COALESCE(ended_at, updated_at),
+           updated_at = ?
+         WHERE status = 'pending' AND updated_at < ?`,
+      )
+      .run(Date.now(), cutoff);
+    return Number(res.changes);
+  }
+
+  /** Raw episode-event row count (governance) */
+  totalEpisodeEventCount(): number {
+    const row = this.db.prepare("SELECT COUNT(*) n FROM episode_events").get() as { n: number };
+    return Number(row.n);
+  }
+
+  /**
+   * Purge episodes (+ steps, + their event rows) plus stale unclaimed event rows.
+   * Returns deleted counts. Never touches memories rows.
+   */
+  purgeEpisodes(options: { projectId?: string; olderThanTs?: number } = {}): {
+    episodes: number;
+    steps: number;
+    events: number;
+  } {
+    const counts = { episodes: 0, steps: 0, events: 0 };
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const where: string[] = [];
+      const params: Array<string | number> = [];
+      if (options.projectId) { where.push("project_id = ?"); params.push(options.projectId); }
+      if (options.olderThanTs !== undefined) { where.push("COALESCE(updated_at, 0) < ?"); params.push(options.olderThanTs); }
+      if (where.length > 0) {
+        const ids = (
+          this.db
+            .prepare(`SELECT id FROM episodes WHERE ${where.join(" AND ")}`)
+            .all(...params) as Array<{ id: string }>
+        ).map((r) => String(r.id));
+        if (ids.length > 0) {
+          for (const chunk of chunkList(ids, 400)) {
+            const ph = chunk.map(() => "?").join(",");
+            const resSteps = this.db.prepare(`DELETE FROM episode_steps WHERE episode_id IN (${ph})`).run(...chunk);
+            const resEvents = this.db.prepare(`DELETE FROM episode_events WHERE episode_id IN (${ph})`).run(...chunk);
+            const resEpisodes = this.db.prepare(`DELETE FROM episodes WHERE id IN (${ph})`).run(...chunk);
+            counts.steps += Number(resSteps.changes);
+            counts.events += Number(resEvents.changes);
+            counts.episodes += Number(resEpisodes.changes);
+          }
+        }
+      }
+      if (options.olderThanTs !== undefined) {
+        // Stale unclaimed rows (never assembled) are purged on created_at AGE,
+        // never on seq (seq is an event counter, not an epoch timestamp), and are
+        // scoped by project through the durable session→project mapping.
+        const purgeUnclaimed = this.db
+          .prepare(
+            `DELETE FROM episode_events
+               WHERE episode_id IS NULL AND created_at < ?
+                 ${options.projectId ? "AND session_id IN (SELECT session_id FROM session_projects WHERE project_id = ?)" : ""}`,
+          )
+          .run(...(options.projectId ? [options.olderThanTs, options.projectId] : [options.olderThanTs]));
+        counts.events += Number(purgeUnclaimed.changes);
+      }
+      this.db.exec("COMMIT");
+    } catch (error) {
+      try { this.db.exec("ROLLBACK"); } catch { /* already rolled back */ }
+      throw error;
+    }
+    return counts;
+  }
+
+  /**
+   * Episode-side consistency repair (idempotent, called at startup like repairConsistency):
+   * ① orphan steps (episode row gone) are deleted;
+   * ② succeeded/failed episodes with zero steps are demoted to ambiguous (no evidence → never learned from);
+   * ③ pending episodes whose turn is provably closed (a later turn exists in the same session) but were
+   *    never assembled are demoted to ambiguous (unpaired evidence).
+   */
+  repairEpisodeConsistency(): void {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db.exec(`DELETE FROM episode_steps WHERE episode_id NOT IN (SELECT id FROM episodes)`);
+      const now = Date.now();
+      this.db
+        .prepare(
+          `UPDATE episodes SET status = 'ambiguous',
+             ended_at = COALESCE(ended_at, updated_at), updated_at = ?
+           WHERE status IN ('succeeded', 'failed')
+             AND NOT EXISTS (SELECT 1 FROM episode_steps s WHERE s.episode_id = episodes.id)`,
+        )
+        .run(now);
+      this.db
+        .prepare(
+          `UPDATE episodes SET status = 'ambiguous',
+             ended_at = COALESCE(ended_at, updated_at), updated_at = ?
+           WHERE status = 'pending'
+             AND EXISTS (
+               SELECT 1 FROM episodes later
+               WHERE later.session_id = episodes.session_id AND later.turn > episodes.turn
+             )`,
+        )
+        .run(now);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      try { this.db.exec("ROLLBACK"); } catch { /* already rolled back */ }
+      throw error;
+    }
+  }
+}
+
+// ---------- Episode learning types ----------
+
+export type EpisodeStatus = "pending" | "succeeded" | "failed" | "ambiguous" | "reviewed" | "rejected";
+export type EpisodeEventKind = "call" | "result" | "turn-end";
+
+/** Redaction happened BEFORE this struct is built; payload here is the bounded JSON string. */
+export interface EpisodeEventInput {
+  kind: EpisodeEventKind;
+  callId: string | null;
+  turn: number;
+  step: number | null;
+  seq: number;
+  at: number;
+  payload: string;
+}
+
+export interface EpisodeEventRecord extends EpisodeEventInput {
+  sessionId: string;
+  episodeId: string | null;
+}
+
+export interface EpisodeStepInput {
+  episodeId: string;
+  ordinal: number;
+  callId: string;
+  toolName: string;
+  argumentsRedacted: string;
+  resultExcerpt: string;
+  isError: number;
+  errorName: string | null;
+  errorCode: string | null;
+  callSeq: number | null;
+  resultSeq: number | null;
+  callAt: number | null;
+  resultAt: number | null;
+  argsTruncated: number;
+  resultTruncated: number;
+}
+
+export type EpisodeStepRecord = EpisodeStepInput;
+
+export interface EpisodeUpsertInput {
+  sessionId: string;
+  projectId: string;
+  turn: number;
+  status: EpisodeStatus;
+  startedAt: number;
+  endedAt: number | null;
+  firstSeq: number | null;
+  lastSeq: number | null;
+  fingerprint: string | null;
+  delegated: boolean;
+}
+
+export interface EpisodeRecord {
+  id: string;
+  sessionId: string;
+  projectId: string;
+  turn: number;
+  status: EpisodeStatus;
+  startedAt: number;
+  endedAt: number | null;
+  updatedAt: number;
+  firstSeq: number | null;
+  lastSeq: number | null;
+  reviewedAt: number | null;
+  summary: string | null;
+  confidence: number | null;
+  fingerprint: string | null;
+  delegated: boolean;
+  rejectReason: string | null;
+}
+
+function toEpisodeEventRecord(row: Record<string, unknown>): EpisodeEventRecord {
+  return {
+    sessionId: String(row.session_id),
+    kind: row.kind as EpisodeEventKind,
+    callId: row.call_id == null ? null : String(row.call_id),
+    turn: Number(row.turn),
+    step: row.step == null ? null : Number(row.step),
+    seq: Number(row.seq),
+    at: Number(row.at),
+    payload: String(row.payload),
+    episodeId: row.episode_id == null ? null : String(row.episode_id),
+  };
+}
+
+function toEpisodeRecord(row: Record<string, unknown>): EpisodeRecord {
+  return {
+    id: String(row.id),
+    sessionId: String(row.session_id),
+    projectId: String(row.project_id),
+    turn: Number(row.turn),
+    status: row.status as EpisodeStatus,
+    startedAt: Number(row.started_at),
+    endedAt: row.ended_at == null ? null : Number(row.ended_at),
+    updatedAt: Number(row.updated_at),
+    firstSeq: row.first_seq == null ? null : Number(row.first_seq),
+    lastSeq: row.last_seq == null ? null : Number(row.last_seq),
+    reviewedAt: row.reviewed_at == null ? null : Number(row.reviewed_at),
+    summary: row.summary == null ? null : String(row.summary),
+    confidence: row.confidence == null ? null : Number(row.confidence),
+    fingerprint: row.fingerprint == null ? null : String(row.fingerprint),
+    delegated: Number(row.delegated) === 1,
+    rejectReason: row.reject_reason == null ? null : String(row.reject_reason),
+  };
+}
+
+function toEpisodeStepRecord(row: Record<string, unknown>): EpisodeStepRecord {
+  return {
+    episodeId: String(row.episode_id),
+    ordinal: Number(row.ordinal),
+    callId: String(row.call_id),
+    toolName: String(row.tool_name),
+    argumentsRedacted: String(row.arguments_redacted),
+    resultExcerpt: String(row.result_excerpt),
+    isError: Number(row.is_error),
+    errorName: row.error_name == null ? null : String(row.error_name),
+    errorCode: row.error_code == null ? null : String(row.error_code),
+    callSeq: row.call_seq == null ? null : Number(row.call_seq),
+    resultSeq: row.result_seq == null ? null : Number(row.result_seq),
+    callAt: row.call_at == null ? null : Number(row.call_at),
+    resultAt: row.result_at == null ? null : Number(row.result_at),
+    argsTruncated: Number(row.args_truncated),
+    resultTruncated: Number(row.result_truncated),
+  };
+}
+
+function chunkList<T>(items: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
+
+function minNullable(a: number | null, b: number | null): number | null {
+  if (a == null) return b;
+  if (b == null) return a;
+  return Math.min(a, b);
+}
+
+function maxNullable(a: number | null, b: number | null): number | null {
+  if (a == null) return b;
+  if (b == null) return a;
+  return Math.max(a, b);
 }
 
 // Options alias to keep the extended search signature readable
