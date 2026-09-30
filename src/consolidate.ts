@@ -150,9 +150,12 @@ export class Consolidator {
     // Clean, user-only synthesis: global scope + fact/preference kinds + PROVENANCE
     // user. persona-provenance rows are themselves synthesized text; feeding them
     // back would let generated content drift away from real user statements.
+    // Reject-by-structure: paste-suspicious demoted rows (source llm-extract-pasted)
+    // never reach the persona/system-prompt profile, whatever their claimed importance.
     const memories = this.store
       .getActiveMemories(10_000, 0, true)
       .filter((m) => m.meta?.provenance === "user")
+      .filter((m) => m.meta?.source !== "llm-extract-pasted")
       .filter((m) => m.meta?.scope === "global" && (m.kind === "fact" || m.kind === "preference"))
       .slice(0, this.settings.personaMaxMemories);
     if (memories.length === 0) return undefined;
@@ -160,7 +163,7 @@ export class Consolidator {
     // Pre-M7 personas were synthesized from contaminated task-local instructions;
     // preserve them for audit but never feed them forward into the trusted profile.
     const prev = candidatePrev && candidatePrev.createdAt >= this.store.migrationAppliedAt() ? candidatePrev : undefined;
-    if (prev && memories.filter((m) => m.createdAt > prev.createdAt).length < 3) {
+    if (prev && this.store.countNewMemoriesForPersona({ ver: prev.ver, memWatermark: prev.memWatermark, createdAt: prev.createdAt }) < 3) {
       return prev.ver;
     }
     const input = [
@@ -168,6 +171,10 @@ export class Consolidator {
       "## New memories\n" + memories.map((m) => `- [${m.kind}] ${m.content}`).join("\n"),
     ].join("\n");
     const signal = AbortSignal.timeout(180_000);
+    // Capture the insertion watermark together with the input snapshot, BEFORE
+    // the awaited LLM call: a memory inserted while generation runs must stay
+    // eligible at the next regeneration (it was never part of this input).
+    const inputWatermark = this.store.personaMemWatermark();
     // Sanitize the assembled stream text: a retried/duplicated completion must not
     // land as two persona documents (see sanitizePersonaContent).
     const content = sanitizePersonaContent(await this.callLlm({ system: PERSONA_SYSTEM_PROMPT, user: input, signal }));
@@ -175,7 +182,7 @@ export class Consolidator {
       console.warn("[dsh-self-improved] persona synthesis returned empty output");
       return undefined;
     }
-    const ver = this.store.savePersona(content);
+    const ver = this.store.savePersona(content, inputWatermark);
     return ver;
   }
 }

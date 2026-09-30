@@ -21,10 +21,10 @@ const check = (n, c, e = "") => {
 };
 
 // Seeds: one preference/fact/event/instruction each (including one high-importance instruction used for skill synthesis)
-store.insertMemory({ kind: "preference", content: "User prefers PowerShell over cmd", importance: 8 });
-store.insertMemory({ kind: "fact", content: "Project E:\\dshPro uses pnpm to manage dependencies", importance: 7 });
-store.insertMemory({ kind: "event", content: "Completed joint debugging of the login module yesterday", importance: 5 });
-store.insertMemory({ kind: "instruction", content: "Use pnpm when updating dependencies and keep the lockfile up to date", importance: 8 });
+store.insertMemory({ kind: "preference", content: "User prefers PowerShell over cmd", importance: 8 }, { provenance: "user" });
+store.insertMemory({ kind: "fact", content: "Project E:\\dshPro uses pnpm to manage dependencies", importance: 7 }, { provenance: "user" });
+store.insertMemory({ kind: "event", content: "Completed joint debugging of the login module yesterday", importance: 5 }, { provenance: "user" });
+store.insertMemory({ kind: "instruction", content: "Use pnpm when updating dependencies and keep the lockfile up to date", importance: 8 }, { provenance: "user" });
 
 // ---------- 1) Scene consolidation ----------
 // Fake LLM: distinguishes scene/persona calls by the system prompt
@@ -49,16 +49,16 @@ const p1 = store.getPersona();
 check("persona content persisted", p1?.content.includes("PowerShell") === true);
 check("persona.md written to disk", existsSync(join(dir, "persona", "persona.md")));
 // 3 new memories since the last version → the gate opens and a new version is written
-store.insertMemory({ kind: "fact", content: "User codes mainly in TypeScript", importance: 7 });
-store.insertMemory({ kind: "preference", content: "User prefers dark editors", importance: 7 });
-store.insertMemory({ kind: "preference", content: "User runs Arch Linux on the workstation", importance: 8 });
+store.insertMemory({ kind: "fact", content: "User codes mainly in TypeScript", importance: 7 }, { provenance: "user" });
+store.insertMemory({ kind: "preference", content: "User prefers dark editors", importance: 7 }, { provenance: "user" });
+store.insertMemory({ kind: "preference", content: "User runs Arch Linux on the workstation", importance: 8 }, { provenance: "user" });
 const r3 = await c2.consolidate();
 check("persona bumps version after ≥3 new memories", r3.personaVersion === 2, JSON.stringify(r3));
 check("persona.md has a backup", existsSync(join(dir, "persona", "persona.md.bak1")));
 
 // ---------- 3) Forgetting decay ----------
 const now = Date.now();
-const fresh = store.insertMemory({ kind: "fact", content: "a temporary detail just recorded", importance: 1 });
+const fresh = store.insertMemory({ kind: "fact", content: "a temporary detail just recorded", importance: 1 }, { provenance: "user" });
 check("old low-score memory scores below threshold", memoryScore({ importance: 1, accessCount: 0, createdAt: now - 60 * 86_400_000 }, now) < 2);
 const decayed = applyDecay(store, { enabled: true, minAgeDays: 30, threshold: 2, retentionDays: 0 }, now);
 check("decay run returns counts", typeof decayed.decayed === "number" && typeof decayed.deleted === "number");
@@ -150,11 +150,46 @@ check("deletion with empty prefix is refused", existsSync(join(skillsRoot, "bump
 
 // Memory total cap: over the limit, the lowest-scoring memories are demoted automatically
 const capMem = await import("../lib/storage.js").then((m) => new m.MemoryStore(join(dir, "cap-mem")));
-for (let i = 0; i < 5; i++) capMem.insertMemory({ kind: "fact", content: `test memory ${i}`, importance: 5 });
+for (let i = 0; i < 5; i++) capMem.insertMemory({ kind: "fact", content: `test memory ${i}`, importance: 5 }, { provenance: "user" });
 const dc = applyDecay(capMem, { enabled: true, minAgeDays: 9999, threshold: 0, retentionDays: 0, maxActiveMemories: 3 });
 check("memory cap demotes lowest scores (5→3)", dc.decayed === 2, "decayed=" + dc.decayed);
 check("active count after demotion = 3", capMem.getActiveMemories(100).length === 3);
 capMem.close();
+
+// ---------- Watermark-before-LLM regression ----------
+// A memory inserted WHILE persona generation runs must remain eligible at the
+// next regeneration: the persisted watermark is the value captured together
+// with the input snapshot (before the awaited LLM call), never MAX(seq) read
+// after generation finished.
+{
+  const wmStore = new MemoryStore(join(dir, "persona-watermark"));
+  wmStore.insertMemory({ kind: "preference", content: "User drinks coffee", importance: 8 }, { provenance: "user" });
+  // No previous persona → the gate opens; the fake LLM simulates three trusted
+  // rows arriving DURING generation (after the input snapshot was taken).
+  const concurrentLlm = async () => {
+    for (const andThen of ["alpha", "beta", "gamma"]) {
+      wmStore.insertMemory(
+        { kind: "fact", content: `Concurrent user detail ${andThen}`, importance: 7 },
+        { provenance: "user", source: "user-direct", scope: "global" },
+      );
+    }
+    return `## Basic Info\n- Coffee drinker`;
+  };
+  const wmResult = await new Consolidator(
+    wmStore,
+    { scenesEnabled: false, sceneMaxMemories: 50, personaMaxMemories: 30, sceneBatchSize: 8 },
+    concurrentLlm,
+  ).consolidate();
+  const wmPersona = wmStore.getPersona();
+  const eligible = wmStore.countNewMemoriesForPersona({
+    ver: wmPersona?.ver ?? 0,
+    memWatermark: wmPersona?.memWatermark ?? null,
+    createdAt: wmPersona?.createdAt ?? 0,
+  });
+  check("persona first version written", wmResult.personaVersion === 1 && wmPersona?.ver === 1, JSON.stringify(wmResult));
+  check("concurrent insert during generation stays eligible next time (watermark captured before the LLM)", eligible === 3, `eligible=${eligible} watermark=${wmPersona?.memWatermark}`);
+  wmStore.close();
+}
 
 store.close();
 console.log(failed === 0 ? "\nALL PASS ✅" : `\n${failed} FAILED ❌`);

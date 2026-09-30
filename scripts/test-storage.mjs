@@ -21,10 +21,19 @@ check("memory.db created", existsSync(join(dir, "memory.db")));
 check("conversations directory logic available", typeof store.appendConversationSlice === "function");
 
 // 2) Insert
-const m1 = store.insertMemory({ kind: "preference", content: "User prefers PowerShell over cmd", importance: 8 });
-const m2 = store.insertMemory({ kind: "fact", content: "Project E:\\dshPro manages dependencies with pnpm", importance: 7 });
-const m3 = store.insertMemory({ kind: "event", content: "5/14 completed the payment module migration, took about 4 hours", importance: 6 });
+const m1 = store.insertMemory({ kind: "preference", content: "User prefers PowerShell over cmd", importance: 8 }, { provenance: "user" });
+const m2 = store.insertMemory({ kind: "fact", content: "Project E:\\dshPro manages dependencies with pnpm", importance: 7 }, { provenance: "user" });
+const m3 = store.insertMemory({ kind: "event", content: "5/14 completed the payment module migration, took about 4 hours", importance: 6 }, { provenance: "user" });
 check("inserting 3 memories returns ids", m1.id && m2.id && m3.id);
+
+// 2b) Fail-closed provenance: an insert that omits provenance must land in the
+// untrusted 'unknown' tier (never injectable, never recallable), never in the
+// trusted tier the old default stamped.
+const noMeta = store.insertMemory({ kind: "fact", content: "Insert without provenance metadata", importance: 9 });
+const noMetaMeta = store.getMeta(noMeta.id);
+check("insertMemory without provenance defaults to unknown", noMetaMeta?.provenance === "unknown", JSON.stringify(noMetaMeta));
+check("unknown-tier insert is not injectable", !store.getActiveMemories(50, 0, true).some((m) => m.id === noMeta.id));
+check("unknown-tier insert is not keyword-searchable via recall lane", !store.searchMemories("provenance metadata", { limit: 10, injectableOnly: true }).some((h) => h.id === noMeta.id));
 
 // 3) FTS5 search (BM25)
 let hits = store.searchMemories("PowerShell", { limit: 5 });
@@ -35,14 +44,14 @@ hits = store.searchMemories("nonexistentwordxyzzy", { limit: 5 });
 check("no match returns empty", hits.length === 0);
 
 // 4) List / single lookup / forget / delete
-check("listMemories returns 3", store.listMemories().length === 3);
+check("listMemories returns 4", store.listMemories().length === 4);
 check("getMemory hits", store.getMemory(m1.id)?.kind === "preference");
 check("forgetMemory works", store.forgetMemory(m1.id) === true);
 hits = store.searchMemories("PowerShell", { limit: 5 });
 check("no hits after forget", hits.length === 0);
 check("deleteMemory works", store.deleteMemory(m2.id) === true);
 // listMemories is a browse view: forgotten records are kept for recovery, so m1(forgotten) + m3 = 2 records remain
-check("list has 2 records left after delete (including forgotten)", store.listMemories().length === 2, `got ${store.listMemories().length}`);
+check("list has 3 records left after delete (including forgotten)", store.listMemories().length === 3, `got ${store.listMemories().length}`);
 check("listMemories includes the forgotten record", store.listMemories().some((m) => m.status === "forgotten"));
 
 // 5) L0 slice persistence

@@ -79,10 +79,12 @@ export interface ExtractPumpResult {
   duplicatesMerged: number;
   /** Conflicting drafts stored alongside the existing row (both kept, flagged) */
   conflicts: number;
+  /** Drafts demoted because their evidence came from a paste-suspicious slice (importance/confidence capped, never baseline-pinned) */
+  demotedPasteSuspicious: number;
 }
 
 export const emptyPumpResult: ExtractPumpResult = {
-  sessions: 0, memories: 0, skipped: 0, errors: 0, rejectedTaskLocal: 0, rejectedLowValue: 0, duplicatesMerged: 0, conflicts: 0,
+  sessions: 0, memories: 0, skipped: 0, errors: 0, rejectedTaskLocal: 0, rejectedLowValue: 0, duplicatesMerged: 0, conflicts: 0, demotedPasteSuspicious: 0,
 };
 
 export const EXTRACT_SYSTEM_PROMPT = `You are a long-term memory extractor for a personal memory store. Extract only memories with durable, cross-session value for the USER.
@@ -127,8 +129,33 @@ export function isVerbatimUserEvidence(evidence: string, slices: ConversationSli
   return slices.some((slice) => normalizedEvidence(slice.text).includes(needle));
 }
 
-/** The model may suggest global scope, but deterministic guards own the final decision. */
-export function durableScopeForDraft(draft: ExtractedMemoryDraft): "global" | "project" {
+/**
+ * PASTE-SUSPICION heuristic for the slice a verbatim evidence quote came from:
+ * structured/external material (fenced code, markdown headings, inline links,
+ * list blocks, very long messages) reads like pasted web/issue/README content,
+ * not a direct human assertion. Two distinct markers — or a single fenced code
+ * block — flag the slice, and the extracted draft is DEMOTED (importance and
+ * confidence capped, baseline pinning refused): still recallable in its own
+ * scope, but it can never reach the system-prompt baseline (the every-session
+ * amplifier). Deliberately a demotion, not a rejection: false positives must not
+ * discard genuinely user-stated facts that happen to share a message with paste.
+ */
+export function isPasteSuspiciousSlice(text: string): boolean {
+  if (text.length > 4000) return true;
+  let markers = 0;
+  if (text.includes("```")) markers += 2; // fenced code: almost never typed in chat
+  if (/^#{1,4} \S/m.test(text)) markers += 1; // markdown heading
+  if (/\[[^\]\n]{1,80}\]\(https?:\/\/[^)\n]{1,200}\)/.test(text)) markers += 1; // inline md link
+  const listLines = text.split("\n").filter((l) => /^\s{0,4}(?:[-*+] |\d+[.)] )/.test(l)).length;
+  if (listLines >= 3) markers += 1; // structured list block
+  return markers >= 2;
+}
+
+/** The model may suggest global scope, but deterministic guards own the final decision.
+ * Paste-suspicious drafts are forced to project scope: structurally excluded from
+ * the persona/profile system-prompt section regardless of importance or confidence. */
+export function durableScopeForDraft(draft: ExtractedMemoryDraft, pasteSuspicious = false): "global" | "project" {
+  if (pasteSuspicious) return "project";
   if (draft.scope !== "global") return "project";
   if (draft.kind !== "preference" && !/^User\b/i.test(draft.content)) return "project";
   if (/\b(project|repository|repo|workboard|application|codebase|branch|ticket|PR)\b/i.test(draft.content)) return "project";
@@ -165,6 +192,7 @@ export class Extractor {
           result.rejectedLowValue += r.rejectedLowValue ?? 0;
           result.duplicatesMerged += r.duplicatesMerged ?? 0;
           result.conflicts += r.conflicts ?? 0;
+          result.demotedPasteSuspicious += r.demotedPasteSuspicious ?? 0;
         } catch (error) {
           result.errors++;
           console.warn(
@@ -228,15 +256,27 @@ export class Extractor {
         r.rejectedLowValue = (r.rejectedLowValue ?? 0) + 1;
         continue;
       }
+      // Paste-poisoning hardening: verbatim evidence proves "this text appeared
+      // in a human message", not "the human asserted this". When the quote sits
+      // in a pasted-material slice, demote the draft (importance/confidence
+      // caps) so it can never be auto-promoted into the system-prompt baseline.
+      const evidenceSlice = draft.evidence.trim()
+        ? userSlices.find((s) => normalizedEvidence(s.text).includes(normalizedEvidence(draft.evidence)))
+        : undefined;
+      const pasteSuspicious = evidenceSlice ? isPasteSuspiciousSlice(evidenceSlice.text) : false;
+      const insertImportance = pasteSuspicious ? Math.min(draft.importance, 7) : draft.importance;
+      const insertConfidence = pasteSuspicious ? Math.min(draft.confidence, 0.6) : draft.confidence;
+      if (pasteSuspicious) r.demotedPasteSuspicious = (r.demotedPasteSuspicious ?? 0) + 1;
       const projectId = (this.settings.projectIdForSession?.(sessionId) ?? this.settings.projectId) || "default";
-      const scope = durableScopeForDraft(draft);
+      const scope = durableScopeForDraft(draft, pasteSuspicious);
       const meta: MemoryMetaInput = {
         provenance: "user",
-        source: "llm-extract",
+        // Distinct source tag: consolidation can also exclude paste-demoted rows deterministically.
+        source: pasteSuspicious ? "llm-extract-pasted" : "llm-extract",
         scope,
         projectId: scope === "project" ? projectId : null,
         sessionId,
-        confidence: draft.confidence,
+        confidence: insertConfidence,
         evidence: draft.evidence.trim() ? [{ sessionId, snippet: draft.evidence.slice(0, 200) }] : [],
       };
       let record: { id: string; content: string } | null = null;
@@ -247,16 +287,17 @@ export class Extractor {
           continue;
         }
         record = this.store.insertMemory(
-          { kind: draft.kind, content: draft.content, importance: draft.importance },
+          { kind: draft.kind, content: draft.content, importance: insertImportance },
           gateResult.conflict
             ? { ...meta, evidence: [...(meta.evidence ?? []), { sessionId, snippet: `conflict-of:${gateResult.neighborId}` }] }
             : meta,
         );
         if (gateResult.conflict) r.conflicts = (r.conflicts ?? 0) + 1;
       } else {
-        record = this.store.insertMemory({ kind: draft.kind, content: draft.content, importance: draft.importance }, meta);
+        record = this.store.insertMemory({ kind: draft.kind, content: draft.content, importance: insertImportance }, meta);
       }
       if (
+        !pasteSuspicious &&
         scope === "global" &&
         (draft.kind === "preference" || draft.kind === "fact") &&
         draft.importance >= 8 &&

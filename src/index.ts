@@ -24,7 +24,7 @@ import { RecallService, createOpenAiEmbedding, renderCuratedProfile, type Recall
 import { installRecallInjection } from "./inject.js";
 import { Consolidator } from "./consolidate.js";
 import { applyDecay, synthesizeSkills, deleteSkill } from "./evolve.js";
-import { installMemoryCommands, browserSnapshot } from "./commands.js";
+import { installMemoryCommands, installBrowserChannel } from "./commands.js";
 import { BlockAssembler, createUserMessage } from "@deepseek-ai/dsh-llm";
 
 export const name = "self-improved";
@@ -124,6 +124,61 @@ export interface Config {
   review: { enabled: boolean; time: string };
 }
 
+// Shared LLM caller (used by extraction/consolidation/skill synthesis; reuses the DSH model stack).
+// maxTokens may be a getter so settings hot-apply takes effect per call instead
+// of being captured at creation time.
+export function makeLlmCall(
+  ctx: any,
+  config: Config,
+  purpose: string,
+  maxTokens: number | (() => number),
+): (input: { system: string; user: string; sessionId?: string; signal: AbortSignal }) => Promise<string> {
+  return async (input: { system: string; user: string; sessionId?: string; signal: AbortSignal }): Promise<string> => {
+      const maxOutputTokens = typeof maxTokens === "function" ? maxTokens() : maxTokens;
+      const assembler = new BlockAssembler();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const options: any = {
+        messages: [
+          createUserMessage({
+            content: [{ type: "text", text: input.user }],
+            source: { kind: "plugin", plugin: "dsh-self-improved" },
+          }),
+        ],
+        system: input.system,
+        maxTokens: maxOutputTokens,
+        purpose,
+        signal: input.signal,
+      };
+      if (input.sessionId) options.sessionId = input.sessionId;
+      // Extraction/consolidation/skill model: explicit config first, then fall back to the DSH default model (agentDefaultModel)
+      let provider = config.extract.provider;
+      let model = config.extract.model;
+      if (!provider || !model) {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const dm = (ctx as any).get?.("agentDefaultModel");
+          const sel = dm?.currentSelection?.();
+          if (sel && typeof sel.provider === "string" && typeof sel.model === "string") {
+            provider = provider || sel.provider;
+            model = model || sel.model;
+          }
+        } catch {
+          /* stay unconfigured when there is no default model */
+        }
+      }
+      if (provider) options.provider = provider;
+      if (model) options.model = model;
+      for await (const chunk of ctx.llm.stream(options)) {
+        input.signal.throwIfAborted();
+        assembler.push(chunk);
+      }
+      return assembler
+        .blocks()
+        .filter((b) => b.type === "text")
+        .map((b) => b.text)
+        .join("");
+    };
+}
 export const Config = z.object({
   enabled: z.boolean().default(true),
   debug: z.boolean().default(false),
@@ -249,53 +304,7 @@ export function apply(ctx: Context, config: Config): void {
   };
   const embeddingProvider = createOpenAiEmbedding(config.recall.embedding);
 
-  // Shared LLM caller (used by extraction/consolidation/skill synthesis; reuses the DSH model stack)
-  const makeLlmCall = (purpose: string, maxTokens: number) =>
-    async (input: { system: string; user: string; sessionId?: string; signal: AbortSignal }): Promise<string> => {
-      const assembler = new BlockAssembler();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const options: any = {
-        messages: [
-          createUserMessage({
-            content: [{ type: "text", text: input.user }],
-            source: { kind: "plugin", plugin: "dsh-self-improved" },
-          }),
-        ],
-        system: input.system,
-        maxTokens,
-        purpose,
-        signal: input.signal,
-      };
-      if (input.sessionId) options.sessionId = input.sessionId;
-      // Extraction/consolidation/skill model: explicit config first, then fall back to the DSH default model (agentDefaultModel)
-      let provider = config.extract.provider;
-      let model = config.extract.model;
-      if (!provider || !model) {
-        try {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const dm = (ctx as any).get?.("agentDefaultModel");
-          const sel = dm?.currentSelection?.();
-          if (sel && typeof sel.provider === "string" && typeof sel.model === "string") {
-            provider = provider || sel.provider;
-            model = model || sel.model;
-          }
-        } catch {
-          /* stay unconfigured when there is no default model */
-        }
-      }
-      if (provider) options.provider = provider;
-      if (model) options.model = model;
-      for await (const chunk of ctx.llm.stream(options)) {
-        input.signal.throwIfAborted();
-        assembler.push(chunk);
-      }
-      return assembler
-        .blocks()
-        .filter((b) => b.type === "text")
-        .map((b) => b.text)
-        .join("");
-    };
-  const extractLlm = makeLlmCall("memory-extract", extractSettings.maxOutputTokens);
+  const extractLlm = makeLlmCall(ctx, config, "memory-extract", () => extractSettings.maxOutputTokens);
 
   const extractor = new Extractor(store, extractSettings, async ({ system, user, sessionId, signal }) => {
     if (config.debug) {
@@ -312,19 +321,20 @@ export function apply(ctx: Context, config: Config): void {
   log("capture + extract installed");
 
   // Timed evolution pipeline (dsh-schedule is not part of the headless base assembly, so in-process timers are used)
-  const consolidateLlm = makeLlmCall("memory-consolidate", 2000);
+  const consolidateLlm = makeLlmCall(ctx, config, "memory-consolidate", 2000);
+  const consolidateSettings = {
+    scenesEnabled: config.consolidate.scenesEnabled,
+    sceneMaxMemories: config.consolidate.sceneMaxMemories,
+    personaMaxMemories: config.consolidate.personaMaxMemories,
+    sceneBatchSize: config.consolidate.sceneBatchSize,
+  };
   const consolidator = new Consolidator(
     store,
-    {
-      scenesEnabled: config.consolidate.scenesEnabled,
-      sceneMaxMemories: config.consolidate.sceneMaxMemories,
-      personaMaxMemories: config.consolidate.personaMaxMemories,
-      sceneBatchSize: config.consolidate.sceneBatchSize,
-    },
+    consolidateSettings,
     async ({ system, user, signal }) => consolidateLlm({ system, user, signal }),
     embeddingProvider,
   );
-  const skillLlm = makeLlmCall("memory-skill", 3000);
+  const skillLlm = makeLlmCall(ctx, config, "memory-skill", 3000);
   let lastEvolveTs = 0;
   /**
    * Run one evolution round.
@@ -522,7 +532,7 @@ export function apply(ctx: Context, config: Config): void {
     minImportance: config.recall.minImportance,
   } };
   const recall = new RecallService(store, rec.recallSettings, embeddingProvider);
-  installRecallInjection(ctx, recall, {
+  const injectionCtl = {
     enabled: () => readModule("recall"),
     maxHits: config.recall.maxResults,
     maxChars: config.recall.maxInjectChars,
@@ -530,8 +540,9 @@ export function apply(ctx: Context, config: Config): void {
     projectKeyOf: projectKeyOfPayload,
     sessionIdOf: sessionIdForPayload,
     maxInjectPerTurn: config.recall.maxInjectPerTurn,
-    onInjected: (ids) => store.recordAccess(ids),
-  });
+    onInjected: (ids: string[]) => store.recordAccess(ids),
+  };
+  installRecallInjection(ctx, recall, injectionCtl);
   log("recall injection installed (strategy:", rec.recallSettings.strategy, ", project scoping on)");
 
   // ⑥ CLI command (M5): /memory (active when the host provides a commands service); hot-registers/unregisters following the master switch
@@ -549,7 +560,10 @@ export function apply(ctx: Context, config: Config): void {
     commandsDispose = installMemoryCommands(ctx, store, {
       evolve: () => fullReview("manual"),
       isEnabled: () => state.enabled,
-      skillsPrefix: config.evolve.skillSynthesis.prefix,
+      // Live getters: hot-applied synthesis settings must reach `/memory browser --json`
+      // and the synthesized-skill flags without re-registering the command.
+      skillsPrefix: () => config.evolve.skillSynthesis.prefix,
+      skillsRoot: () => config.evolve.skillSynthesis.skillsRoot,
     });
     if (commandsDispose) {
       log("memory command installed (/memory)");
@@ -559,11 +573,70 @@ export function apply(ctx: Context, config: Config): void {
   };
   syncCommands();
 
-  // ⑦ Hot apply: settings/updated → update runtime state (toggle anytime, no restart)
+  // ⑦ Hot apply: settings/updated → update runtime state (toggle anytime, no restart).
+  //    Every settings field the UI exposes is applied to its live consumer object:
+  //    extract/recall/consolidate read their settings objects per operation, and the
+  //    decay/skill/housekeeping rounds rebuild options from `config` each run.
   scope.watch((next) => {
     state.enabled = next.enabled;
     state.modules = { ...next.modules };
     extractSettings.enabled = readModule("extract");
+    extractSettings.intervalMinutes = next.extract.intervalMinutes;
+    extractSettings.batchMaxChars = next.extract.batchMaxChars;
+    extractSettings.maxOutputTokens = next.extract.maxOutputTokens;
+    extractSettings.timeoutMs = next.extract.timeoutMs;
+    extractSettings.dedup = next.extract.dedup;
+    extractSettings.fallbackOnBadJson = next.extract.fallbackOnBadJson;
+    extractSettings.minImportance = next.extract.minImportance;
+    extractSettings.flushDrain = next.extract.flushDrain;
+    extractSettings.provenanceFilter = next.extract.provenanceFilter === "off" ? ("off" as const) : ("strict" as const);
+    extractSettings.requireEvidence = next.extract.requireEvidence;
+    rec.recallSettings.strategy = next.recall.strategy === "hybrid" ? "hybrid" : "keyword";
+    rec.recallSettings.maxResults = next.recall.maxResults;
+    rec.recallSettings.scoreThreshold = next.recall.scoreThreshold;
+    rec.recallSettings.timeoutMs = next.recall.timeoutMs;
+    rec.recallSettings.relevanceMargin = next.recall.relevanceMargin;
+    rec.recallSettings.minImportance = next.recall.minImportance;
+    injectionCtl.maxHits = next.recall.maxResults;
+    injectionCtl.maxChars = next.recall.maxInjectChars;
+    injectionCtl.maxInjectPerTurn = next.recall.maxInjectPerTurn;
+    injectionCtl.debug = next.debug;
+    consolidateSettings.scenesEnabled = next.consolidate.scenesEnabled;
+    consolidateSettings.sceneMaxMemories = next.consolidate.sceneMaxMemories;
+    consolidateSettings.personaMaxMemories = next.consolidate.personaMaxMemories;
+    consolidateSettings.sceneBatchSize = next.consolidate.sceneBatchSize;
+    // Per-round option builders read the config object: keep it in sync so the
+    // next decay/skill/housekeeping round and the shared LLM route pick up changes.
+    config.debug = next.debug;
+    config.extract.intervalMinutes = next.extract.intervalMinutes;
+    config.extract.provider = next.extract.provider;
+    config.extract.model = next.extract.model;
+    config.evolve.decay.enabled = next.evolve.decay.enabled;
+    config.evolve.decay.minAgeDays = next.evolve.decay.minAgeDays;
+    config.evolve.decay.threshold = next.evolve.decay.threshold;
+    config.evolve.decay.retentionDays = next.evolve.decay.retentionDays;
+    config.evolve.decay.maxActiveMemories = next.evolve.decay.maxActiveMemories;
+    config.evolve.skillSynthesis.enabled = next.evolve.skillSynthesis.enabled;
+    config.evolve.skillSynthesis.minImportance = next.evolve.skillSynthesis.minImportance;
+    config.evolve.skillSynthesis.skillsRoot = next.evolve.skillSynthesis.skillsRoot;
+    config.evolve.skillSynthesis.prefix = next.evolve.skillSynthesis.prefix;
+    config.evolve.skillSynthesis.maxSkills = next.evolve.skillSynthesis.maxSkills;
+    config.housekeeping.personaVersions = next.housekeeping.personaVersions;
+    config.housekeeping.maxScenes = next.housekeeping.maxScenes;
+    config.housekeeping.sceneActiveRatio = next.housekeeping.sceneActiveRatio;
+    config.housekeeping.conversationRetentionDays = next.housekeeping.conversationRetentionDays;
+    config.recall.embedding.baseUrl = next.recall.embedding.baseUrl;
+    config.recall.embedding.apiKey = next.recall.embedding.apiKey;
+    config.recall.embedding.model = next.recall.embedding.model;
+    config.recall.embedding.dimensions = next.recall.embedding.dimensions;
+    config.recall.embedding.timeoutMs = next.recall.embedding.timeoutMs;
+    // The embedding provider reads the shared config object per call, so the
+    // fields above hot-apply without rebuilding it.
+    // Tool default result limit: cheap to re-register when it changes.
+    if (next.searchLimit !== config.searchLimit) {
+      config.searchLimit = next.searchLimit;
+      if (toolsDispose) { toolsDispose(); toolsDispose = null; }
+    }
     syncTools();
     syncCommands(); // master switch off → unregister the /memory command; on → register again
     // Nightly review time/switch hot-changed: re-arm the timers
@@ -575,96 +648,21 @@ export function apply(ctx: Context, config: Config): void {
     log("runtime config applied:", "enabled=", next.enabled, "modules=", JSON.stringify(next.modules));
   });
 
-  // ⑧ Memory browser data channel (the settings-page frontend can read/operate memories without a session):
-  //    dedicated namespace dsh-self-improved-browser: snapshot = snapshot JSON, action = operation sent by the frontend
-  const browserNs = settingsNamespace("dsh-self-improved-browser");
-  const BrowserSchema = z.object({
-    snapshot: z.string().default("{}"),
-    action: z.string().default(""),
-    detail: z.string().default(""),
+  // ⑧ Memory browser data channel (see installBrowserChannel in commands.ts).
+  // Mutating ops run a 3-step one-shot challenge handshake: the executing
+  // credential is a short-TTL challenge bound to the exact op + arguments,
+  // published through the snapshot and consumed atomically — captured payloads
+  // cannot be replayed for arbitrary actions.
+  const browserChannel = installBrowserChannel({
+    ctx,
+    store,
+    skillsPrefix: () => config.evolve.skillSynthesis.prefix,
+    skillsRoot: () => config.evolve.skillSynthesis.skillsRoot,
+    deleteSkill,
+    log,
   });
-  const browserScope = ctx.settings.register(browserNs, BrowserSchema);
-  let lastSnapshotJson = "";
-  let lastHandledAction = "";
-  const refreshBrowserSnapshot = (): void => {
-    try {
-      const json = JSON.stringify(browserSnapshot(store, config.evolve.skillSynthesis.prefix));
-      if (json === lastSnapshotJson) return;
-      lastSnapshotJson = json;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const cur = (browserScope.get() ?? {}) as any;
-      browserScope.replace({ snapshot: json, action: cur.action ?? "" }).catch(() => { /* best effort */ });
-    } catch {
-      /* noop */
-    }
-  };
-  const handleBrowserAction = (raw: string): void => {
-    if (!raw || raw === lastHandledAction) return;
-    lastHandledAction = raw;
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const action = JSON.parse(raw) as any;
-      // Detail: return the full memory on demand (content is truncated in the snapshot)
-      if (action.op === "detail" && typeof action.id === "string") {
-        const m = store.getMemory(action.id);
-        if (m) {
-          browserScope
-            .replace({ snapshot: lastSnapshotJson, action: "", detail: JSON.stringify(m) })
-            .catch(() => { /* noop */ });
-        }
-        return; // detail does not need a snapshot refresh
-      }
-      if (action.op === "forget" && typeof action.id === "string") {
-        store.forgetMemory(action.id);
-        log("browser action: forget", action.id.slice(0, 8));
-      } else if (action.op === "correct" && typeof action.id === "string" && typeof action.content === "string") {
-        const old = store.getMemory(action.id);
-        if (old) {
-          // Direct browser action → user-initiated correction: trusted, inheriting the
-          // old row's scope/project/session; the old row is retired (corrected).
-          store.insertMemory(
-            { kind: old.kind, content: action.content, importance: old.importance, supersedes: old.id },
-            {
-              provenance: "user",
-              source: "browser-correct",
-              scope: old.meta?.scope ?? "global",
-              projectId: old.meta?.projectId ?? null,
-              sessionId: old.meta?.sessionId ?? null,
-              confidence: 0.9,
-            },
-          );
-          store.setMemoryStatus(old.id, "corrected");
-          log("browser action: correct", action.id.slice(0, 8));
-        }
-      } else if (action.op === "confirm-correct" && typeof action.newId === "string") {
-        // Confirm a tool-staged correction candidate: promote it to trusted user
-        // provenance and retire the superseded row it points at.
-        const candidate = store.getMemory(action.newId);
-        if (candidate?.supersedes) {
-          store.updateMeta(candidate.id, { provenance: "user", source: "browser-correct", confidence: 0.9 });
-          store.setMemoryStatus(candidate.supersedes, "corrected");
-          log("browser action: confirm-correct", candidate.id.slice(0, 8));
-        }
-      } else if (action.op === "deleteSkill" && typeof action.name === "string") {
-        if (deleteSkill(action.name, config.evolve.skillSynthesis.skillsRoot, config.evolve.skillSynthesis.prefix)) {
-          log("browser action: deleteSkill", action.name);
-        }
-      }
-    } catch {
-      /* noop */
-    }
-    lastSnapshotJson = ""; // force a refresh on the next round
-    refreshBrowserSnapshot();
-    browserScope.replace({ snapshot: lastSnapshotJson, action: "" }).catch(() => { /* noop */ });
-  };
-  browserScope.watch((next, _prev) => {
-    if (next.action) handleBrowserAction(next.action);
-  });
-  refreshBrowserSnapshot();
-  const browserTimer = setInterval(refreshBrowserSnapshot, 60_000);
-  browserTimer.unref?.();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (ctx as any).on("dispose", () => clearInterval(browserTimer));
+  (ctx as any).on("dispose", () => browserChannel.stop());
   log("memory browser channel ready (dsh-self-improved-browser)");
 
   // ⑥ Background pipeline (from M2 on: extract/consolidate/evolve, driven by dsh-schedule)

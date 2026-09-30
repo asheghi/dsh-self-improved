@@ -172,7 +172,7 @@ window.__ModuleLoader__.load({
       fEvolve: "Self-evolve (decay/skills)",
       fRecall: "Auto recall injection",
       fTools: "Memory tools (memory_search etc.)",
-      fStorageRoot: "Memory dir (blank = $DSH_HOME/memory)",
+      fStorageRoot: "Memory dir (blank = $DSH_HOME/memory; restart required when changed)",
       fSearchLimit: "Default tool result limit",
       fProvider: "Extraction provider (blank = default model)",
       fModel: "Extraction model (blank = default model)",
@@ -335,7 +335,7 @@ window.__ModuleLoader__.load({
       fEvolve: "Self-evolve (decay/skills)",
       fRecall: "Auto recall injection",
       fTools: "Memory tools (memory_search etc.)",
-      fStorageRoot: "Memory dir (blank = $DSH_HOME/memory)",
+      fStorageRoot: "Memory dir (blank = $DSH_HOME/memory; restart required when changed)",
       fSearchLimit: "Default tool result limit",
       fProvider: "Extraction provider (blank = default model)",
       fModel: "Extraction model (blank = default model)",
@@ -782,10 +782,57 @@ window.__ModuleLoader__.load({
       var q = query.trim().toLowerCase();
       var filtered = q ? memories.filter(function (m) { return m.content.toLowerCase().indexOf(q) >= 0 || m.kind.indexOf(q) >= 0; }) : memories;
 
+      // Mutating ops run a two-step one-shot challenge handshake: the noble
+      // (prepare) submit voices intended op+arguments gated by the snapshot
+      // token; the host mints a short-TTL challenge bound to those exact args
+      // and consumes it atomically at the confirm submit, so captured payloads
+      // cannot be replayed for arbitrary actions.
+      var MUTATING_OPS = { forget: 1, correct: 1, "confirm-correct": 1, deleteSkill: 1 };
+      function readServedToken() {
+        try {
+          var sv = scope.getSnapshot();
+          var svVal = sv && sv.value;
+          if (svVal && typeof svVal.snapshot === "string") {
+            var sd = JSON.parse(svVal.snapshot);
+            if (sd && typeof sd.actionToken === "string") return sd.actionToken;
+          }
+        } catch (e) { /* host rejects unsigned actions */ }
+        return "";
+      }
       function sendAction(action) {
-        return api.settings.mutate({
+        var payload = readServedToken()
+          ? Object.assign({}, action, { token: readServedToken() })
+          : action;
+        var first = api.settings.mutate({
           ns: "dsh-self-improved-browser",
-          ops: [{ op: "set", path: ["action"], value: JSON.stringify(action) }]
+          ops: [{ op: "set", path: ["action"], value: JSON.stringify(payload) }]
+        });
+        if (!MUTATING_OPS[action.op]) return first;
+        // Poll the served snapshot for the pending challenge, then echo it back.
+        return new Promise(function (resolve, reject) {
+          var tries = 0;
+          var poll = setInterval(function () {
+            tries += 1;
+            var snap = null;
+            try {
+              var sv = scope.getSnapshot();
+              var svVal = sv && sv.value;
+              var sd = svVal && typeof svVal.snapshot === "string" ? JSON.parse(svVal.snapshot) : null;
+              snap = sd && sd.confirm;
+            } catch (e) { snap = null; }
+            if (snap && snap.token && snap.args && snap.args.op === action.op) {
+              clearInterval(poll);
+              resolve(api.settings.mutate({
+                ns: "dsh-self-improved-browser",
+                ops: [{ op: "set", path: ["action"], value: JSON.stringify(Object.assign({}, action, { confirmToken: snap.token })) }]
+              }));
+              return;
+            }
+            if (tries > 50) {
+              clearInterval(poll);
+              reject(new Error("browser action confirm timed out"));
+            }
+          }, 120);
         });
       }
       function viewDetail(m) {

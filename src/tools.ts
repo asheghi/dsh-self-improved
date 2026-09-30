@@ -56,7 +56,10 @@ export function registerMemoryTools(ctx: Context, store: MemoryStore, defaultLim
     async execute(args, exec) {
       const limit = typeof args.limit === "number" ? args.limit : defaultLimit;
       const scope = scopeOf(exec);
-      const hits = store.searchMemories(String(args.query), { limit, ...scope });
+      // Provenance alignment with automatic recall (recall.ts uses injectableOnly):
+      // the tool lane must not hand the model rows that injection withholds
+      // (derived/system/tool/coordinator/quarantined candidates).
+      const hits = store.searchMemories(String(args.query), { limit, injectableOnly: true, ...scope });
       const filtered = typeof args.kind === "string" && args.kind
         ? hits.filter((h) => h.kind === args.kind)
         : hits;

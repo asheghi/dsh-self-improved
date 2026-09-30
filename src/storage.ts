@@ -34,6 +34,8 @@ export type MemoryStatus = "active" | "decayed" | "forgotten" | "corrected" | "q
 export type MemoryProvenance = "user" | "assistant" | "derived" | "system" | "tool" | "skill" | "unknown" | "persona" | "coordinator";
 export type MemorySource =
   | "llm-extract"
+  /** paste-suspicious demoted draft: recallable in its own scope, never persona/profile material */
+  | "llm-extract-pasted"
   | "user-direct"
   | "browser-correct"
   | "tool-correct"
@@ -245,9 +247,10 @@ export class MemoryStore {
       ) STRICT;
       -- L3 user persona versions (M4, append-only for easy rollback)
       CREATE TABLE IF NOT EXISTS persona_versions (
-        ver        INTEGER PRIMARY KEY AUTOINCREMENT,
-        content    TEXT NOT NULL,
-        created_at INTEGER NOT NULL
+        ver           INTEGER PRIMARY KEY AUTOINCREMENT,
+        content       TEXT NOT NULL,
+        created_at    INTEGER NOT NULL,
+        mem_watermark INTEGER
       ) STRICT;
       -- Provenance/scope metadata side table (additive; keeps the STRICT memories table untouched)
       CREATE TABLE IF NOT EXISTS memories_meta (
@@ -264,6 +267,13 @@ export class MemoryStore {
         last_read_at INTEGER
       ) STRICT;
       CREATE INDEX IF NOT EXISTS idx_memories_meta_project ON memories_meta(project_id);
+      -- Insertion-order watermark: a global monotonic sequence per memory. Persona
+      -- gating uses this instead of millisecond timestamps, so memories added in the
+      -- same clock tick are still counted as "newer than the stored version".
+      CREATE TABLE IF NOT EXISTS memories_seq (
+        memory_id TEXT PRIMARY KEY,
+        seq       INTEGER NOT NULL
+      ) STRICT;
       -- Bounded curated global baseline slots (slot -> memory)
       CREATE TABLE IF NOT EXISTS baseline (
         slot       INTEGER PRIMARY KEY,
@@ -279,6 +289,13 @@ export class MemoryStore {
         updated_at INTEGER NOT NULL
       ) STRICT;
     `);
+    // Additive migration: databases created before mem_watermark lack the column
+    // (CREATE TABLE IF NOT EXISTS does not alter an existing table).
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const personaCols = db.prepare("PRAGMA table_info(persona_versions)").all() as Array<any>;
+    if (personaCols.length > 0 && !personaCols.some((c) => c.name === "mem_watermark")) {
+      db.exec("ALTER TABLE persona_versions ADD COLUMN mem_watermark INTEGER");
+    }
   }
 
   /**
@@ -378,7 +395,24 @@ export class MemoryStore {
     }
   }
 
-  /** Insert one atomic memory (L1). meta records provenance/scope/origin. */
+  /** Lazily-loaded base of the insertion watermark (MAX(seq) over memories_seq; -1 = uninitialized) */
+  private memSeqBase = -1;
+
+  /** Next insertion-watermark value. Strictly increasing over the store lifetime. */
+  private nextMemSeq(): number {
+    if (this.memSeqBase < 0) {
+      const row = this.db.prepare("SELECT COALESCE(MAX(seq), 0) AS m FROM memories_seq").get() as { m: number };
+      this.memSeqBase = Number(row.m);
+    }
+    this.memSeqBase += 1;
+    return this.memSeqBase;
+  }
+
+  /**
+   * Insert one atomic memory (L1). meta records provenance/scope/origin.
+   * FAIL CLOSED: omitting provenance yields the untrusted 'unknown' tier (never
+   * injected); every trusted insert must state provenance explicitly.
+   */
   insertMemory(input: {
     kind: MemoryKind;
     content: string;
@@ -408,15 +442,21 @@ export class MemoryStore {
         )
         .run(record.id, record.kind, record.content, record.importance, 0, now, now, "active", record.supersedes ?? null);
       this.db
+        .prepare(`INSERT INTO memories_seq (memory_id, seq) VALUES (?, ?)`)
+        .run(record.id, this.nextMemSeq());
+      this.db
         .prepare(`INSERT INTO memories_fts (search_text, kind, content_rowid) VALUES (?, ?, ?)`)
         .run(tokenize(record.content), record.kind, record.id);
       this.upsertMeta(record.id, {
-        provenance: meta.provenance ?? "user",
-        source: meta.source ?? "user-direct",
+        // Fail closed: an omitted provenance MUST NOT default to the trusted tier.
+        // 'unknown' rows are never injected or recallable until a caller or user
+        // explicitly asserts their origin.
+        provenance: meta.provenance ?? "unknown",
+        source: meta.provenance ? (meta.source ?? "user-direct") : "legacy",
         scope: meta.scope ?? "global",
         projectId: meta.projectId ?? null,
         sessionId: meta.sessionId ?? null,
-        confidence: meta.confidence ?? 0.6,
+        confidence: meta.confidence ?? (meta.provenance ? 0.6 : 0.3),
         expiresAt: meta.expiresAt ?? null,
         evidence: meta.evidence ?? [],
         readCount: 0,
@@ -915,10 +955,26 @@ export class MemoryStore {
     return true;
   }
 
-  /** Save the persona (version +1, writes the persona.md mirror) */
-  savePersona(content: string): number {
+  /** Current deterministic insertion watermark: the MAX(seq) of memories_seq at
+   *  the moment of the call. Capture this BEFORE an awaited step (e.g. the LLM
+   *  call in persona synthesis) and pass it to savePersona, so rows inserted
+   *  while the awaited work runs stay visible to the next regeneration gate. */
+  personaMemWatermark(): number {
+    const row = this.db.prepare("SELECT COALESCE(MAX(seq), 0) AS m FROM memories_seq").get() as { m: number };
+    return Number(row.m);
+  }
+
+  /** Save the persona (version +1, writes the persona.md mirror).
+   *  memWatermark: pre-captured insertion watermark (captured together with the
+   *  synthesis input snapshot, BEFORE the awaited LLM call). When omitted the
+   *  current MAX(seq) at save time is used — acceptable only when no awaited
+   *  work separates the input snapshot from the save (e.g. rebuild scripts). */
+  savePersona(content: string, memWatermark?: number): number {
     const now = Date.now();
-    const res = this.db.prepare("INSERT INTO persona_versions (content, created_at) VALUES (?, ?)").run(content, now);
+    const watermark = memWatermark ?? this.personaMemWatermark();
+    const res = this.db
+      .prepare("INSERT INTO persona_versions (content, created_at, mem_watermark) VALUES (?, ?, ?)")
+      .run(content, now, watermark);
     const ver = Number(res.lastInsertRowid);
     const dir = join(this.dir, "persona");
     mkdirSync(dir, { recursive: true });
@@ -934,13 +990,70 @@ export class MemoryStore {
     return ver;
   }
 
-  /** Read the latest persona (undefined if none) */
-  getPersona(): { ver: number; content: string; createdAt: number } | undefined {
-    const row = this.db.prepare("SELECT ver, content, created_at FROM persona_versions ORDER BY ver DESC LIMIT 1").get() as
-      | Record<string, unknown>
-      | undefined;
+  /** Read the latest persona (undefined if none). memWatermark = deterministic
+   * insertion-order seq at save time (null for pre-watermark rows → caller falls
+   * back to the millisecond createdAt comparison). */
+  getPersona(): { ver: number; content: string; createdAt: number; memWatermark: number | null } | undefined {
+    const row = this.db
+      .prepare("SELECT ver, content, created_at, mem_watermark FROM persona_versions ORDER BY ver DESC LIMIT 1")
+      .get() as Record<string, unknown> | undefined;
     if (!row) return undefined;
-    return { ver: Number(row.ver), content: String(row.content), createdAt: Number(row.created_at) };
+    return {
+      ver: Number(row.ver),
+      content: String(row.content),
+      createdAt: Number(row.created_at),
+      memWatermark: row.mem_watermark == null ? null : Number(row.mem_watermark),
+    };
+  }
+
+  /**
+   * Deterministic persona-regeneration gate: count the same candidate rows the
+   * consolidator feeds the personas (active, user-provenance, global scope,
+   * fact/preference, not paste-demoted) that were INSERTED after the persona
+   * version represented by `persona`'s watermark. Watermark comparison is by
+   * insertion sequence, never wall-clock, so rows added in the same millisecond
+   * as the saved persona still count as newer. Legacy personas without a
+   * watermark fall back to the createdAt comparison (same as before).
+   */
+  countNewMemoriesForPersona(
+    persona: { ver: number; memWatermark: number | null; createdAt: number },
+  ): number {
+    // Watermark mode (all persona rows written by this build): count candidate
+    // rows whose insertion seq exceeds the persona watermark — deterministic,
+    // independent of wall-clock ticks. Seq rows of deleted memories are orphaned
+    // but harmless: the JOIN only counts memories that still exist.
+    if (persona.memWatermark != null) {
+      const counted = this.db
+        .prepare(
+          `SELECT COUNT(*) AS n
+           FROM memories_seq s
+           JOIN memories ON memories.id = s.memory_id
+           JOIN memories_meta mm ON mm.memory_id = memories.id
+           WHERE s.seq > ?
+             AND memories.status = 'active'
+             AND mm.provenance = 'user'
+             AND mm.source != 'llm-extract-pasted'
+             AND mm.scope = 'global'
+             AND memories.kind IN ('fact', 'preference')`,
+        )
+        .get(persona.memWatermark) as { n: number };
+      return Number(counted.n);
+    }
+    // Legacy fallback (pre-watermark personas): the original millisecond gate.
+    const row = this.db
+      .prepare(
+        `SELECT COUNT(*) AS n
+         FROM memories
+         JOIN memories_meta mm ON mm.memory_id = memories.id
+         WHERE memories.status = 'active'
+           AND mm.provenance = 'user'
+           AND mm.source != 'llm-extract-pasted'
+           AND mm.scope = 'global'
+           AND memories.kind IN ('fact', 'preference')
+           AND memories.created_at > ?`,
+      )
+      .get(persona.createdAt) as { n: number };
+    return Number(row.n);
   }
 
   /** Save a scene block */

@@ -53,14 +53,19 @@ export function createOpenAiEmbedding(config: {
   model?: string;
   dimensions?: number;
   timeoutMs?: number;
-}): EmbeddingProvider | null {
-  const baseUrl = (config.baseUrl ?? "").trim().replace(/\/+$/, "");
-  const model = (config.model ?? "").trim();
-  if (!baseUrl || !model) return null;
-  const timeoutMs = config.timeoutMs ?? 10_000;
-  const dimensions = config.dimensions ?? 1024;
+}): EmbeddingProvider {
+  // Construction is never gated on configuration: fields are read live from the
+  // passed object on every embed() call, so runtime hot-apply can configure the
+  // endpoint after plugin start and hybrid recall activates without a restart.
+  // embed() throws a clear error when still unconfigured; callers degrade to
+  // keyword-only recall by catching (recall.ts already does).
   return {
     async embed(texts: string[]): Promise<number[][]> {
+      const baseUrl = (config.baseUrl ?? "").trim().replace(/\/+$/, "");
+      const model = (config.model ?? "").trim();
+      if (!baseUrl || !model) throw new Error("embedding endpoint not configured");
+      const timeoutMs = config.timeoutMs ?? 10_000;
+      const dimensions = config.dimensions ?? 1024;
       const response = await fetch(`${baseUrl}/embeddings`, {
         method: "POST",
         headers: {
@@ -140,12 +145,14 @@ export class RecallService {
     if (topicalTokens(query, this.tokenizeFn).length === 0) return [];
     try {
       const deadline = AbortSignal.timeout(this.settings.timeoutMs);
-      // The keyword path is a synchronous DB query; vector/hybrid paths may involve external calls
+      // The keyword path is a synchronous DB query; every asynchronous lane
+      // inside the strategies is individually deadline-bounded and degrades to
+      // keyword-only on its own timeout, so no lane failure can discard keyword
+      // results here — no post-hoc throwIfAborted that would drop the result.
       const result =
         this.settings.strategy === "hybrid" && this.embedding
           ? await this.hybridSearch(query, maxResults, deadline, options)
           : await this.keywordSearch(query, maxResults, deadline, options);
-      deadline.throwIfAborted();
       return result;
     } catch (error) {
       console.warn("[dsh-self-improved] recall degraded:", String(error));
@@ -197,10 +204,26 @@ export class RecallService {
     options: { projectId?: string | null; excludeSessionId?: string } = {},
   ): Promise<RecallHit[]> {
     const topicTokens = new Set(topicalTokens(query, this.tokenizeFn));
-    const [keywordHits, vectorHits] = await Promise.all([
-      this.keywordSearch(query, Math.max(limit * 3, 10), signal, options),
-      this.vectorSearch(query, Math.max(limit * 3, 10), signal, options),
-    ]);
+    // The keyword lane is a local DB query and effectively cannot fail; a vector
+    // failure OR a slow provider (hung endpoint that never rejects in time) must
+    // never discard keyword results nor exceed the overall recall deadline:
+    // the vector lane is raced against the deadline and degrades to keyword-only
+    // recall right here instead of bubbling into search()'s catch-all.
+    const keywordHits = await this.keywordSearch(query, Math.max(limit * 3, 10), signal, options);
+    const vectorPromise = this.vectorSearch(query, Math.max(limit * 3, 10), signal, options).catch((error) => {
+      console.warn("[dsh-self-improved] vector lane failed; keyword-only fallback:", String(error));
+      return [] as RecallHit[];
+    });
+    const deadlineRace = new Promise<never>((_, reject) => {
+      signal.addEventListener("abort", () => reject(signal.reason ?? new Error("recall deadline exceeded")), { once: true });
+    });
+    let vectorHits: RecallHit[];
+    try {
+      vectorHits = await Promise.race([vectorPromise, deadlineRace]);
+    } catch (error) {
+      console.warn("[dsh-self-improved] vector lane exceeded the recall deadline; keyword-only fallback:", String(error));
+      vectorHits = [];
+    }
     const topicalVectorHits = vectorHits.filter(
       (h) => sharesTopic(h.content, topicTokens, this.tokenizeFn),
     );

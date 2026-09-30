@@ -172,9 +172,9 @@ check("recordAccess bumps access_count + read stats", gAfter.accessCount === 1 &
 // =====================================================================
 // C) Curated global baseline (bounded, slot-ordered) + block framing
 // =====================================================================
-const b1 = store2.insertMemory({ kind: "preference", content: "User prefers concise replies", importance: 9 });
-const b2 = store2.insertMemory({ kind: "preference", content: "User is based in Belgium", importance: 9 });
-const b3 = store2.insertMemory({ kind: "fact", content: "User works from Delft", importance: 8 });
+const b1 = store2.insertMemory({ kind: "preference", content: "User prefers concise replies", importance: 9 }, { provenance: "user" });
+const b2 = store2.insertMemory({ kind: "preference", content: "User is based in Belgium", importance: 9 }, { provenance: "user" });
+const b3 = store2.insertMemory({ kind: "fact", content: "User works from Delft", importance: 8 }, { provenance: "user" });
 check("baseline pins land in order", store2.pinBaseline(b1.id, 15) === 1 && store2.pinBaseline(b2.id, 15) === 2);
 const entries0 = recall2.getBaselineEntries();
 check("baseline entries include pinned memories", entries0.some((e) => e.id === b1.id) && entries0.some((e) => e.id === b2.id), JSON.stringify(entries0.map((e) => e.id.slice(0, 6))));
@@ -261,7 +261,7 @@ scripted.set("s-hallucinated", JSON.stringify({
   ],
 }));
 // A6: near-duplicate → merged into the existing row, not inserted
-store3.insertMemory({ kind: "preference", content: "User prefers pnpm for package management", importance: 8 });
+store3.insertMemory({ kind: "preference", content: "User prefers pnpm for package management", importance: 8 }, { provenance: "user" });
 seedSession("s-dup-src", [{ type: "user", text: "I prefer pnpm overall, remember that" }]);
 scripted.set("s-dup-src", JSON.stringify({
   memories: [
@@ -758,7 +758,7 @@ legacyOnly.close();
   );
   check("backup taken before DDL for the stale legacy db", existsSync(join(staleDir, "memory.db.pre-hermes.bak")));
   // Missing-meta repair: destructive drop of a meta row, reopen must repair
-  const victim = staleStore.insertMemory({ kind: "fact", content: "Meta repair victim row", importance: 7 });
+  const victim = staleStore.insertMemory({ kind: "fact", content: "Meta repair victim row", importance: 7 }, { provenance: "user" });
   staleStore.close();
   const db = new DatabaseSync(join(staleDir, "memory.db"));
   db.prepare("DELETE FROM memories_meta WHERE memory_id = ?").run(victim.id);
