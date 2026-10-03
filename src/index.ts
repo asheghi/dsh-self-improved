@@ -25,7 +25,7 @@ import { Extractor, type ExtractSettings } from "./extract.js";
 import { RecallService, createOpenAiEmbedding, renderCuratedProfile, type RecallSettings } from "./recall.js";
 import { installRecallInjection } from "./inject.js";
 import { Consolidator } from "./consolidate.js";
-import { applyDecay, synthesizeSkills, deleteSkill } from "./evolve.js";
+import { applyDecay, synthesizeSkills, synthesizeSkillsFromEpisodes, deleteSkill } from "./evolve.js";
 import { installMemoryCommands, installBrowserChannel } from "./commands.js";
 import { BlockAssembler, createUserMessage } from "@deepseek-ai/dsh-llm";
 
@@ -119,6 +119,8 @@ export interface EpisodeLearningConfig {
   maxRecallResults: number;
   /** Character cap of the operational fence itself (100–5000, default 600) */
   maxRecallChars: number;
+  /** Phase 5: minimum reviewed-successful-episode group size for automatic skill synthesis (2–10, default 2) */
+  skillMinEpisodes: number;
 }
 
 export interface Config {
@@ -298,6 +300,7 @@ export const Config = z.object({
     operationalRecallEnabled: z.boolean().default(false),
     maxRecallResults: z.number().min(1).max(10).default(2),
     maxRecallChars: z.number().min(100).max(5000).default(600),
+    skillMinEpisodes: z.number().min(2).max(10).default(2),
   }),
 });
 
@@ -372,7 +375,7 @@ export function apply(ctx: Context, config: Config): void {
     return extractLlm({ system, user, sessionId, signal });
   }, embeddingProvider);
   // Episode-learning runtime state (hot-applied by scope.watch below)
-  const episodeState = { enabled: config.episodeLearning.enabled, captureArguments: config.episodeLearning.captureArguments, maxChars: config.episodeLearning.resultExcerptChars, reviewEnabled: config.episodeLearning.reviewEnabled, confidenceFloor: config.episodeLearning.confidenceFloor, expiryDays: config.episodeLearning.expiryDays, operationalRecallEnabled: config.episodeLearning.operationalRecallEnabled, maxRecallResults: config.episodeLearning.maxRecallResults, maxRecallChars: config.episodeLearning.maxRecallChars };
+  const episodeState = { enabled: config.episodeLearning.enabled, captureArguments: config.episodeLearning.captureArguments, maxChars: config.episodeLearning.resultExcerptChars, reviewEnabled: config.episodeLearning.reviewEnabled, confidenceFloor: config.episodeLearning.confidenceFloor, expiryDays: config.episodeLearning.expiryDays, operationalRecallEnabled: config.episodeLearning.operationalRecallEnabled, maxRecallResults: config.episodeLearning.maxRecallResults, maxRecallChars: config.episodeLearning.maxRecallChars, skillMinEpisodes: config.episodeLearning.skillMinEpisodes };
   installCapture(ctx, store, { enabled: () => readModule("capture") }, () => {
     if (!extractSettings.enabled) return;
     const result = extractor.pump();
@@ -400,6 +403,7 @@ export function apply(ctx: Context, config: Config): void {
   );
   const skillLlm = makeLlmCall(ctx, config, "memory-skill", 3000);
   const episodeReviewLlm = makeLlmCall(ctx, config, "episode-review", 2000);
+  const episodeSkillLlm = makeLlmCall(ctx, config, "episode-skill", 3000);
   let lastEvolveTs = 0;
   /**
    * Run one evolution round.
@@ -491,6 +495,30 @@ export function apply(ctx: Context, config: Config): void {
         : null;
     const summary = await runEvolution(true, true);
     if (episodeReviewPromise) await episodeReviewPromise;
+    // Phase 5 (OPT-IN, runs only from fullReview — never per-flush): episode-to-skill
+    // synthesis needs the Phase 3 review to have committed its derived memories first.
+    if (
+      readModule("evolve") &&
+      episodeState.enabled &&
+      config.evolve.skillSynthesis.enabled
+    ) {
+      try {
+        const n = await synthesizeSkillsFromEpisodes(
+          store,
+          async ({ system, user, signal }) => episodeSkillLlm({ system, user, signal }),
+          {
+            skillsRoot: config.evolve.skillSynthesis.skillsRoot,
+            prefix: config.evolve.skillSynthesis.prefix,
+            maxSkills: config.evolve.skillSynthesis.maxSkills,
+            minEpisodes: episodeState.skillMinEpisodes,
+          },
+        );
+        if (n > 0) log("episode skills synthesized:", n);
+        summary.episodeSkills = n;
+      } catch (e) {
+        console.warn("[dsh-self-improved] episode skill synthesis error:", String(e));
+      }
+    }
     log(`review(${reason}) done:`, JSON.stringify({ pumped, ...summary }));
     return { pumped, ...summary };
   };
@@ -700,6 +728,7 @@ export function apply(ctx: Context, config: Config): void {
     episodeState.operationalRecallEnabled = next.episodeLearning.operationalRecallEnabled;
     episodeState.maxRecallResults = next.episodeLearning.maxRecallResults;
     episodeState.maxRecallChars = next.episodeLearning.maxRecallChars;
+    episodeState.skillMinEpisodes = next.episodeLearning.skillMinEpisodes;
     config.episodeLearning.retentionDays = next.episodeLearning.retentionDays;
     extractSettings.enabled = readModule("extract");
     extractSettings.intervalMinutes = next.extract.intervalMinutes;

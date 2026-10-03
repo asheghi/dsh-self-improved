@@ -1021,6 +1021,38 @@ export class MemoryStore {
     }));
   }
 
+  /**
+   * Derived operational-memory contents learned from the given sessions'
+   * episodes (Phase 5 skill-synthesis support EVIDENCE ONLY: provenance
+   * 'derived', source 'episode-review'). Read-only, additive, bounded.
+   */
+  operationalMemoryContentsBySession(sessionIds: string[], limitPerSession = 10, maxChars = 500): string[] {
+    const contents: string[] = [];
+    const seen = new Set<string>();
+    for (const chunk of chunkList(sessionIds.filter((s) => s && s.trim()), 100)) {
+      const placeholders = chunk.map(() => "?").join(",");
+      const rows = this.db
+        .prepare(
+          `SELECT m.content, m.id FROM memories m
+           JOIN memories_meta mm ON mm.memory_id = m.id
+           WHERE mm.source = 'episode-review'
+             AND mm.provenance = 'derived'
+             AND mm.session_id IN (${placeholders})
+           ORDER BY m.created_at DESC `,
+        )
+        .all(...chunk) as Array<Record<string, unknown>>;
+      for (const row of rows) {
+        const id = String(row.id);
+        if (seen.has(id)) continue;
+        seen.add(id);
+        if (contents.length < limitPerSession * Math.max(1, sessionIds.length)) {
+          contents.push(String(row.content ?? "").slice(0, maxChars));
+        }
+      }
+    }
+    return contents.slice(0, limitPerSession * Math.max(1, sessionIds.length));
+  }
+
   /** jieba tokenization → FTS5 quoted terms (punctuation stripped, FTS syntax injection impossible) */
   private ftsTerms(query: string, maxTerms = 24): string[] {
     const raw = tokenize(query)

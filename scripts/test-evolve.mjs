@@ -2,11 +2,14 @@
  * M4 self-evolution unit tests: scene consolidation / persona versioning / forgetting decay / skill synthesis (fake LLM).
  * Run: node scripts/test-evolve.mjs
  */
-import { rmSync, existsSync, readFileSync } from "node:fs";
+import { rmSync, existsSync, readFileSync, mkdirSync, writeFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { MemoryStore } from "../lib/storage.js";
 import { Consolidator } from "../lib/consolidate.js";
-import { applyDecay, memoryScore, synthesizeSkills, deleteSkill } from "../lib/evolve.js";
+import { applyDecay, memoryScore, synthesizeSkills, synthesizeSkillsFromEpisodes, deleteSkill } from "../lib/evolve.js";
+import { installCapture } from "../lib/capture.js";
+import { assembleSessionEpisodes } from "../lib/episodes.js";
+import { randomUUID } from "node:crypto";
 
 const dir = join(process.env.TEST_DIR ?? "/tmp/dsh-mem-test", "m4-unit");
 rmSync(dir, { recursive: true, force: true });
@@ -189,6 +192,265 @@ capMem.close();
   check("persona first version written", wmResult.personaVersion === 1 && wmPersona?.ver === 1, JSON.stringify(wmResult));
   check("concurrent insert during generation stays eligible next time (watermark captured before the LLM)", eligible === 3, `eligible=${eligible} watermark=${wmPersona?.memWatermark}`);
   wmStore.close();
+}
+
+// ---------- 5) Phase 5: episode-to-skill synthesis (opt-in, gated by the caller) ----------
+{
+  // Shared episode-seeding helpers (mirrors test-episode-review.mjs conventions)
+  const flushOf = (store) => {
+    const regs = [];
+    const ctx = { on: (type, fn) => regs.push({ type, fn }) };
+    installCapture(ctx, store, { enabled: () => true }, undefined, { enabled: () => true, maxChars: () => 4000 });
+    return async (session) => {
+      await regs[0].fn(session);
+      assembleSessionEpisodes(store, session.id);
+    };
+  };
+  const callEv = (seq, turn, step, callId, name, args, time = 1000) => ({
+    type: "tool/call",
+    seq,
+    time,
+    data: { turn, step, callId, name, arguments: typeof args === "string" ? args : JSON.stringify(args) },
+  });
+  const resultEv = (seq, turn, step, callId, text, time = 2000) => ({
+    type: "tool/result",
+    seq,
+    time,
+    data: { turn, step, message: { content: [{ type: "tool-result", toolCallId: callId, content: text }] } },
+  });
+  const turnEndEv = (seq, turn, time = 3000) => ({ type: "turn/end", seq, time, data: { turn, reason: { kind: "completed" } } });
+
+  let sessionSeq = 0;
+  /** One successful episode in its own session; returns the episode id. */
+  const seedGoodEpisode = async (flush, tool = "bash", args = { cmd: "pnpm update" }, excerpt = "lockfile updated") => {
+    const turn = 1;
+    sessionSeq += 1;
+    const sessionId = `ep-skill-session-${sessionSeq}`;
+    await flush({
+      id: sessionId,
+      header: { cwd: "/tmp/ep-skill-proj" },
+      events: [
+        callEv(1, turn, 0, `c${sessionSeq}`, tool, args),
+        resultEv(2, turn, 0, `c${sessionSeq}`, excerpt),
+        turnEndEv(3, turn),
+      ],
+    });
+    return sessionId;
+  };
+  const countReviewed = (store) => store.listEpisodes({ status: "succeeded", limit: 500 }).filter((e) => e.reviewedAt != null).length;
+  const episodeIdOfSession = (store, sessionId) => {
+    for (const reviewed of [false, true]) {
+      const eps = reviewed
+        ? store.listEpisodes({ status: "succeeded", limit: 500 }).filter((e) => e.reviewedAt != null)
+        : store.listEpisodes({ status: "succeeded", limit: 500, unreviewedOnly: true });
+      const ep = eps.find((e) => e.sessionId === sessionId);
+      if (ep) return ep.id;
+    }
+    return null;
+  };
+  const markReviewed = (store, episodeId) => {
+    store.setEpisodeReview(episodeId, {
+      summary: "dependency update demonstrated successfully via pnpm",
+      confidence: 0.9,
+      status: "reviewed",
+    });
+  };
+
+  /**
+   * Seeds `n` identical (same fingerprint) episodes for one store and returns
+   * their episode ids. whenReviewed=false leaves them unreviewed.
+   */
+  const seedGroup = async (store, n, whenReviewed = true) => {
+    const flush = flushOf(store);
+    const ids = [];
+    for (let i = 0; i < n; i++) {
+      const sessionId = await seedGoodEpisode(flush);
+      const id = episodeIdOfSession(store, sessionId);
+      ids.push(id);
+      if (whenReviewed) markReviewed(store, id);
+    }
+    return ids;
+  };
+
+  /** Canned LLM echoing the actual episode ids from the prompt (real citation path). */
+  const emitSkill = (name, procedure, extra = {}) => {
+    const fn = async ({ user }) => {
+      const ids = [...user.matchAll(/Episode id: ([0-9a-f-]+)/g)].map((m) => m[1]);
+      return JSON.stringify({
+        skill: { name, description: "Update dependencies safely with pnpm", whenToUse: "When project dependencies need updating", procedure, source_episode_ids: ids, ...extra },
+      });
+    };
+    fn.getSkillName = () => name;
+    return fn;
+  };
+  const skillDir = (root, name) => join(root, name, "SKILL.md");
+
+  const synth = (store, root, llm, opts = {}) =>
+    synthesizeSkillsFromEpisodes(store, llm, {
+      skillsRoot: root,
+      prefix: "",
+      maxSkills: 0,
+      minEpisodes: 2,
+      ...opts,
+    });
+
+  // --- 5a) ONE succeeded episode → never a skill
+  {
+    const s = new MemoryStore(join(dir, "ep-skill-one"));
+    const root = join(dir, "ep-skill-root-one");
+    await seedGroup(s, 1);
+    const n = await synth(s, root, emitSkill("bump-deps", ["Update the lockfile", "Verify the build"]));
+    check("5a: one succeeded episode yields NO skill", n === 0 && !existsSync(join(root, "bump-deps")));
+    s.close();
+  }
+
+  // --- 5b) two compatible succeeded episodes → exactly 1 skill with full provenance
+  let rootB;
+  {
+    const s = new MemoryStore(join(dir, "ep-skill-two"));
+    rootB = join(dir, "ep-skill-root-two");
+    const ids = await seedGroup(s, 2);
+    const n = await synth(s, rootB, emitSkill("bump-deps", ["Check current dependency versions", "Update the lockfile", "Verify the build"]));
+    check("5b: two compatible episodes write ONE skill", n === 1 && existsSync(skillDir(rootB, "bump-deps")));
+    const content = existsSync(skillDir(rootB, "bump-deps")) ? readFileSync(skillDir(rootB, "bump-deps"), "utf8") : "";
+    const cited = ids.every((id) => content.includes(`"${id}"`));
+    check("5b: frontmatter cites BOTH episode ids", cited, content.match(/^source_episodes:.*$/m)?.[0] ?? "missing");
+    check("5b: frontmatter carries generated_at", /^generated_at: .+Z$/m.test(content));
+    check("5b: name validation applied (kebab-case kept)", content.includes("name: bump-deps"));
+    check("5b: procedure steps present", content.includes("Update the lockfile"));
+    // --- 5c) rerun on the SAME episodes (all already cited + same content) → 0 additional skills
+    const n2 = await synth(s, rootB, emitSkill("bump-deps", ["Check current dependency versions", "Update the lockfile", "Verify the build"]));
+    check("5c: re-synthesis of the same episodes writes 0 skills", n2 === 0 && !existsSync(join(rootB, "bump-deps-2")));
+    s.close();
+  }
+
+  // --- 5d) partial citation: new uncited episode → 1; then all cited → 0
+  {
+    const s = new MemoryStore(join(dir, "ep-skill-partial"));
+    const root = join(dir, "ep-skill-root-partial");
+    const ids = await seedGroup(s, 2);
+    // Hand-written prior skill citing ONLY the first episode (simulates an earlier synthesis)
+    const prior = ["---", `name: bump-deps`, "description: prior version", "whenToUse: when updating", `source_episodes: ${JSON.stringify([ids[0]])}`, "generated_at: 2026-01-01T00:00:00.000Z", "---", "1. an old unrelated procedure line about uninstalling stale caches entirely"].join("\n");
+    mkdirSync(join(root, "bump-deps"), { recursive: true });
+    writeFileSync(join(root, "bump-deps", "SKILL.md"), prior + "\n");
+    const n1 = await synth(s, root, emitSkill("bump-deps", ["Update the lockfile with pnpm update", "Then run the release verification suite freshly again"]));
+    check("5d: partial citation + new episode → 1 new skill", n1 === 1, "n1=" + n1);
+    // now all group ids are cited → gate 3 blocks
+    const n2 = await synth(s, root, emitSkill("bump-deps", ["Yet another genuinely different generalized procedure text for testing purposes"]));
+    check("5d: all cited → 0 (dedupe gate)", n2 === 0, "n2=" + n2);
+    s.close();
+  }
+
+  // --- 5e) a later FAILED episode with the same fingerprint blocks the group
+  {
+    const s = new MemoryStore(join(dir, "ep-skill-failed"));
+    const root = join(dir, "ep-skill-root-failed");
+    await seedGroup(s, 2);
+    // one same-fingerprint FAILED episode (same single bash call, erroring result)
+    sessionSeq += 1;
+    const sessionId = `ep-skill-session-${sessionSeq}`;
+    await flushOf(s)({
+      id: sessionId,
+      header: { cwd: "/tmp/ep-skill-proj" },
+      events: [
+        callEv(1, 1, 0, `c${sessionSeq}`, "bash", { cmd: "pnpm update" }),
+        {
+          type: "tool/result",
+          seq: 2,
+          time: 2000,
+          data: { turn: 1, step: 0, message: { content: [{ type: "tool-result", toolCallId: `c${sessionSeq}`, content: "failed to resolve", isError: true }] } },
+        },
+        turnEndEv(3, 1),
+      ],
+    });
+    const n = await synth(s, root, emitSkill("bump-deps", ["Update the lockfile", "Verify the build passes"]));
+    check("5e: later failed episode with same fingerprint blocks synthesis", n === 0 && !existsSync(join(root, "bump-deps")));
+    s.close();
+  }
+
+  // --- 5f) contradictory evidence: {"skill":null,"reason"} → skip, no crash, no errored group
+  {
+    const s = new MemoryStore(join(dir, "ep-skill-contradict"));
+    const root = join(dir, "ep-skill-root-contradict");
+    await seedGroup(s, 2);
+    const contradictLlm = async () => JSON.stringify({ skill: null, reason: "procedures differ between the episodes" });
+    const n = await synth(s, root, contradictLlm);
+    let files = "";
+    try { files = readdirSync(root).join(","); } catch { files = ""; }
+    check("5f: contradictory evidence → 0 skills, no files", n === 0 && files === "", files);
+    s.close();
+  }
+
+  // --- 5g) credential-shaped procedure line is dropped; secrets never reach the file
+  {
+    const s = new MemoryStore(join(dir, "ep-skill-secret"));
+    const root = join(dir, "ep-skill-root-secret");
+    await seedGroup(s, 2);
+    const n = await synth(s, root, emitSkill("bump-deps", ["Run the build to verify", "set token bearer AKIAIOSEXAMPLE123456"])); // eslint-disable-line no-restricted-syntax
+    const file = skillDir(root, "bump-deps");
+    const content = existsSync(file) ? readFileSync(file, "utf8") : "";
+    check("5g: credential line dropped, skill still written", n === 1 && content.includes("Run the build to verify"));
+    check("5g: no secret in written skill file", !content.includes("AKIAIOS"));
+    // all-lines-secret → skill rejected entirely
+    const root2 = join(dir, "ep-skill-root-secret-all");
+    const secretOnly = emitSkill("bump-deps", ["set token bearer AKIAIOSEXAMPLE123456", "password=hunter2verysecretxx"]);
+    const n2 = await synth(s, root2, secretOnly);
+    check("5g: all-secret procedure → skill rejected", n2 === 0 && !existsSync(join(root2, "bump-deps")));
+    s.close();
+  }
+
+  // --- 5h) maxSkills cap reached → 0 + existing skip behaviour
+  {
+    const s = new MemoryStore(join(dir, "ep-skill-cap"));
+    const root = join(dir, "ep-skill-root-cap");
+    await seedGroup(s, 2);
+    mkdirSync(join(root, "dsi-existing-procedure"), { recursive: true });
+    writeFileSync(join(root, "dsi-existing-procedure", "SKILL.md"), "---\nname: dsi-existing-procedure\ndescription: an existing synthesized skill\n---\n1. an existing step");
+    const n = await synth(s, root, emitSkill("bump-deps", ["Update the lockfile"]), { prefix: "dsi-", maxSkills: 1 });
+    check("5h: cap reached → 0 written", n === 0);
+    s.close();
+  }
+
+  // --- 5i) prefix rules: prefixed config writes dsi-prefixed skill; unprefixed writes bare
+  {
+    const s = new MemoryStore(join(dir, "ep-skill-prefix"));
+    const root = join(dir, "ep-skill-root-prefix");
+    await seedGroup(s, 2);
+    const n = await synth(s, root, emitSkill("bump-deps", ["Update the lockfile"]), { prefix: "dsi-" });
+    const file = skillDir(root, "dsi-bump-deps");
+    const content = existsSync(file) ? readFileSync(file, "utf8") : "";
+    check("5i: prefixed skill written with rewritten frontmatter name", n === 1 && content.includes("name: dsi-bump-deps"));
+    s.close();
+  }
+
+  // --- 5j) unreviewed succeeded episodes are NOT candidates
+  {
+    const s = new MemoryStore(join(dir, "ep-skill-unreviewed"));
+    const root = join(dir, "ep-skill-root-unreviewed");
+    await seedGroup(s, 2, false);
+    check("5j: setup has unreviewed episodes", countReviewed(s) === 0);
+    const n = await synth(s, root, emitSkill("bump-deps", ["Update the lockfile"]));
+    check("5j: unreviewed episodes yield 0 skills", n === 0 && !existsSync(join(root, "bump-deps")));
+    s.close();
+  }
+
+  // --- 5k) empty skillsRoot is a safe no-op; now override respected
+  {
+    const s = new MemoryStore(join(dir, "ep-skill-noop"));
+    check("5k: empty skillsRoot → 0 (no-op)", (await synth(s, "", emitSkill("bump-deps", ["Update the lockfile"]))) === 0);
+    const root = join(dir, "ep-skill-root-now");
+    await seedGroup(s, 2);
+    const n = await synth(s, root, emitSkill("bump-deps", ["Update the lockfile"]), { now: Date.UTC(2026, 0, 15) });
+    const content = yamlGeneratedAt(join(root, "bump-deps"));
+    if (content) check("5k: generated_at honors opts.now", content === "2026-01-15T00:00:00.000Z", content);
+    s.close();
+  }
+
+  function yamlGeneratedAt(root) {
+    const file = join(root, "SKILL.md");
+    if (!existsSync(file)) return null;
+    return readFileSync(file, "utf8").match(/^generated_at: (\S+)/m)?.[1] ?? null;
+  }
 }
 
 store.close();
