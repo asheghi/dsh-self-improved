@@ -624,8 +624,9 @@ export function installBrowserChannel(opts: BrowserChannelOptions): BrowserChann
   });
   refresh();
   let timer: ReturnType<typeof setInterval> | null = null;
-  if ((opts.refreshIntervalMs ?? 60_000) > 0) {
-    timer = setInterval(refresh, opts.refreshIntervalMs);
+  const refreshIntervalMs = opts.refreshIntervalMs ?? 60_000;
+  if (refreshIntervalMs > 0) {
+    timer = setInterval(refresh, refreshIntervalMs);
     timer.unref?.();
   }
   const stop = (): void => {
