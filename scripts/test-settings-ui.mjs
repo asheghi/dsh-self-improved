@@ -98,4 +98,48 @@ assert.ok(
 const onSave = src.slice(src.indexOf("function onSave()"), src.indexOf("function onReset()"));
 assert.ok(!/valueToDraft\(fresh/.test(onSave), "save path unchanged");
 
+// ── 4. Phase 6: episode learning fields + first-enable consent ─────────────
+// Every episodeLearning schema path is exposed as a settings field in the groupEpisodes group.
+const EPISODE_PATHS = [
+  "episodeLearning.enabled",
+  "episodeLearning.captureArguments",
+  "episodeLearning.resultExcerptChars",
+  "episodeLearning.retentionDays",
+  "episodeLearning.reviewEnabled",
+  "episodeLearning.confidenceFloor",
+  "episodeLearning.expiryDays",
+  "episodeLearning.operationalRecallEnabled",
+  "episodeLearning.maxRecallResults",
+  "episodeLearning.maxRecallChars",
+  "episodeLearning.skillMinEpisodes",
+];
+const fieldsBlock = src.match(/var FIELDS = \[[\s\S]*?\n    \];/);
+assert.ok(fieldsBlock, "FIELDS block parses");
+for (const p of EPISODE_PATHS) {
+  const path = p.split(".");
+  const pattern = new RegExp(`path: \\[${path.map((s) => `"${s}"`).join(", ")}\\]`);
+  assert.match(fieldsBlock[0], pattern, `episodeLearning field exposed in the settings UI: ${p}`);
+}
+// The episode group must stay reachable while disabled (it collapses only with
+// the master switch — collapsing on its own switch would hide the enable toggle).
+assert.match(src, /groupEpisodes: "enabled"/, "groupEpisodes visible while episode learning is off (else it can never be enabled)");
+// Flipping episode capture on requires an explicit consent confirm; declining
+// must force a re-render so the controlled checkbox un-flips (no state change
+// on the early-return path otherwise leaves the DOM checked).
+assert.match(
+  src,
+  /f\.key === "episodeLearning\.enabled" && v === true && !draft\[f\.key\] && !getPath\(value, f\.path\)[\s\S]*?window\.confirm\(t\("episodeEnableWarning"\)\)[\s\S]{0,400}setDraft\(function \(prev\) \{ return Object\.assign\(\{\}, prev\); \}\)/,
+  "declined first-enable re-renders to restore the checkbox",
+);
+// Both locale dictionaries carry the consent text + episode browser keys.
+for (const key of ["episodeEnableWarning", "browserEpisodes", "browserEpisodePurge", "browserEpisodeDryReview", "browserEpisodeDetailTitle"]) {
+  const hits = [...src.matchAll(new RegExp(`^      ${key}: "`, "gm"))].length;
+  assert.equal(hits, 2, `locale key ${key} present in both dictionaries (zh+en)`);
+}
+// Episode detail modal + episodes panel are wired into the browser section.
+assert.match(src, /collapse\("episodes"/, "episodes panel rendered");
+assert.match(src, /episodeModal/, "episode detail modal rendered");
+// browserSummary template exposes the episode count in both dictionaries.
+assert.equal([...src.matchAll(/browserSummary: "\{n\} active memories[^\n]*\{e\} episodes"/g)].length, 2, "browserSummary shows the episode count in both dictionaries");
+
 console.log("test-settings-ui: PASS");

@@ -20,6 +20,7 @@ import { MemoryStore, defaultMemoryDir } from "./storage.js";
 import { installCapture, projectKeyFromCwd } from "./capture.js";
 import { closeStalePendingEpisodes, repairEpisodeConsistency, assembleSessionEpisodes } from "./episodes.js";
 import { runEpisodeReview } from "./episode-review.js";
+import type { EpisodeReviewSummary } from "./episode-review.js";
 import { registerMemoryTools } from "./tools.js";
 import { Extractor, type ExtractSettings } from "./extract.js";
 import { RecallService, createOpenAiEmbedding, renderCuratedProfile, type RecallSettings } from "./recall.js";
@@ -27,6 +28,7 @@ import { installRecallInjection } from "./inject.js";
 import { Consolidator } from "./consolidate.js";
 import { applyDecay, synthesizeSkills, synthesizeSkillsFromEpisodes, deleteSkill } from "./evolve.js";
 import { installMemoryCommands, installBrowserChannel } from "./commands.js";
+import type { BrowserChannel } from "./commands.js";
 import { BlockAssembler, createUserMessage } from "@deepseek-ai/dsh-llm";
 
 export const name = "self-improved";
@@ -685,6 +687,36 @@ export function apply(ctx: Context, config: Config): void {
   log("recall injection installed (strategy:", rec.recallSettings.strategy, ", project scoping on)");
 
   // ⑥ CLI command (M5): /memory (active when the host provides a commands service); hot-registers/unregisters following the master switch
+  // Browser channel is created below (⑧) but referenced by the episode-review
+  // delegate (dry-review summaries publish into the served snapshot), so the
+  // variable must exist before the command handler can run — command
+  // invocations can only arrive after apply() finishes anyway.
+  let browserChannel: BrowserChannel | null = null;
+  /** Manual/nightly episode review runner. dry=true → validateOnly commits (nothing persists).
+   *  Gated on the master switch + episodeLearning.enabled + reviewEnabled; publishes the
+   *  summary line into the browser snapshot so the UI can display the last verdict. */
+  const episodeReviewRun = (dry: boolean): Promise<EpisodeReviewSummary> => {
+    if (!state.enabled || !episodeState.enabled || !episodeState.reviewEnabled) {
+      return Promise.reject(
+        new Error("Episode learning review is disabled (dsh-self-improved enabled / episodeLearning.enabled / reviewEnabled)"),
+      );
+    }
+    return runEpisodeReview(
+      store,
+      async ({ system, user, signal }) => episodeReviewLlm({ system, user, signal }),
+      {
+        confidenceFloor: episodeState.confidenceFloor,
+        expiryDays: episodeState.expiryDays,
+        dryRun: dry,
+      },
+    ).then((s) => {
+      log("episode review" + (dry ? " (dry-run)" : "") + ":", JSON.stringify(s));
+      try {
+        browserChannel?.episodeStatus(JSON.stringify({ ...s, dryRun: dry, at: Date.now() }));
+      } catch { /* status publish is best effort */ }
+      return s;
+    });
+  };
   let commandsDispose: (() => void) | null = null;
   const syncCommands = (): void => {
     if (!state.enabled) {
@@ -703,6 +735,8 @@ export function apply(ctx: Context, config: Config): void {
       // and the synthesized-skill flags without re-registering the command.
       skillsPrefix: () => config.evolve.skillSynthesis.prefix,
       skillsRoot: () => config.evolve.skillSynthesis.skillsRoot,
+      episodeEnabled: () => episodeState.enabled,
+      episodeReview: (dry) => episodeReviewRun(dry),
     });
     if (commandsDispose) {
       log("memory command installed (/memory)");
@@ -803,12 +837,15 @@ export function apply(ctx: Context, config: Config): void {
   // credential is a short-TTL challenge bound to the exact op + arguments,
   // published through the snapshot and consumed atomically — captured payloads
   // cannot be replayed for arbitrary actions.
-  const browserChannel = installBrowserChannel({
+  browserChannel = installBrowserChannel({
     ctx,
     store,
     skillsPrefix: () => config.evolve.skillSynthesis.prefix,
     skillsRoot: () => config.evolve.skillSynthesis.skillsRoot,
     deleteSkill,
+    episodeEnabled: () => episodeState.enabled,
+    episodeDryReview: () =>
+      episodeState.enabled && episodeState.reviewEnabled ? episodeReviewRun(true) : null,
     log,
   });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

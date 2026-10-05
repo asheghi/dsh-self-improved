@@ -231,7 +231,7 @@ window.__ModuleLoader__.load({
       browserHint: "Loading… (data from /memory browser --json)",
       browserSearch: "Filter",
       browserRefresh: "Refresh",
-      browserSummary: "{n} active memories · {p} pending · {s} scenes · persona v{v} · {k} skills",
+      browserSummary: "{n} active memories · {p} pending · {s} scenes · persona v{v} · {k} skills · {e} episodes",
       browserEmpty: "(no active memories)",
       browserPersona: "Persona",
       browserPersonaEmpty: "(no persona yet — self-evolution synthesizes it as memories accumulate)",
@@ -260,7 +260,44 @@ window.__ModuleLoader__.load({
       browserCorrectCancel: "Cancel",
       browserCorrected: "Corrected",
       browserForgetConfirm: "Forget this memory?",
-      browserForgotten: "Forgotten"
+      browserForgotten: "Forgotten",
+      groupEpisodes: "Episode learning (tool outcomes, disabled by default)",
+      fEpEnabled: "Enable episode learning",
+      fEpEnabledHint: "Captures every tool call + result (arguments/results redacted at capture, bounded) into the local episode store. Nothing leaves this machine; purge anytime from the Memory tab.",
+      fEpCaptureArgs: "Capture tool arguments",
+      fEpExcerpt: "Result excerpt chars (max)",
+      fEpRetention: "Episode record retention days",
+      fEpReview: "Run LLM outcome review (manual/nightly only)",
+      fEpReviewHint: "Reviews redacted episodes into project-scoped, evidence-cited operational memories. Never runs per-flush.",
+      fEpConf: "Operational memory confidence floor",
+      fEpExpiry: "Operational memory expiry days",
+      fEpRecall: "Inject operational recall (labeled, separate)",
+      fEpRecallHint: "Off by default: injects derived, project-scoped operational knowledge as a fallible labeled block — never into persona/baseline.",
+      fEpRecallMax: "Max operational recall results",
+      fEpRecallChars: "Max operational recall chars",
+      fEpSkillMin: "Episodes required to synthesize one skill",
+      episodeEnableWarning: "Episode learning will store every tool call and result (redacted, bounded) for this project's sessions locally until purged. Enable now?",
+      browserEpisodes: "Episodes (tool outcomes)",
+      browserEpisodesDisabled: "(episode learning disabled — enable it in Config to capture episodes; purge below still works)",
+      browserEpisodesEmpty: "(no episodes recorded yet)",
+      browserEpisodePurge: "Purge >30d",
+      browserEpisodePurgeAll: "Purge all",
+      browserEpisodePurgeConfirm: "Purge stored episode records (steps + events)? Memories and skills are untouched.",
+      browserEpisodeDryReview: "Dry-review",
+      browserEpisodeDetailTitle: "Episode detail (redacted)",
+      browserEpisodeNoSteps: "(no steps recorded)",
+      browserEpisodeLastReview: "Last review:",
+      browserEpisodeReviewNone: "no review run yet",
+      browserMetaSession: "Session",
+      browserMetaTurn: "Turn",
+      browserMetaProject: "Project",
+      browserMetaSteps: "Steps",
+      browserMetaSummary: "Summary",
+      browserMetaConfidence: "Confidence",
+      browserMetaFingerprint: "Fingerprint",
+      browserMetaRejectReason: "Reject reason",
+      browserMetaStarted: "Started",
+      browserMetaEnded: "Ended"
     };
     var en = {
       nav: "Evolving Memory",
@@ -394,7 +431,7 @@ window.__ModuleLoader__.load({
       browserHint: "Loading… (data from /memory browser --json)",
       browserSearch: "Filter",
       browserRefresh: "Refresh",
-      browserSummary: "{n} active memories · {p} pending · {s} scenes · persona v{v} · {k} skills",
+      browserSummary: "{n} active memories · {p} pending · {s} scenes · persona v{v} · {k} skills · {e} episodes",
       browserEmpty: "(no active memories)",
       browserPersona: "Persona",
       browserPersonaEmpty: "(no persona yet — self-evolution synthesizes it as memories accumulate)",
@@ -423,7 +460,44 @@ window.__ModuleLoader__.load({
       browserCorrectCancel: "Cancel",
       browserCorrected: "Corrected",
       browserForgetConfirm: "Forget this memory?",
-      browserForgotten: "Forgotten"
+      browserForgotten: "Forgotten",
+      groupEpisodes: "Episode learning (tool outcomes, disabled by default)",
+      fEpEnabled: "Enable episode learning",
+      fEpEnabledHint: "Captures every tool call + result (arguments/results redacted at capture, bounded) into the local episode store. Nothing leaves this machine; purge anytime from the Memory tab.",
+      fEpCaptureArgs: "Capture tool arguments",
+      fEpExcerpt: "Result excerpt chars (max)",
+      fEpRetention: "Episode record retention days",
+      fEpReview: "Run LLM outcome review (manual/nightly only)",
+      fEpReviewHint: "Reviews redacted episodes into project-scoped, evidence-cited operational memories. Never runs per-flush.",
+      fEpConf: "Operational memory confidence floor",
+      fEpExpiry: "Operational memory expiry days",
+      fEpRecall: "Inject operational recall (labeled, separate)",
+      fEpRecallHint: "Off by default: injects derived, project-scoped operational knowledge as a fallible labeled block — never into persona/baseline.",
+      fEpRecallMax: "Max operational recall results",
+      fEpRecallChars: "Max operational recall chars",
+      fEpSkillMin: "Episodes required to synthesize one skill",
+      episodeEnableWarning: "Episode learning will store every tool call and result (redacted, bounded) for this project's sessions locally until purged. Enable now?",
+      browserEpisodes: "Episodes (tool outcomes)",
+      browserEpisodesDisabled: "(episode learning disabled — enable it in Config to capture episodes; purge below still works)",
+      browserEpisodesEmpty: "(no episodes recorded yet)",
+      browserEpisodePurge: "Purge >30d",
+      browserEpisodePurgeAll: "Purge all",
+      browserEpisodePurgeConfirm: "Purge stored episode records (steps + events)? Memories and skills are untouched.",
+      browserEpisodeDryReview: "Dry-review",
+      browserEpisodeDetailTitle: "Episode detail (redacted)",
+      browserEpisodeNoSteps: "(no steps recorded)",
+      browserEpisodeLastReview: "Last review:",
+      browserEpisodeReviewNone: "no review run yet",
+      browserMetaSession: "Session",
+      browserMetaTurn: "Turn",
+      browserMetaProject: "Project",
+      browserMetaSteps: "Steps",
+      browserMetaSummary: "Summary",
+      browserMetaConfidence: "Confidence",
+      browserMetaFingerprint: "Fingerprint",
+      browserMetaRejectReason: "Reject reason",
+      browserMetaStarted: "Started",
+      browserMetaEnded: "Ended"
     };
 
     // ── field spec: dotted path + type + group ─────────────────────────────
@@ -480,7 +554,18 @@ window.__ModuleLoader__.load({
       { path: ["housekeeping", "sceneActiveRatio"], label: "fHkSceneRatio", type: "number", group: "groupHousekeeping" },
       { path: ["housekeeping", "conversationRetentionDays"], label: "fHkConvDays", type: "number", group: "groupHousekeeping" },
       { path: ["review", "enabled"], label: "fReviewEnabled", type: "checkbox", group: "groupReview" },
-      { path: ["review", "time"], label: "fReviewTime", type: "text", group: "groupReview" }
+      { path: ["review", "time"], label: "fReviewTime", type: "text", group: "groupReview" },
+      { path: ["episodeLearning", "enabled"], label: "fEpEnabled", type: "checkbox", hint: "fEpEnabledHint", group: "groupEpisodes" },
+      { path: ["episodeLearning", "captureArguments"], label: "fEpCaptureArgs", type: "checkbox", group: "groupEpisodes" },
+      { path: ["episodeLearning", "resultExcerptChars"], label: "fEpExcerpt", type: "number", group: "groupEpisodes" },
+      { path: ["episodeLearning", "retentionDays"], label: "fEpRetention", type: "number", group: "groupEpisodes" },
+      { path: ["episodeLearning", "reviewEnabled"], label: "fEpReview", type: "checkbox", hint: "fEpReviewHint", group: "groupEpisodes" },
+      { path: ["episodeLearning", "confidenceFloor"], label: "fEpConf", type: "number", group: "groupEpisodes" },
+      { path: ["episodeLearning", "expiryDays"], label: "fEpExpiry", type: "number", group: "groupEpisodes" },
+      { path: ["episodeLearning", "operationalRecallEnabled"], label: "fEpRecall", type: "checkbox", hint: "fEpRecallHint", group: "groupEpisodes" },
+      { path: ["episodeLearning", "maxRecallResults"], label: "fEpRecallMax", type: "number", group: "groupEpisodes" },
+      { path: ["episodeLearning", "maxRecallChars"], label: "fEpRecallChars", type: "number", group: "groupEpisodes" },
+      { path: ["episodeLearning", "skillMinEpisodes"], label: "fEpSkillMin", type: "number", group: "groupEpisodes" }
     ];
     FIELDS.forEach(function (f) { f.key = f.path.join("."); });
 
@@ -536,6 +621,18 @@ window.__ModuleLoader__.load({
         return draft[f.key] !== void 0 ? draft[f.key] : String(getPath(value, f.path) ?? "");
       }
       function setField(f, v) {
+        // First-enable gate for episode capture: flipping episodeLearning.enabled
+        // from off to on requires an explicit consent confirm (capture stores
+        // redacted tool arguments/results locally). Declining leaves the draft off.
+        if (f.key === "episodeLearning.enabled" && v === true && !draft[f.key] && !getPath(value, f.path)) {
+          if (!window.confirm(t("episodeEnableWarning"))) {
+            setNotice(null);
+            // The click already flipped the DOM input; re-render is required to
+            // restore the controlled checked state from the (unchanged) draft.
+            setDraft(function (prev) { return Object.assign({}, prev); });
+            return;
+          }
+        }
         setDraft(function (prev) { var next = Object.assign({}, prev); next[f.key] = v; return next; });
         setNotice(null);
         setError(null);
@@ -625,6 +722,9 @@ window.__ModuleLoader__.load({
         groupRecall: "modules.recall",
         groupConsolidate: "modules.consolidate",
         groupEvolve: "modules.evolve",
+        // groupEpisodes stays VISIBLE while disabled (otherwise its enable
+        // switch could never be reached); it only collapses with the master.
+        groupEpisodes: "enabled",
         groupStorage: "enabled"
       };
       function switchValue(key) {
@@ -739,10 +839,12 @@ window.__ModuleLoader__.load({
       var [query, setQuery] = react.useState("");
       var [notice, setNotice] = react.useState(null);
       var [closedDetailId, setClosedDetailId] = react.useState(null);
+      // Phase 6: episode evidence inspector (separate modal data channel field)
+      var [closedEpisodeDetailId, setClosedEpisodeDetailId] = react.useState(null);
       // Inline correction editor (replaces window.prompt, which the host page may suppress)
       var [editingId, setEditingId] = react.useState(null);
       var [editDraft, setEditDraft] = react.useState("");
-      var [open, setOpen] = react.useState({ persona: false, memories: true, scenes: false, skills: false });
+      var [open, setOpen] = react.useState({ persona: false, memories: true, scenes: false, skills: false, episodes: false });
 
       react.useEffect(function () {
         var alive = true;
@@ -768,6 +870,17 @@ window.__ModuleLoader__.load({
         try { detailObj = JSON.parse(snapshot.value.detail); } catch (e) { detailObj = null; }
       }
       var showDetail = detailObj && detailObj.id !== closedDetailId;
+      // Phase 6 episode detail modal data (server returns the full redacted episode on demand)
+      var episodeDetailObj = null;
+      if (snapshot.status === "ready" && snapshot.value && typeof snapshot.value.episodeDetail === "string" && snapshot.value.episodeDetail) {
+        try { episodeDetailObj = JSON.parse(snapshot.value.episodeDetail); } catch (e) { episodeDetailObj = null; }
+      }
+      var showEpisodeDetail = episodeDetailObj && episodeDetailObj.id !== closedEpisodeDetailId;
+      // Last review verdict line (published by the dry-review/full-review runner)
+      var episodeStatusObj = null;
+      if (snapshot.status === "ready" && snapshot.value && typeof snapshot.value.episodeStatus === "string" && snapshot.value.episodeStatus) {
+        try { episodeStatusObj = JSON.parse(snapshot.value.episodeStatus); } catch (e) { episodeStatusObj = null; }
+      }
 
       if (snapshot.status === "unavailable") {
         return h("p", { className: "__dsi_unavailable" }, t("unavailable"));
@@ -787,7 +900,7 @@ window.__ModuleLoader__.load({
       // token; the host mints a short-TTL challenge bound to those exact args
       // and consumes it atomically at the confirm submit, so captured payloads
       // cannot be replayed for arbitrary actions.
-      var MUTATING_OPS = { forget: 1, correct: 1, "confirm-correct": 1, deleteSkill: 1 };
+      var MUTATING_OPS = { forget: 1, correct: 1, "confirm-correct": 1, deleteSkill: 1, purgeEpisodes: 1, dryReview: 1 };
       function readServedToken() {
         try {
           var sv = scope.getSnapshot();
@@ -934,7 +1047,7 @@ window.__ModuleLoader__.load({
           ) : null);
       });
 
-      // Collapsible panels (persona/memories/scenes/skills); hook state declared above early returns
+      // Collapsible panels (persona/memories/scenes/skills/episodes); hook state declared above early returns
       function toggle(k) {
         setOpen(function (p) { var n = Object.assign({}, p); n[k] = !n[k]; return n; });
       }
@@ -972,6 +1085,60 @@ window.__ModuleLoader__.load({
         ? (skillsNodes.length ? h("div", { className: "__dsi_collapse" }, skillsNodes) : h("p", { className: "__dsi_status" }, t("browserSkillsEmpty")))
         : h("p", { className: "__dsi_status" }, t("browserSkillsEmpty"));
 
+      // ── Episodes (Phase 6): counts + recent redacted rows + inspect/purge/dry-review ──
+      var epData = data.episodes || { counts: null, recent: null };
+      var epCounts = epData.counts || {};
+      var epTotal = ["pending", "succeeded", "failed", "ambiguous", "reviewed", "rejected"].reduce(function (acc, k) { return acc + (Number(epCounts[k]) || 0); }, 0);
+      var epEnabled = Array.isArray(epData.recent);
+      function viewEpisodeDetail(e) {
+        setBusy(true); setNotice(null); setError(null);
+        setClosedEpisodeDetailId(null);
+        sendAction({ op: "episodeDetail", id: e.id }).then(function () { setBusy(false); }).catch(function (e2) { setBusy(false); setError(String(e2 && e2.message || e2)); });
+      }
+      function purgeEpisodes(scope) {
+        if (!window.confirm(t("browserEpisodePurgeConfirm"))) return;
+        setBusy(true); setNotice(null); setError(null);
+        sendAction({ op: "purgeEpisodes", id: scope }).then(function () { setNotice(t("browserEpisodePurge") + (scope === "all" ? " (all)" : " (>30d)")); }).catch(function (e2) { setError(String(e2 && e2.message || e2)); }).finally(function () { setBusy(false); });
+      }
+      function runDryReview() {
+        setBusy(true); setNotice(null); setError(null);
+        sendAction({ op: "dryReview" }).then(function () { setNotice(t("browserEpisodeDryReview") + "…"); }).catch(function (e2) { setError(String(e2 && e2.message || e2)); }).finally(function () { setBusy(false); });
+      }
+      var EP_STATUS_LABEL = { pending: "pending", succeeded: "succeeded", failed: "failed", ambiguous: "ambiguous", reviewed: "reviewed", rejected: "rejected" };
+      var episodeRows = (epData.recent || []).map(function (e) {
+        return h("div", { key: e.id, className: "__dsi_browserRow" },
+          h("div", { className: "__dsi_browserMain" },
+            h("span", { className: "__dsi_browserKind" }, "⚗️ " + (EP_STATUS_LABEL[e.status] || e.status)),
+            e.summary ? h("span", { className: "__dsi_browserContent" }, e.summary) : null,
+            h("span", { className: "__dsi_browserMeta" }, "turn " + e.turn + " · " + String(e.projectId || "-").slice(0, 24) + " · " + fmtTime(e.updatedAt))
+          ),
+          h("span", { className: "__dsi_browserOps" },
+            h("button", { type: "button", className: "__dsi_btn", onClick: function () { viewEpisodeDetail(e); }, disabled: busy }, t("browserDetail"))
+          )
+        );
+      });
+      var episodesBody = h("div", { className: "__dsi_collapse" },
+        h("div", { className: "__dsi_row" },
+          h("span", { className: "__dsi_browserMeta" },
+            (epCounts.reviewed || 0) + " reviewed · " + (epCounts.succeeded || 0) + " succeeded · " + (epCounts.failed || 0) + " failed · " + (epCounts.pending || 0) + " pending · " + (epCounts.ambiguous || 0) + " ambiguous · " + (epCounts.rejected || 0) + " rejected"),
+          h("button", { type: "button", className: "__dsi_btn", onClick: runDryReview, disabled: busy }, t("browserEpisodeDryReview")),
+          h("button", { type: "button", className: "__dsi_btn", onClick: function () { purgeEpisodes("30"); }, disabled: busy }, t("browserEpisodePurge")),
+          h("button", { type: "button", className: "__dsi_btn", onClick: function () { purgeEpisodes("all"); }, disabled: busy }, t("browserEpisodePurgeAll"))
+        ),
+        episodeStatusObj ? h("p", { className: "__dsi_status" },
+          t("browserEpisodeLastReview") + " " + JSON.stringify({
+            dryRun: episodeStatusObj.dryRun === true,
+            considered: episodeStatusObj.considered,
+            reviewed: episodeStatusObj.reviewed,
+            rejected: episodeStatusObj.rejected,
+            memories: episodeStatusObj.memories,
+            dropped: episodeStatusObj.dropped,
+            errors: episodeStatusObj.errors
+          })) : null,
+        !epEnabled ? h("p", { className: "__dsi_status" }, t("browserEpisodesDisabled")) : null,
+        epEnabled && episodeRows.length ? episodeRows : (epEnabled ? h("p", { className: "__dsi_status" }, t("browserEpisodesEmpty")) : null)
+      );
+
       var STATUS_LABEL = { active: "Active", decayed: "Decayed", forgotten: "Forgotten", corrected: "Corrected" };
       function fmtTime(ts) {
         try { return new Date(ts).toLocaleString(); } catch (e) { return String(ts); }
@@ -999,9 +1166,46 @@ window.__ModuleLoader__.load({
         )
       ) : null;
 
+      var EPISODE_STATUS_LABEL = { pending: "pending", succeeded: "succeeded", failed: "failed", ambiguous: "ambiguous", reviewed: "reviewed", rejected: "rejected" };
+      var episodeModal = showEpisodeDetail ? h("div", { className: "__dsi_modalBackdrop", onClick: function () { setClosedEpisodeDetailId(episodeDetailObj.id); } },
+        h("div", { className: "__dsi_modal", onClick: function (e) { e.stopPropagation(); } },
+          h("div", { className: "__dsi_modalHeader" },
+            h("span", { className: "__dsi_modalTitle" }, "⚗️ " + t("browserEpisodeDetailTitle") + " · " + (EPISODE_STATUS_LABEL[episodeDetailObj.status] || episodeDetailObj.status)),
+            h("button", { type: "button", className: "__dsi_btn", onClick: function () { setClosedEpisodeDetailId(episodeDetailObj.id); } }, t("browserDetailClose"))
+          ),
+          h("div", { className: "__dsi_modalBody" },
+            h("div", { className: "__dsi_modalMeta" },
+              h("b", null, t("browserMetaSession")), h("span", null, String(episodeDetailObj.sessionId || "-").slice(0, 20)),
+              h("b", null, t("browserMetaTurn")), h("span", null, String(episodeDetailObj.turn)),
+              h("b", null, t("browserMetaProject")), h("span", null, String(episodeDetailObj.projectId || "-").slice(0, 40)),
+              h("b", null, t("browserMetaStarted")), h("span", null, fmtTime(episodeDetailObj.startedAt)),
+              h("b", null, t("browserMetaEnded")), h("span", null, episodeDetailObj.endedAt ? fmtTime(episodeDetailObj.endedAt) : "-"),
+              episodeDetailObj.summary ? h("b", null, t("browserMetaSummary")) : null,
+              episodeDetailObj.summary ? h("span", null, episodeDetailObj.summary) : null,
+              episodeDetailObj.confidence != null ? h("b", null, t("browserMetaConfidence")) : null,
+              episodeDetailObj.confidence != null ? h("span", null, String(episodeDetailObj.confidence)) : null,
+              episodeDetailObj.fingerprint ? h("b", null, t("browserMetaFingerprint")) : null,
+              episodeDetailObj.fingerprint ? h("span", null, String(episodeDetailObj.fingerprint).slice(0, 16)) : null,
+              episodeDetailObj.rejectReason ? h("b", null, t("browserMetaRejectReason")) : null,
+              episodeDetailObj.rejectReason ? h("span", null, episodeDetailObj.rejectReason) : null
+            ),
+            (episodeDetailObj.steps || []).length === 0 ? h("p", { className: "__dsi_status" }, t("browserEpisodeNoSteps")) : null,
+            (episodeDetailObj.steps || []).map(function (s) {
+              return h("div", { key: s.ordinal, className: "__dsi_browserRow" },
+                h("div", { className: "__dsi_browserMain" },
+                  h("span", { className: "__dsi_browserKind" }, (s.isError ? "✗ " : "✓ ") + s.ordinal + ". " + s.toolName + (s.errorName ? " (" + s.errorName + ")" : "")),
+                  h("span", { className: "__dsi_browserContent" }, String(s.argumentsRedacted || "").slice(0, 300)),
+                  h("span", { className: "__dsi_browserMeta" }, String(s.resultExcerpt || "").slice(0, 300) + (s.resultTruncated ? " …[truncated]" : ""))
+                )
+              );
+            })
+          )
+        )
+      ) : null;
+
       return h("div", { className: "__dsi_root" },
         h("p", { className: "__dsi_status" },
-          t("browserSummary").replace("{n}", String(memories.length)).replace("{p}", String(data.pending || 0)).replace("{s}", String(scenesArr.length)).replace("{v}", String(persona ? persona.ver : "-")).replace("{k}", String(skills.length))
+          t("browserSummary").replace("{n}", String(memories.length)).replace("{p}", String(data.pending || 0)).replace("{s}", String(scenesArr.length)).replace("{v}", String(persona ? persona.ver : "-")).replace("{k}", String(skills.length)).replace("{e}", String(epTotal))
         ),
         notice ? h("p", { className: "__dsi_ok" }, notice) : null,
         error ? h("p", { className: "__dsi_error" }, error) : null,
@@ -1009,7 +1213,9 @@ window.__ModuleLoader__.load({
         collapse("memories", t("browserMemories"), String(memories.length), memoryBody),
         collapse("scenes", t("browserScenes"), String(scenesArr.length), scenesBody),
         collapse("skills", t("browserSkills"), String(skills.length), skillsBody),
-        modal
+        collapse("episodes", t("browserEpisodes"), String(epTotal), episodesBody),
+        modal,
+        episodeModal
       );
     }
 

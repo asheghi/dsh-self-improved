@@ -133,7 +133,7 @@ check("forged token rejected, valid token accepted", !tracker.verify("deadbeef")
 // ── Browser action channel integration tests (real host handler + fake settings scope) ──
 {
   const { installBrowserChannel, MUTATING_BROWSER_OPS } = await import("../lib/commands.js");
-  check("mutating op set is the challenge-gated set", [...MUTATING_BROWSER_OPS].sort().join(",") === "confirm-correct,correct,deleteSkill,forget");
+  check("mutating op set is the challenge-gated set", [...MUTATING_BROWSER_OPS].sort().join(",") === "confirm-correct,correct,deleteSkill,dryReview,forget,purgeEpisodes");
 
   // Fake settings namespace (settings.register/get/replace/watch semantics)
   const watchState = { snapshot: "{}", action: "", detail: "", watchers: [] };
@@ -293,6 +293,121 @@ check("forged token rejected, valid token accepted", !tracker.verify("deadbeef")
   const detail = watchState.detail ? JSON.parse(watchState.detail) : null;
   check("detail op returns the full memory without a token", detail?.id === replayTarget.id, JSON.stringify(Boolean(detail)));
 
+  // ── 6b) Phase 6: episodes snapshot gating + episodeDetail/purgeEpisodes/dryReview ops ──
+  // Each channel gets its OWN fake scope: scope.watch registrations are never
+  // disposed by stop(), so sharing one watchState would double-handle actions
+  // through stale channels' trackers/ledgers.
+  const mkFakeScope = () => {
+    const state = { snapshot: "{}", action: "", detail: "", episodeDetail: "", episodeStatus: "", watchers: [] };
+    const picture = () => ({ snapshot: state.snapshot, action: state.action, detail: state.detail, episodeDetail: state.episodeDetail, episodeStatus: state.episodeStatus });
+    state.get = () => ({ ...picture() });
+    state.replace = (next) => {
+      Object.assign(state, next);
+      for (const w of [...state.watchers]) w({ ...picture() });
+      return Promise.resolve();
+    };
+    state.watch = (fn) => { state.watchers.push(fn); return () => {}; };
+    return state;
+  };
+  const mkFakeCtx = (scope) => ({ settings: { register() { return scope; } }, on() {} });
+  {
+    const { assembleSessionEpisodes } = await import("../lib/episodes.js");
+    // Two succeeded episodes in a project + one failed, via the direct event/assembly API.
+    const mkRows = (callId, turn, seq, okResult) => [
+      { kind: "call", callId, turn, step: 0, seq, at: 1000, payload: JSON.stringify({ toolName: "bash", argumentsRedacted: '{"cmd":"build"}', argsTruncated: 0, callId }) },
+      { kind: "result", callId, turn, step: 0, seq: seq + 1, at: 1001, payload: JSON.stringify({ toolCallId: callId, resultExcerpt: okResult ? "build ok" : "exit 1", resultTruncated: 0, isError: okResult ? 0 : 1, errorName: okResult ? null : "Error", errorCode: null, toolHint: null }) },
+      { kind: "turn-end", callId: "", turn, step: null, seq: seq + 2, at: 1002, payload: JSON.stringify({ reason: { kind: "completed" } }) },
+    ];
+    store.appendEpisodeEvents("chan-ep", "/tmp/proj-chan", false, mkRows("c-ep1", 1, 10, true));
+    store.appendEpisodeEvents("chan-ep", "/tmp/proj-chan", false, mkRows("c-ep2", 2, 20, false));
+    assembleSessionEpisodes(store, "chan-ep");
+
+    // Snapshot: disabled → counts present, recent withheld
+    const scopeOff = mkFakeScope();
+    const noEpChannel = installBrowserChannel({
+      ctx: mkFakeCtx(scopeOff), store, skillsPrefix: () => "dsi-", skillsRoot: () => skillRoot,
+      episodeEnabled: () => false, refreshIntervalMs: 0,
+    });
+    noEpChannel.refresh();
+    const snapOff = JSON.parse(scopeOff.snapshot);
+    check("episodes disabled: counts served, recent rows withheld",
+      snapOff.episodes && typeof snapOff.episodes.counts === "object" && snapOff.episodes.recent === null,
+      JSON.stringify({ counts: snapOff.episodes?.counts, recent: Array.isArray(snapOff.episodes?.recent) }));
+    check("episodes disabled: counts reflect the seeded rows",
+      snapOff.episodes.counts.succeeded === 1 && snapOff.episodes.counts.failed === 1, JSON.stringify(snapOff.episodes.counts));
+    noEpChannel.stop();
+
+    // Snapshot: enabled → redacted recent rows served
+    const scopeOn = mkFakeScope();
+    let dryRuns = 0;
+    const epChannel = installBrowserChannel({
+      ctx: mkFakeCtx(scopeOn), store, skillsPrefix: () => "dsi-", skillsRoot: () => skillRoot,
+      episodeEnabled: () => true, refreshIntervalMs: 0,
+      episodeDryReview: () => {
+        dryRuns += 1;
+        return Promise.resolve({ considered: 2, reviewed: 1, rejected: 0, memories: 1, dropped: 0, errors: 0, dryRun: true });
+      },
+    });
+    epChannel.refresh();
+    const snapOn = JSON.parse(scopeOn.snapshot);
+    check("episodes enabled: recent redacted rows served", Array.isArray(snapOn.episodes.recent) && snapOn.episodes.recent.length === 2, JSON.stringify(snapOn.episodes?.recent?.length));
+    const listedEpisode = snapOn.episodes.recent.find((e) => e.status === "succeeded");
+    check("episode rows carry no raw args/results fields",
+      listedEpisode && !("steps" in listedEpisode) && listedEpisode.summary === null && listedEpisode.turn === 1, JSON.stringify(snapOn.episodes.recent[0]));
+
+    // episodeDetail op (read-only, no token) — served through the episodeDetail field
+    scopeOn.action = JSON.stringify({ op: "episodeDetail", id: listedEpisode.id });
+    scopeOn.replace({ action: scopeOn.action });
+    const epDetail = scopeOn.episodeDetail ? JSON.parse(scopeOn.episodeDetail) : null;
+    check("episodeDetail op returns the redacted episode + steps", epDetail?.id === listedEpisode.id && Array.isArray(epDetail.steps) && epDetail.steps.length === 1, JSON.stringify(epDetail && { steps: epDetail.steps.length }));
+    check("episodeDetail steps are redacted + bounded",
+      epDetail.steps[0].argumentsRedacted === '{"cmd":"build"}' && epDetail.steps[0].resultExcerpt === "build ok" && epDetail.steps[0].isError === 0, JSON.stringify(epDetail.steps[0]));
+
+    // purgeEpisodes: challenge handshake both steps
+    check("episodes still stored before purge", store.episodeCounts().succeeded === 1, JSON.stringify(store.episodeCounts()));
+    scopeOn.action = JSON.stringify({ op: "purgeEpisodes", id: "all", token: JSON.parse(scopeOn.snapshot).actionToken });
+    scopeOn.replace({ action: scopeOn.action });
+    check("purgeEpisodes prepare stages without executing", store.episodeCounts().succeeded === 1, JSON.stringify(store.episodeCounts()));
+    epChannel.refresh();
+    const purgeChip = JSON.parse(scopeOn.snapshot).confirm;
+    check("purgeEpisodes challenge published", purgeChip?.token && purgeChip.args?.op === "purgeEpisodes" && purgeChip.args?.id === "all", JSON.stringify(purgeChip));
+    scopeOn.action = JSON.stringify({ op: "purgeEpisodes", id: "all", confirmToken: purgeChip.token });
+    scopeOn.replace({ action: scopeOn.action });
+    const countsAfterPurge = store.episodeCounts();
+    check("purgeEpisodes confirm executes (episodes, steps and events purged)",
+      countsAfterPurge.succeeded === 0 && countsAfterPurge.failed === 0, JSON.stringify(countsAfterPurge));
+
+    // dryReview: challenge-gated; delegate invoked on confirm; summary published via episodeStatus
+    scopeOn.action = JSON.stringify({ op: "dryReview", token: JSON.parse(scopeOn.snapshot).actionToken });
+    scopeOn.replace({ action: scopeOn.action });
+    epChannel.refresh();
+    const dryChip = JSON.parse(scopeOn.snapshot).confirm;
+    check("dryReview challenge published", dryChip?.token && dryChip.args?.op === "dryReview", JSON.stringify(dryChip));
+    scopeOn.action = JSON.stringify({ op: "dryReview", confirmToken: dryChip.token });
+    scopeOn.replace({ action: scopeOn.action });
+    await new Promise((r) => setTimeout(r, 20));
+    check("dryReview delegate ran and published its summary",
+      dryRuns === 1 && scopeOn.episodeStatus.includes('"dryRun":true') && scopeOn.episodeStatus.includes('"considered":2'), scopeOn.episodeStatus.slice(0, 80));
+
+    // dryReview unavailable (no delegate) → ignored, nothing published
+    const scopeDryless = mkFakeScope();
+    const dryLessChannel = installBrowserChannel({
+      ctx: mkFakeCtx(scopeDryless), store, skillsPrefix: () => "dsi-", skillsRoot: () => skillRoot,
+      episodeEnabled: () => true, refreshIntervalMs: 0,
+    });
+    dryLessChannel.refresh();
+    scopeDryless.action = JSON.stringify({ op: "dryReview", token: JSON.parse(scopeDryless.snapshot).actionToken });
+    scopeDryless.replace({ action: scopeDryless.action });
+    dryLessChannel.refresh();
+    const dryChip2 = JSON.parse(scopeDryless.snapshot).confirm;
+    scopeDryless.action = JSON.stringify({ op: "dryReview", confirmToken: dryChip2.token });
+    scopeDryless.replace({ action: scopeDryless.action });
+    await new Promise((r) => setTimeout(r, 20));
+    check("dryReview without a delegate is ignored (no status published)", !scopeDryless.episodeStatus.includes('"considered"'), scopeDryless.episodeStatus.slice(0, 60));
+    dryLessChannel.stop();
+    epChannel.stop();
+  }
+
   // 7) hot-apply: live prefix getter + /memory browser (command-side regression)
   prefix = "mem-";
   channel.refresh();
@@ -307,6 +422,45 @@ check("forged token rejected, valid token accepted", !tracker.verify("deadbeef")
   check("prefix getter is evaluated per call (live getter, not captured)", skillsPrefixCalls > 3, "calls=" + skillsPrefixCalls);
 
   channel.stop();
+}
+
+// ── Phase 6: /memory episodes | episode <id> | episode-purge | episode-review ──
+{
+  const { assembleSessionEpisodes } = await import("../lib/episodes.js");
+  const mkRows = (callId, turn, seq, okResult) => [
+    { kind: "call", callId, turn, step: 0, seq, at: 1000, payload: JSON.stringify({ toolName: "bash", argumentsRedacted: '{"cmd":"build"}', argsTruncated: 0, callId }) },
+    { kind: "result", callId, turn, step: 0, seq: seq + 1, at: 1001, payload: JSON.stringify({ toolCallId: callId, resultExcerpt: okResult ? "build ok" : "exit 1", resultTruncated: 0, isError: okResult ? 0 : 1, errorName: okResult ? null : "Error", errorCode: null, toolHint: null }) },
+    { kind: "turn-end", callId: "", turn, step: null, seq: seq + 2, at: 1002, payload: JSON.stringify({ reason: { kind: "completed" } }) },
+  ];
+  store.appendEpisodeEvents("cmd-ep", "/tmp/proj-cmd", false, mkRows("c-cmd1", 1, 10, true));
+  assembleSessionEpisodes(store, "cmd-ep");
+
+  const off = handleMemoryCommand(store, "episodes", {});
+  check("/memory episodes without enabled lists counts only", off.kind === "success" && off.text.includes("succeeded 1") === false && off.text.includes("Episode listing requires episodeLearning.enabled"), off.text.slice(0, 120));
+  const on = handleMemoryCommand(store, "episodes succeeded", { episodeEnabled: () => true });
+  check("/memory episodes lists redacted rows when enabled", on.kind === "success" && /\[succeeded\] [0-9a-f-]{36} · turn 1 · project \/tmp\/proj-cmd/.test(on.text), on.text.slice(0, 140));
+  const bad = handleMemoryCommand(store, "episodes wat", { episodeEnabled: () => true });
+  check("invalid status filter errors", bad.kind === "error");
+
+  const epId = store.listEpisodes({ projectId: "/tmp/proj-cmd" })[0]?.id;
+  const insp = handleMemoryCommand(store, `episode ${epId}`, {});
+  check("/memory episode inspects steps + redaction note", insp.kind === "success" && insp.text.includes("bash") && insp.text.includes("build ok") && insp.text.includes("stored redacted"), insp.text.slice(0, 140));
+  check("/memory episode unknown id errors", handleMemoryCommand(store, "episode ep-nope").kind === "error");
+  check("/memory episode without id errors", handleMemoryCommand(store, "episode").kind === "error");
+
+  const purgeBad = handleMemoryCommand(store, "episode-purge wat");
+  check("invalid purge scope errors", purgeBad.kind === "error");
+  const purge = handleMemoryCommand(store, "episode-purge all");
+  check("/memory episode-purge all removes every episode", purge.kind === "success" && /Purged 1 episodes/.test(purge.text), purge.text);
+  check("store empty after purge", store.episodeCounts().succeeded === 0 && store.getEpisodeSteps(epId).length === 0, JSON.stringify(store.episodeCounts()));
+  store.appendEpisodeEvents("cmd-ep2", "/tmp/proj-cmd", false, mkRows("c-cmd2", 1, 30, true));
+  assembleSessionEpisodes(store, "cmd-ep2");
+  const purgeOld = handleMemoryCommand(store, "episode-purge 0");
+  check("/memory episode-purge <days> purges by age", purgeOld.kind === "success" && /Purged 1 episodes/.test(purgeOld.text), purgeOld.text);
+
+  // episode-review gating + intercept (async handler in installMemoryCommands is covered
+  // by the host wiring; here the pure handler path is unavailable-delegate and dry parsing)
+  check("help lists the episode subcommands", handleMemoryCommand(store, "").text.includes("episode-review"));
 }
 
 store.close();

@@ -9,7 +9,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createHmac, randomBytes } from "node:crypto";
 import { defaultSkillsDir, deleteSkill } from "./evolve.js";
-import type { MemoryStore } from "./storage.js";
+import type { EpisodeStatus, MemoryStore } from "./storage.js";
 
 export interface CommandOutcome {
   kind: "success" | "error";
@@ -23,11 +23,16 @@ function err(text: string): CommandOutcome {
   return { kind: "error", text };
 }
 
+/** Valid episode status filters for /memory episodes */
+const EPISODE_STATUSES: ReadonlySet<string> = new Set(["pending", "succeeded", "failed", "ambiguous", "reviewed", "rejected"]);
+/** Cap on steps rendered by one /memory episode inspect call (display budget, not the DB cap) */
+const MAX_EPISODE_INSPECT_STEPS = 24;
+
 /** Memory command handler (pure function). When the input ends with `--json`, text outputs JSON (parsed by the settings-page memory browser) */
 export function handleMemoryCommand(
   store: MemoryStore,
   rawInput: string,
-  opts?: { evolve?: () => Promise<Record<string, unknown>>; skillsPrefix?: string | (() => string); skillsRoot?: string | (() => string) },
+  opts?: { evolve?: () => Promise<Record<string, unknown>>; skillsPrefix?: string | (() => string); skillsRoot?: string | (() => string); episodeEnabled?: () => boolean },
 ): CommandOutcome {
   const args = rawInput.trim().split(/\s+/).filter(Boolean);
   const json = args.includes("--json");
@@ -37,7 +42,7 @@ export function handleMemoryCommand(
     // picked up without re-registering the command.
     const prefix = typeof opts?.skillsPrefix === "function" ? opts.skillsPrefix() : opts?.skillsPrefix;
     const root = typeof opts?.skillsRoot === "function" ? opts.skillsRoot() : opts?.skillsRoot;
-    return ok(JSON.stringify(browserSnapshot(store, prefix, root)));
+    return ok(JSON.stringify(browserSnapshot(store, prefix, root, opts?.episodeEnabled?.() === true)));
   }
   switch (sub) {
     case "evolve": {
@@ -138,6 +143,85 @@ export function handleMemoryCommand(
         ? ok(accepted > 0 ? `Accepted legacy memory ${id} as user-proven` : "Nothing to accept (already accepted or not legacy)")
         : ok(`Accepted ${accepted} legacy memories as user-proven`);
     }
+    case "episodes": {
+      // Counts are harmless numbers; the recent list (redacted rows) only when
+      // episode learning is enabled — same privacy posture as the browser.
+      const counts = store.episodeCounts();
+      const lines = [
+        `Episodes: ${counts.reviewed} reviewed / ${counts.succeeded} succeeded / ${counts.failed} failed / ${counts.pending} pending / ${counts.ambiguous} ambiguous / ${counts.rejected} rejected`,
+      ];
+      if (opts?.episodeEnabled?.() !== true) {
+        lines.push("Episode listing requires episodeLearning.enabled");
+        return ok(lines.join("\n"));
+      }
+      const statusArg = args[1] && args[1] !== "--json" ? args[1].toLowerCase() : undefined;
+      if (statusArg && !EPISODE_STATUSES.has(statusArg)) {
+        return err("Usage: /memory episodes [pending|succeeded|failed|ambiguous|reviewed|rejected] [limit]");
+      }
+      const limitArg = args.find((a, i) => i >= 2 && /^\d+$/.test(a));
+      const list = store.listEpisodes({
+        status: statusArg as EpisodeStatus | undefined,
+        limit: limitArg ? Math.min(Number(limitArg), 50) : 10,
+      });
+      lines.push(
+        ...(list.length > 0
+          ? list.map(
+              (e) =>
+                `[${e.status}] ${e.id} · turn ${e.turn} · project ${e.projectId}` +
+                (e.summary ? ` · ${e.summary.slice(0, 80)}` : ""),
+            )
+          : ["(no episodes recorded)"]),
+      );
+      return ok(lines.join("\n"));
+    }
+    case "episode": {
+      const id = args[1];
+      if (!id) return err("Usage: /memory episode <episode-id>");
+      const ep = store.getEpisode(id);
+      if (!ep) return err(`Episode not found: ${id}`);
+      const lines = [
+        `[${ep.status}] ${ep.id}`,
+        `session ${ep.sessionId} · turn ${ep.turn} · project ${ep.projectId}${ep.delegated ? " · delegated" : ""}`,
+      ];
+      if (ep.summary) {
+        lines.push(`Summary: ${ep.summary.slice(0, 200)}${ep.confidence != null ? ` (confidence ${ep.confidence.toFixed(2)})` : ""}`);
+      }
+      if (ep.rejectReason) lines.push(`Reject reason: ${ep.rejectReason}`);
+      const steps = store.getEpisodeSteps(id).slice(0, MAX_EPISODE_INSPECT_STEPS);
+      lines.push(
+        ...steps.map(
+          (s) =>
+            `  ${s.ordinal}. ${s.isError ? "FAIL" : " ok "} ${s.toolName}${s.errorName ? ` (${s.errorName})` : ""}` +
+            ` · args: ${s.argumentsRedacted.slice(0, 120)}` +
+            ` · result: ${s.resultExcerpt.slice(0, 160)}`,
+        ),
+      );
+      lines.push("(arguments and results are stored redacted)");
+      return ok(lines.join("\n"));
+    }
+    case "episode-purge": {
+      const rest = args.slice(1).filter((a) => a !== "--json");
+      const pIdx = rest.indexOf("--project");
+      let projectId: string | undefined;
+      if (pIdx >= 0) {
+        projectId = rest[pIdx + 1];
+        if (!projectId) return err("Usage: /memory episode-purge [days|all] [--project <id>]");
+        rest.splice(pIdx, 2);
+      }
+      const scope = rest[0] ?? "30";
+      if (scope !== "all" && !/^\d+$/.test(scope)) {
+        return err("Usage: /memory episode-purge [days|all] [--project <id>]");
+      }
+      // "all" → explicit future cutoff (see the browser purgeEpisodes note: no
+      // filters means delete-nothing by design).
+      const olderThanTs =
+        scope === "all" ? Date.now() + 60_000 : Date.now() - Number(scope) * 86_400_000;
+      const res = store.purgeEpisodes({ projectId, olderThanTs });
+      return ok(
+        `Purged ${res.episodes} episodes (${res.steps} steps, ${res.events} events)` +
+          `${projectId ? ` in project ${projectId}` : ""}${olderThanTs !== undefined ? ` older than ${scope}d` : ""}`,
+      );
+    }
     default:
       return ok(
         "dsh-self-improved memory commands:\n" +
@@ -148,6 +232,8 @@ export function handleMemoryCommand(
           "/memory accept-legacy [id]\n" +
           "/memory forget <id>\n" +
           "/memory correct <id> <new content>\n" +
+          "/memory episodes [status] [limit] | episode <id> | episode-purge [days|all] [--project <id>]\n" +
+          "/memory episode-review [--dry]\n" +
           "/memory status",
       );
   }
@@ -232,8 +318,18 @@ export interface BrowserActionArgs {
   name?: string;
   newId?: string;
 }
+/** `purgeEpisodes` reuses `id` as its purge scope: "all" | "<days>" (e.g. "30"). */
 
-export const MUTATING_BROWSER_OPS: ReadonlySet<string> = new Set(["forget", "correct", "confirm-correct", "deleteSkill"]);
+export const MUTATING_BROWSER_OPS: ReadonlySet<string> = new Set([
+  "forget",
+  "correct",
+  "confirm-correct",
+  "deleteSkill",
+  // Phase 6: purge spends stored data; dry-review spends LLM tokens — both are
+  // trust-elevating even though dry-review persists nothing.
+  "purgeEpisodes",
+  "dryReview",
+]);
 
 /** Canonical args fingerprint (sorted known fields; HMAC-bound to the exact operation + arguments). */
 function fingerprintActionArgs(secret: string, args: BrowserActionArgs): string {
@@ -299,7 +395,13 @@ export class ActionChallengeLedger {
 }
 
 /** Memory browser snapshot (for the settings-page frontend; content truncation + count caps keep the payload small) */
-export function browserSnapshot(store: MemoryStore, skillsPrefix = "dsi-", skillsRoot = ""): Record<string, unknown> {
+export function browserSnapshot(
+  store: MemoryStore,
+  skillsPrefix = "dsi-",
+  skillsRoot = "",
+  /** Phase 6: recent episode rows (redacted) are served only while episode learning is enabled; counts are always included */
+  episodeEnabled = false,
+): Record<string, unknown> {
   const memories = store.listMemories({ limit: 300 })
     // Stable ordering: same-millisecond ties fall back to createdAt then id, so
     // an unchanged store renders an unchanged snapshot (the HMAC token stays the
@@ -325,6 +427,27 @@ export function browserSnapshot(store: MemoryStore, skillsPrefix = "dsi-", skill
   const baseline = store.listBaseline().map((b) => ({ slot: b.slot, memoryId: b.memoryId }));
   const scenes = store.listScenes(50).map((s) => ({ id: s.id, title: s.title, updatedAt: s.updatedAt }));
   const persona = store.getPersona();
+  // Episode learning (Phase 6): counts by status (harmless numbers) + a bounded
+  // recent list of redacted rows when enabled. Sorting mirrors the memories list
+  // so an unchanged store re-signs to the same snapshot token.
+  const episodes = {
+    counts: store.episodeCounts(),
+    recent: episodeEnabled
+      ? store
+          .listEpisodes({ limit: 12 })
+          .sort((a, b) => b.updatedAt - a.updatedAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+          .map((e) => ({
+            id: e.id,
+            sessionId: e.sessionId,
+            projectId: e.projectId,
+            turn: e.turn,
+            status: e.status,
+            updatedAt: e.updatedAt,
+            summary: e.summary ? e.summary.slice(0, 80) : null,
+            confidence: e.confidence,
+          }))
+      : null,
+  };
   return {
     memories,
     baseline,
@@ -332,6 +455,7 @@ export function browserSnapshot(store: MemoryStore, skillsPrefix = "dsi-", skill
     persona: persona ? { ver: persona.ver, content: persona.content.slice(0, 500), createdAt: persona.createdAt } : null,
     skills: listSkills(100, skillsPrefix, skillsRoot),
     pending: store.pendingSessions().length,
+    episodes,
     updatedAt: Date.now(),
   };
 }
@@ -391,21 +515,43 @@ export function listSkills(limit = 100, prefix = "dsi-", skillsRoot = ""): Array
 export function installMemoryCommands(
   ctx: Context,
   store: MemoryStore,
-  opts?: { evolve?: () => Promise<Record<string, unknown>>; isEnabled?: () => boolean; skillsPrefix?: string | (() => string); skillsRoot?: string | (() => string) },
+  opts?: {
+    evolve?: () => Promise<Record<string, unknown>>;
+    isEnabled?: () => boolean;
+    skillsPrefix?: string | (() => string);
+    skillsRoot?: string | (() => string);
+    episodeEnabled?: () => boolean;
+    /** Phase 6: async episode-review runner (dry = validateOnly); gating lives in the delegate */
+    episodeReview?: (dry: boolean) => Promise<unknown>;
+  },
 ): (() => void) | null {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const commands = (ctx as any).get?.("commands");
   if (!commands) return null;
   return commands.register({
     name: "memory",
-    description: "Manage the dsh-self-improved memory store (search/list/forget/correct/status/evolve)",
+    description: "Manage the dsh-self-improved memory store (search/list/forget/correct/status/episodes/evolve)",
     // Key: the command system only takes over parameterized input (e.g. /memory status) after input is declared;
     // otherwise parameterized input is treated as "the command does not accept arguments" and falls back to a plain message sent to the LLM.
-    input: { hint: "search <term> | list | status | baseline | pin <id> [slot] | unpin <slot> | accept-legacy [id] | forget <id> | correct <id> <content> | evolve | browser" },
+    input: { hint: "search <term> | list | status | baseline | pin <id> [slot] | unpin <slot> | accept-legacy [id] | forget <id> | correct <id> <content> | episodes | episode <id> | episode-purge [days|all] | episode-review [--dry] | evolve | browser" },
     handler: async (invocation: { rawInput?: string }) => {
       // Fallback: even if unregistration has a timing window, refuse to execute while the plugin is disabled
       if (opts?.isEnabled && !opts.isEnabled()) {
         return { kind: "error" as const, text: "Plugin is disabled (dsh-self-improved enabled=false); the /memory command is unavailable" };
+      }
+      const sub = (invocation.rawInput ?? "").trim().split(/\s+/)[0]?.toLowerCase() ?? "";
+      if (sub === "episode-review") {
+        if (!opts?.episodeReview) return { kind: "error" as const, text: "Episode review is not installed (episodeLearning disabled or scheduled runs only)" };
+        const dry = (invocation.rawInput ?? "").includes("--dry");
+        try {
+          const summary = (await opts.episodeReview(dry)) as Record<string, unknown>;
+          const parts = Object.entries(summary)
+            .filter(([, v]) => v !== undefined)
+            .map(([k, v]) => `${k}=${String(v)}`);
+          return { kind: "success" as const, text: `Episode review ${dry ? "(dry-run) " : ""}done: ${parts.join(", ") || "no episodes considered"}` };
+        } catch (e) {
+          return { kind: "error" as const, text: `Episode review failed: ${String(e instanceof Error ? e.message : e)}` };
+        }
       }
       return handleMemoryCommand(store, invocation.rawInput ?? "", opts);
     },
@@ -436,6 +582,12 @@ export interface BrowserChannelOptions {
   deleteSkill?: (name: string, skillsRoot: string, prefix: string) => boolean;
   /** Live getters for per-op settings, so tests can drive both halves */
   skillsRoot?: () => string;
+  /** Phase 6: recent-episode rows are served only while episode learning is enabled */
+  episodeEnabled?: () => boolean;
+  /** Phase 6: dry-review runner (publishes the summary itself via episodeStatus). Returning null = unavailable. */
+  episodeDryReview?: (() => Promise<unknown> | null) | null;
+  /** Destructive-op delegate so tests can slice purge away from the real store */
+  purgeEpisodes?: (scope: string) => unknown;
   log?: (...args: unknown[]) => void;
   /** 0 = no refresh timer (integration tests drive refresh() manually) */
   refreshIntervalMs?: number;
@@ -449,6 +601,8 @@ export interface BrowserChannel {
   /** Process one raw `action` payload string submitted through the namespace */
   handle(raw: string): void;
   stop(): void;
+  /** Publish a one-line status (e.g. a dry-review summary JSON) into the served snapshot */
+  episodeStatus(json: string): void;
 }
 
 export function installBrowserChannel(opts: BrowserChannelOptions): BrowserChannel {
@@ -458,6 +612,9 @@ export function installBrowserChannel(opts: BrowserChannelOptions): BrowserChann
     snapshot: z.string().default("{}"),
     action: z.string().default(""),
     detail: z.string().default(""),
+    // Phase 6: on-demand redacted episode detail (JSON) + last dry-review summary line
+    episodeDetail: z.string().default(""),
+    episodeStatus: z.string().default(""),
   });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const browserScope = opts.ctx.settings.register(browserNs, BrowserSchema);
@@ -485,7 +642,7 @@ export function installBrowserChannel(opts: BrowserChannelOptions): BrowserChann
 
   const refresh = (): void => {
     try {
-      const snap = browserSnapshot(opts.store, opts.skillsPrefix(), opts.skillsRoot?.() ?? "");
+      const snap = browserSnapshot(opts.store, opts.skillsPrefix(), opts.skillsRoot?.() ?? "", opts.episodeEnabled?.() === true);
       // Sign stable business content only: the volatile updatedAt wall-clock
       // stamp must not make every refresh look changed (that minted a fresh
       // token per tick, so the unchanged branch was dead code and a still-served
@@ -510,13 +667,32 @@ export function installBrowserChannel(opts: BrowserChannelOptions): BrowserChann
           json = JSON.stringify(obj);
         }
         lastSnapshotJson = json;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const cur = (browserScope.get() ?? {}) as any;
-        browserScope.replace({ snapshot: lastSnapshotJson, action: cur.action ?? "" }).catch(() => { /* best effort */ });
+        writeScope({ snapshot: lastSnapshotJson });
       }
     } catch {
       /* noop */
     }
+  };
+
+  /**
+   * Single writer for the browser namespace. `settings.replace` resets absent
+   * keys to defaults, so EVERY replace must restate the full field set —
+   * historically the bare replaces dropped `detail` on the next refresh tick
+   * (a served detail modal self-closed within a minute). Explicit passthrough
+   * of untouched fields fixes that and keeps the new Phase 6 fields intact.
+   */
+  const writeScope = (partial: Record<string, string>): void => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const cur = (browserScope.get() ?? {}) as any;
+    browserScope
+      .replace({
+        snapshot: partial.snapshot !== undefined ? partial.snapshot : lastSnapshotJson,
+        action: partial.action !== undefined ? partial.action : String(cur.action ?? ""),
+        detail: partial.detail !== undefined ? partial.detail : String(cur.detail ?? ""),
+        episodeDetail: partial.episodeDetail !== undefined ? partial.episodeDetail : String(cur.episodeDetail ?? ""),
+        episodeStatus: partial.episodeStatus !== undefined ? partial.episodeStatus : String(cur.episodeStatus ?? ""),
+      })
+      .catch(() => { /* best effort */ });
   };
 
   const handle = (raw: string): void => {
@@ -528,7 +704,7 @@ export function installBrowserChannel(opts: BrowserChannelOptions): BrowserChann
       const action = (args ? JSON.parse(raw) : {}) as any;
       if (!args) {
         log("browser action rejected: malformed action payload");
-        browserScope.replace({ snapshot: lastSnapshotJson, action: "" }).catch(() => { /* noop */ });
+        writeScope({ snapshot: lastSnapshotJson, action: "" });
         return;
       }
       // Mutating ops: the two-step one-shot challenge handshake.
@@ -540,13 +716,13 @@ export function installBrowserChannel(opts: BrowserChannelOptions): BrowserChann
           const token = typeof action.token === "string" ? action.token : "";
           if (!token || !tracker.verify(token)) {
             log("browser action rejected: missing, stale or replayed action token");
-            browserScope.replace({ snapshot: lastSnapshotJson, action: "" }).catch(() => { /* noop */ });
+            writeScope({ snapshot: lastSnapshotJson, action: "" });
             return;
           }
           ledger.prepare(args);
           lastSnapshotJson = ""; // force re-serve with the confirm chip
           refresh();
-          browserScope.replace({ snapshot: lastSnapshotJson, action: "" }).catch(() => { /* noop */ });
+          writeScope({ snapshot: lastSnapshotJson, action: "" });
           log("browser action staged, awaiting confirm:", args.op);
           return; // do not execute yet
         }
@@ -556,7 +732,7 @@ export function installBrowserChannel(opts: BrowserChannelOptions): BrowserChann
           // Drop any published (now stale) confirm chip so the namespace never advertises a credential that no longer exists.
           lastSnapshotJson = "";
           refresh();
-          browserScope.replace({ snapshot: lastSnapshotJson, action: "" }).catch(() => { /* noop */ });
+          writeScope({ snapshot: lastSnapshotJson, action: "" });
           return;
         }
         // fall through to execution with the args verified against the fingerprint
@@ -564,12 +740,54 @@ export function installBrowserChannel(opts: BrowserChannelOptions): BrowserChann
       // Detail: return the full memory on demand (content is truncated in the snapshot)
       if (args.op === "detail" && typeof args.id === "string") {
         const m = opts.store.getMemory(args.id);
-        if (m) {
-          browserScope
-            .replace({ snapshot: lastSnapshotJson, action: "", detail: JSON.stringify(m) })
-            .catch(() => { /* noop */ });
-        }
+        if (m) writeScope({ snapshot: lastSnapshotJson, action: "", detail: JSON.stringify(m) });
         return; // detail does not need a snapshot refresh
+      }
+      // Phase 6: episode evidence inspector (read-only; rows are already stored redacted).
+      // Served only while episode learning is enabled, with per-field display caps.
+      if (args.op === "episodeDetail" && typeof args.id === "string") {
+        if (opts.episodeEnabled?.() !== true) {
+          log("browser action ignored: episodeDetail requires episodeLearning.enabled");
+          return;
+        }
+        const ep = opts.store.getEpisode(args.id);
+        if (!ep) return;
+        const steps = opts.store
+          .getEpisodeSteps(args.id)
+          .slice(0, MAX_EPISODE_INSPECT_STEPS)
+          .map((s) => ({
+            ordinal: s.ordinal,
+            callId: s.callId,
+            toolName: s.toolName,
+            argumentsRedacted: s.argumentsRedacted.slice(0, 800),
+            resultExcerpt: s.resultExcerpt.slice(0, 800),
+            isError: s.isError,
+            errorName: s.errorName,
+            errorCode: s.errorCode,
+            argsTruncated: s.argsTruncated,
+            resultTruncated: s.resultTruncated,
+          }));
+        writeScope({
+          snapshot: lastSnapshotJson,
+          action: "",
+          episodeDetail: JSON.stringify({
+            id: ep.id,
+            sessionId: ep.sessionId,
+            projectId: ep.projectId,
+            turn: ep.turn,
+            status: ep.status,
+            delegated: ep.delegated,
+            startedAt: ep.startedAt,
+            endedAt: ep.endedAt,
+            updatedAt: ep.updatedAt,
+            summary: ep.summary,
+            confidence: ep.confidence,
+            fingerprint: ep.fingerprint,
+            rejectReason: ep.rejectReason,
+            steps,
+          }),
+        });
+        return;
       }
       // Only re-served, freshly signed tokens count for the echo gate; execute with the SAME args that were fingerprinted.
       if (MUTATING_BROWSER_OPS.has(args.op)) {
@@ -605,6 +823,37 @@ export function installBrowserChannel(opts: BrowserChannelOptions): BrowserChann
             ? opts.deleteSkill(args.name, opts.skillsRoot?.() ?? "", opts.skillsPrefix())
             : deleteSkill(args.name, opts.skillsRoot?.() ?? "", opts.skillsPrefix());
           if (removed) log("browser action: deleteSkill", args.name);
+        } else if (args.op === "purgeEpisodes" && typeof args.id === "string") {
+          // id carries the purge scope: "all" | "<days>" — fingerprint-bound like any other op.
+          // "all" maps to a FUTURE cutoff: purgeEpisodes treats "no filters" as
+          // delete-nothing (it has no unfiltered-universe semantics), so an
+          // explicit future olderThanTs is the only safe way to purge everything.
+          const scope = args.id;
+          if (scope !== "all" && !/^\d+$/.test(scope)) {
+            log("browser action ignored: invalid purgeEpisodes scope", scope.slice(0, 20));
+          } else {
+            const res = opts.purgeEpisodes
+              ? opts.purgeEpisodes(scope)
+              : opts.store.purgeEpisodes(
+                  scope === "all"
+                    ? { olderThanTs: Date.now() + 60_000 }
+                    : { olderThanTs: Date.now() - Number(scope) * 86_400_000 },
+                );
+            log("browser action: purgeEpisodes", scope, JSON.stringify(res));
+          }
+        } else if (args.op === "dryReview") {
+          // Dry-run review persists nothing (validateOnly commit); the resolved
+          // summary is published through episodeStatus. Absent delegate = disabled.
+          const dry = opts.episodeDryReview?.();
+          if (!dry) log("browser action ignored: episode review unavailable (disabled)");
+          else
+            void Promise.resolve(dry)
+              .then((s) => {
+                episodeStatus(JSON.stringify(s ?? {}));
+              })
+              .catch((e) => {
+                log("browser dryReview error:", String(e));
+              });
         } else {
           // shape mismatch reached execution: the fingerprinted args never mapped to a full op
           log("browser action ignored: invalid arguments for", args.op);
@@ -615,7 +864,7 @@ export function installBrowserChannel(opts: BrowserChannelOptions): BrowserChann
     }
     lastSnapshotJson = ""; // force a refresh on the next round
     refresh();
-    browserScope.replace({ snapshot: lastSnapshotJson, action: "" }).catch(() => { /* noop */ });
+    writeScope({ snapshot: lastSnapshotJson, action: "" });
   };
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -633,5 +882,8 @@ export function installBrowserChannel(opts: BrowserChannelOptions): BrowserChann
     if (timer) clearInterval(timer);
     timer = null;
   };
-  return { refresh, handle, stop };
+  const episodeStatus = (json: string): void => {
+    writeScope({ episodeStatus: typeof json === "string" ? json.slice(0, 2000) : "" });
+  };
+  return { refresh, handle, stop, episodeStatus };
 }

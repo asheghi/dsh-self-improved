@@ -9,3 +9,4 @@ package-lock.json
 
 # Local docs (design/research/ops notes, kept out of the repo)
 docs/
+.diag*

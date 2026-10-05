@@ -1980,6 +1980,9 @@ export class MemoryStore {
   /**
    * Purge episodes (+ steps, + their event rows) plus stale unclaimed event rows.
    * Returns deleted counts. Never touches memories rows.
+   * The age cutoff is INCLUSIVE (updated_at <= olderThanTs), so days=0 purges
+   * everything up to and including now; a project filter alone purges the whole
+   * project; with NO filters at all nothing is deleted (no unfiltered universe).
    */
   purgeEpisodes(options: { projectId?: string; olderThanTs?: number } = {}): {
     episodes: number;
@@ -1992,7 +1995,7 @@ export class MemoryStore {
       const where: string[] = [];
       const params: Array<string | number> = [];
       if (options.projectId) { where.push("project_id = ?"); params.push(options.projectId); }
-      if (options.olderThanTs !== undefined) { where.push("COALESCE(updated_at, 0) < ?"); params.push(options.olderThanTs); }
+      if (options.olderThanTs !== undefined) { where.push("COALESCE(updated_at, 0) <= ?"); params.push(options.olderThanTs); }
       if (where.length > 0) {
         const ids = (
           this.db
