@@ -125,10 +125,18 @@ for (const p of EPISODE_PATHS) {
 assert.match(src, /groupEpisodes: "enabled"/, "groupEpisodes visible while episode learning is off (else it can never be enabled)");
 // Flipping episode capture on requires an explicit consent confirm; declining
 // must force a re-render so the controlled checkbox un-flips (no state change
-// on the early-return path otherwise leaves the DOM checked).
+// on the early-return path otherwise leaves the DOM checked). A change event
+// replayed by the browser's form restoration after reload (no user gesture)
+// must be dropped entirely — draft untouched, no dialog.
+assert.match(src, /var lastInputAt = 0;/, "user-input recency tracker present");
 assert.match(
   src,
-  /f\.key === "episodeLearning\.enabled" && v === true && !draft\[f\.key\] && !getPath\(value, f\.path\)[\s\S]*?window\.confirm\(t\("episodeEnableWarning"\)\)[\s\S]{0,400}setDraft\(function \(prev\) \{ return Object\.assign\(\{\}, prev\); \}\)/,
+  /f\.key === "episodeLearning\.enabled" && v === true && !draft\[f\.key\] && !getPath\(value, f\.path\)\)[\s\S]{0,120}if \(!userGesture\) \{[\s\S]{0,300}setDraft\(function \(prev\) \{ return Object\.assign\(\{\}, prev\); \}\);[\s\S]{0,80}return;/,
+  "form-restoration replay is dropped without a dialog",
+);
+assert.match(
+  src,
+  /if \(!window\.confirm\(t\("episodeEnableWarning"\)\)\)[\s\S]{0,300}setDraft\(function \(prev\) \{ return Object\.assign\(\{\}, prev\); \}\)/,
   "declined first-enable re-renders to restore the checkbox",
 );
 // Both locale dictionaries carry the consent text + episode browser keys.

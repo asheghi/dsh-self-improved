@@ -501,6 +501,17 @@ window.__ModuleLoader__.load({
     };
 
     // ── field spec: dotted path + type + group ─────────────────────────────
+    // Recency of the last real user input (pointer/keyboard). Chrome's form
+    // restoration replays checkbox state AFTER a reload and fires a change
+    // event with no user gesture behind it — the consent gate must not treat
+    // that replay as a human "enable" click.
+    var lastInputAt = 0;
+    if (typeof document !== "undefined") {
+      var noteInput = function () { lastInputAt = Date.now(); };
+      document.addEventListener("pointerdown", noteInput, { capture: true, passive: true });
+      document.addEventListener("keydown", noteInput, { capture: true, passive: true });
+    }
+
     var FIELDS = [
       { path: ["enabled"], label: "fEnabled", type: "checkbox", group: "groupMaster" },
       { path: ["debug"], label: "fDebug", type: "checkbox", group: "groupMaster" },
@@ -624,7 +635,17 @@ window.__ModuleLoader__.load({
         // First-enable gate for episode capture: flipping episodeLearning.enabled
         // from off to on requires an explicit consent confirm (capture stores
         // redacted tool arguments/results locally). Declining leaves the draft off.
+        // Only a REAL user input (pointer/key within the last few seconds) is
+        // asked: a change event replayed by the browser's form restoration after
+        // a reload carries no gesture and must not pop the dialog.
+        var userGesture = Date.now() - lastInputAt < 5000;
         if (f.key === "episodeLearning.enabled" && v === true && !draft[f.key] && !getPath(value, f.path)) {
+          if (!userGesture) {
+            // Form-restoration replay after reload: not a human enable. Drop it
+            // entirely (draft and server stay off) and restore the controlled state.
+            setDraft(function (prev) { return Object.assign({}, prev); });
+            return;
+          }
           if (!window.confirm(t("episodeEnableWarning"))) {
             setNotice(null);
             // The click already flipped the DOM input; re-render is required to
