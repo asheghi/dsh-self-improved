@@ -102,7 +102,7 @@ sequenceDiagram
 |---|---|---|
 | Every turn (session flush) | capture slices, queue extraction | 0 |
 | Right after flush + every 15 min | extraction pump, decay, governance caps | one small call, when new content exists |
-| Nightly (default **22:00**), ~60s after boot, or `/memory evolve` | full review: drain extraction + consolidation + skills (optional) + decay/governance | moderate |
+| Nightly (default **22:00**), ~60s after boot, or `/memory evolve` | full review: drain extraction + consolidation + skills (optional) + episode review/skill synthesis (when enabled) + decay/governance | moderate |
 | Before each model call | recall retrieval + injection | 0 (keyword) / one embedding call (hybrid) |
 | `/memory` commands, memory browser | local store queries only | 0 |
 
@@ -114,10 +114,15 @@ Recall = a small curated baseline (pinned, human-corroborated profile facts, in 
 
 Nothing is deleted silently: upgrading an existing store quarantines pre-upgrade rows (`provenance=unknown`) until you confirm them (`accept-legacy`). Corrections via `/memory correct` or the browser's Correct action apply immediately and mark the memory human-confirmed; the `memory_correct` tool only stages a candidate until you confirm it.
 
+### Episode learning (opt-in, off by default)
+
+With `episodeLearning.enabled`, the plugin also records tool calls and results per session ("episodes"): arguments and results are redacted and bounded at capture time, paired strictly by call id, and classified deterministically (ambiguous/interrupted histories are never learned from). A separate LLM review pass (manual or nightly only) distills evidence-cited, project-scoped *operational* memories that expire (90 days) and never touch persona, baseline, or user memories; with `operationalRecallEnabled` they inject in a separately labeled, capped block. Repeated successful episodes can be synthesized into one traceable skill (≥2 supporting episodes, opt-in). Inspect, dry-review, purge, and forget live in the Memory tab and under `/memory episodes …`; purge and forget take effect immediately. Disable stops capture/review/recall and keeps stored data; episode rows auto-expire after `retentionDays`.
+
 ## Privacy
 
 - Store: `$DSH_HOME/memory` (configurable). The plugin itself calls no network services; model and embedding traffic follows your DSH configuration.
 - Master switch off = dormant: extraction, recall, the `/memory` command, and memory tools stop; memories are kept and everything resumes when re-enabled.
+- Episode learning is a separate opt-in layer with its own switch and consent prompt on first enable; captured tool arguments/results are redacted before persistence and reviewable in the browser inspector at any time.
 
 ## Installation
 
