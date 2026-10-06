@@ -106,7 +106,7 @@ window.__ModuleLoader__.load({
       intro: "Long-term memory & self-evolution: captures conversations, extracts memories, injects recall before turns, and consolidates/forgets/evolves over time.",
       helpTitle: "About this plugin",
       help: [
-        "dsh-self-improved adds cross-session long-term memory and self-evolution to DSH. All data is stored locally by default ($DSH_HOME/memory) — nothing is uploaded.",
+        "dsh-self-improved adds cross-session long-term memory and self-evolution to DSH. Data is stored locally by default ($DSH_HOME/memory); LLM-backed features send their required prompt content to the configured provider.",
         "",
         "[Pipeline]",
         "L0 capture: each session's conversation is saved locally for the extraction pipeline.",
@@ -138,7 +138,7 @@ window.__ModuleLoader__.load({
         "[Models & privacy]",
         "• Extraction/persona/skills use DSH's default model; you can set a dedicated one under Extraction",
         "• Secrets (API keys / passwords) are filtered out of memories",
-        "• Fully local; vector recall needs an embedding endpoint, otherwise keyword-only",
+        "• Local storage by default; LLM-backed extraction, episode review, and synthesis send required prompt/evidence to their configured provider; vector recall needs an embedding endpoint, otherwise keyword-only",
         "",
         "[Notes]",
         "• Extraction needs a working, stable model; long sessions are drained in batches (one LLM call per batch, 30s throttle)",
@@ -263,12 +263,12 @@ window.__ModuleLoader__.load({
       browserForgotten: "Forgotten",
       groupEpisodes: "Episode learning (tool outcomes, disabled by default)",
       fEpEnabled: "Enable episode learning",
-      fEpEnabledHint: "Captures every tool call + result (arguments/results redacted at capture, bounded) into the local episode store. Nothing leaves this machine; purge anytime from the Memory tab.",
+      fEpEnabledHint: "Captures every tool call + result (arguments/results redacted at capture, bounded) into the local episode store. If LLM outcome review is enabled, redacted evidence is sent to the configured provider. Purge anytime from the Memory tab.",
       fEpCaptureArgs: "Capture tool arguments",
       fEpExcerpt: "Result excerpt chars (max)",
       fEpRetention: "Episode record retention days",
       fEpReview: "Run LLM outcome review (manual/nightly only)",
-      fEpReviewHint: "Reviews redacted episodes into project-scoped, evidence-cited operational memories. Never runs per-flush.",
+      fEpReviewHint: "Sends redacted episode evidence to the configured LLM provider to create project-scoped, evidence-cited operational memories. Manual/nightly only; never per-flush.",
       fEpConf: "Operational memory confidence floor",
       fEpExpiry: "Operational memory expiry days",
       fEpRecall: "Inject operational recall (labeled, separate)",
@@ -276,7 +276,7 @@ window.__ModuleLoader__.load({
       fEpRecallMax: "Max operational recall results",
       fEpRecallChars: "Max operational recall chars",
       fEpSkillMin: "Episodes required to synthesize one skill",
-      episodeEnableWarning: "Episode learning will store every tool call and result (redacted, bounded) for this project's sessions locally until purged. Enable now?",
+      episodeEnableWarning: "Episode learning stores every tool call and result (redacted and bounded) locally. If LLM outcome review is enabled, redacted episode evidence is sent to your configured LLM provider. Purge stored episodes from the Memory tab. Enable capture now?",
       browserEpisodes: "Episodes (tool outcomes)",
       browserEpisodesDisabled: "(episode learning disabled — enable it in Config to capture episodes; purge below still works)",
       browserEpisodesEmpty: "(no episodes recorded yet)",
@@ -306,7 +306,7 @@ window.__ModuleLoader__.load({
       intro: "Long-term memory & self-evolution: captures conversations, extracts memories, injects recall before turns, and consolidates/forgets/evolves over time.",
       helpTitle: "About this plugin",
       help: [
-        "dsh-self-improved adds cross-session long-term memory and self-evolution to DSH. All data is stored locally by default ($DSH_HOME/memory) — nothing is uploaded.",
+        "dsh-self-improved adds cross-session long-term memory and self-evolution to DSH. Data is stored locally by default ($DSH_HOME/memory); LLM-backed features send their required prompt content to the configured provider.",
         "",
         "[Pipeline]",
         "L0 capture: each session's conversation is saved locally for the extraction pipeline.",
@@ -338,7 +338,7 @@ window.__ModuleLoader__.load({
         "[Models & privacy]",
         "• Extraction/persona/skills use DSH's default model; you can set a dedicated one under Extraction",
         "• Secrets (API keys / passwords) are filtered out of memories",
-        "• Fully local; vector recall needs an embedding endpoint, otherwise keyword-only",
+        "• Local storage by default; LLM-backed extraction, episode review, and synthesis send required prompt/evidence to their configured provider; vector recall needs an embedding endpoint, otherwise keyword-only",
         "",
         "[Notes]",
         "• Extraction needs a working, stable model; long sessions are drained in batches (one LLM call per batch, 30s throttle)",
@@ -463,12 +463,12 @@ window.__ModuleLoader__.load({
       browserForgotten: "Forgotten",
       groupEpisodes: "Episode learning (tool outcomes, disabled by default)",
       fEpEnabled: "Enable episode learning",
-      fEpEnabledHint: "Captures every tool call + result (arguments/results redacted at capture, bounded) into the local episode store. Nothing leaves this machine; purge anytime from the Memory tab.",
+      fEpEnabledHint: "Captures every tool call + result (arguments/results redacted at capture, bounded) into the local episode store. If LLM outcome review is enabled, redacted evidence is sent to the configured provider. Purge anytime from the Memory tab.",
       fEpCaptureArgs: "Capture tool arguments",
       fEpExcerpt: "Result excerpt chars (max)",
       fEpRetention: "Episode record retention days",
       fEpReview: "Run LLM outcome review (manual/nightly only)",
-      fEpReviewHint: "Reviews redacted episodes into project-scoped, evidence-cited operational memories. Never runs per-flush.",
+      fEpReviewHint: "Sends redacted episode evidence to the configured LLM provider to create project-scoped, evidence-cited operational memories. Manual/nightly only; never per-flush.",
       fEpConf: "Operational memory confidence floor",
       fEpExpiry: "Operational memory expiry days",
       fEpRecall: "Inject operational recall (labeled, separate)",
@@ -476,7 +476,7 @@ window.__ModuleLoader__.load({
       fEpRecallMax: "Max operational recall results",
       fEpRecallChars: "Max operational recall chars",
       fEpSkillMin: "Episodes required to synthesize one skill",
-      episodeEnableWarning: "Episode learning will store every tool call and result (redacted, bounded) for this project's sessions locally until purged. Enable now?",
+      episodeEnableWarning: "Episode learning stores every tool call and result (redacted and bounded) locally. If LLM outcome review is enabled, redacted episode evidence is sent to your configured LLM provider. Purge stored episodes from the Memory tab. Enable capture now?",
       browserEpisodes: "Episodes (tool outcomes)",
       browserEpisodesDisabled: "(episode learning disabled — enable it in Config to capture episodes; purge below still works)",
       browserEpisodesEmpty: "(no episodes recorded yet)",
@@ -501,17 +501,6 @@ window.__ModuleLoader__.load({
     };
 
     // ── field spec: dotted path + type + group ─────────────────────────────
-    // Recency of the last real user input (pointer/keyboard). Chrome's form
-    // restoration replays checkbox state AFTER a reload and fires a change
-    // event with no user gesture behind it — the consent gate must not treat
-    // that replay as a human "enable" click.
-    var lastInputAt = 0;
-    if (typeof document !== "undefined") {
-      var noteInput = function () { lastInputAt = Date.now(); };
-      document.addEventListener("pointerdown", noteInput, { capture: true, passive: true });
-      document.addEventListener("keydown", noteInput, { capture: true, passive: true });
-    }
-
     var FIELDS = [
       { path: ["enabled"], label: "fEnabled", type: "checkbox", group: "groupMaster" },
       { path: ["debug"], label: "fDebug", type: "checkbox", group: "groupMaster" },
@@ -620,40 +609,19 @@ window.__ModuleLoader__.load({
       var value = snapshot.value;
       var user = snapshot.user || {};
 
-      function fieldDraft(f) {
-        if (f.type === "checkbox") return draft[f.key] !== void 0 ? draft[f.key] : Boolean(getPath(value, f.path));
+      function fieldDraft(f, sourceValue) {
+        var source = sourceValue === void 0 ? value : sourceValue;
+        if (f.type === "checkbox") return draft[f.key] !== void 0 ? draft[f.key] : Boolean(getPath(source, f.path));
         // Select fields may carry a schema-default fallback so an unset (or never-initialized
         // empty-draft) value still renders a valid option — valueToDraft writes "" for unset
         // selects, so treat both undefined and "" as unset here.
         if (f.type === "select" && (draft[f.key] === void 0 || draft[f.key] === "") && f.fallback !== void 0) {
-          var cur = getPath(value, f.path);
+          var cur = getPath(source, f.path);
           return cur === void 0 || cur === null || cur === "" ? String(f.fallback) : String(cur);
         }
-        return draft[f.key] !== void 0 ? draft[f.key] : String(getPath(value, f.path) ?? "");
+        return draft[f.key] !== void 0 ? draft[f.key] : String(getPath(source, f.path) ?? "");
       }
       function setField(f, v) {
-        // First-enable gate for episode capture: flipping episodeLearning.enabled
-        // from off to on requires an explicit consent confirm (capture stores
-        // redacted tool arguments/results locally). Declining leaves the draft off.
-        // Only a REAL user input (pointer/key within the last few seconds) is
-        // asked: a change event replayed by the browser's form restoration after
-        // a reload carries no gesture and must not pop the dialog.
-        var userGesture = Date.now() - lastInputAt < 5000;
-        if (f.key === "episodeLearning.enabled" && v === true && !draft[f.key] && !getPath(value, f.path)) {
-          if (!userGesture) {
-            // Form-restoration replay after reload: not a human enable. Drop it
-            // entirely (draft and server stay off) and restore the controlled state.
-            setDraft(function (prev) { return Object.assign({}, prev); });
-            return;
-          }
-          if (!window.confirm(t("episodeEnableWarning"))) {
-            setNotice(null);
-            // The click already flipped the DOM input; re-render is required to
-            // restore the controlled checked state from the (unchanged) draft.
-            setDraft(function (prev) { return Object.assign({}, prev); });
-            return;
-          }
-        }
         setDraft(function (prev) { var next = Object.assign({}, prev); next[f.key] = v; return next; });
         setNotice(null);
         setError(null);
@@ -674,12 +642,34 @@ window.__ModuleLoader__.load({
       }
 
       function onSave() {
+        var saveSnapshot = scope.getSnapshot();
+        var currentValue = saveSnapshot.status === "ready" && saveSnapshot.value !== void 0 ? saveSnapshot.value : value;
+        var currentUser = saveSnapshot.user || user;
+        var currentEpisodeEnabled = Boolean(getPath(currentValue, ["episodeLearning", "enabled"]));
+        var draftEpisodeEnabled = Boolean(
+          draft["episodeLearning.enabled"] !== void 0
+            ? draft["episodeLearning.enabled"]
+            : currentEpisodeEnabled
+        );
+        // Consent is checked at the authoritative save boundary, not when a
+        // checkbox changes: a stale draft cannot silently re-enable capture.
+        if (draftEpisodeEnabled && !currentEpisodeEnabled && !window.confirm(t("episodeEnableWarning"))) {
+          setDraft(function (prev) {
+            var next = Object.assign({}, prev);
+            next["episodeLearning.enabled"] = false;
+            return next;
+          });
+          setNotice(null);
+          setError(null);
+          return;
+        }
+
         setBusy(true); setNotice(null); setError(null);
         var ops = [];
         for (var i = 0; i < FIELDS.length; i += 1) {
           var f = FIELDS[i];
-          var d = fieldDraft(f);
-          var current = getPath(value, f.path);
+          var d = fieldDraft(f, currentValue);
+          var current = getPath(currentValue, f.path);
           if (f.type === "password") {
             if (!d) continue; // blank keeps the current key
             if (d === String(current ?? "")) continue;
@@ -700,14 +690,14 @@ window.__ModuleLoader__.load({
             continue;
           }
           if (String(d) === String(current ?? "")) continue;
-          if (String(d).trim() === "" && getPath(user, f.path) === void 0) continue;
+          if (String(d).trim() === "" && getPath(currentUser, f.path) === void 0) continue;
           ops.push(String(d).trim() === "" ? { op: "unset", path: f.path } : { op: "set", path: f.path, value: f.type === "number" ? Number(d) : d });
         }
         if (ops.length === 0) { setBusy(false); setNotice(t("saved")); return; }
         api.settings.mutate({
           ns: "dsh-self-improved",
           ops: ops,
-          ...snapshot.revision === void 0 ? {} : { expectedRevision: snapshot.revision }
+          ...saveSnapshot.revision === void 0 ? {} : { expectedRevision: saveSnapshot.revision }
         }).then(function (response) {
           if (!response.result.ok) { handleMutateFailure(response); return; }
           setBusy(false);

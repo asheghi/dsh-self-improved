@@ -1166,6 +1166,18 @@ export class MemoryStore {
     for (const r of rows) insert.run(tokenize(String(r.content)), String(r.kind), String(r.id));
   }
 
+  checkpoint(): void {
+    if (this.closed) return;
+    const checkpoint = (db: DatabaseSync): void => {
+      const result = db.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get() as { busy?: number } | undefined;
+      if (!result || Number(result.busy ?? 0) !== 0) {
+        throw new Error(`SQLite WAL checkpoint incomplete for ${this.dir}`);
+      }
+    };
+    checkpoint(this.db);
+    if (this.vectors) checkpoint(this.vectors);
+  }
+
   close(): void {
     if (this.closed) return;
     this.closed = true;

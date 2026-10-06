@@ -12,16 +12,17 @@
  *   - stored arguments/results are redacted on disk
  *
  * Usage:
- *   node scripts/validate-episode-rollout.mjs --sessions-root <dir> --memory-dir <dir> \
- *        [--session <id>] [--pick N] [--max-events 4000]
+ *   node scripts/validate-episode-rollout.mjs --sessions-root <dir> --memory-dir <new-dir> \
+ *        [--live-memory-dir <custom-live-dir>] [--session <id>] [--pick N] [--max-events 4000]
  *
- * Default: analyze up to --pick 12 sessions, auto-select the best
- * failure→retry→success candidates, persist ONLY into --memory-dir
- * (never the live ~/.dsh), and print a JSON verdict. Exit 1 on any redaction hit.
+ * The destination must not exist; its parent must exist. The validator refuses
+ * overlap with session storage, $DSH_HOME, and any explicitly supplied custom
+ * live memory directory. It never deletes the destination. Exit 1 on leaks or
+ * missing redaction markers, 2 when the run lacks evidence to validate.
  */
-import { statSync, readFileSync, mkdirSync, rmSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { statSync, mkdirSync, existsSync } from "node:fs";
 import { performance } from "node:perf_hooks";
+import { assertSafeMemoryDir, collectSecretProbes, judgeRolloutEvidence, scanStoreArtifacts } from "./episode-rollout-utils.mjs";
 
 const args = process.argv.slice(2);
 const arg = (name, fallback) => {
@@ -30,13 +31,21 @@ const arg = (name, fallback) => {
 };
 
 const sessionsRoot = arg("sessions-root", "");
-const memoryDir = arg("memory-dir", "");
-if (!sessionsRoot || !memoryDir) {
-  console.error(JSON.stringify({ error: "usage: --sessions-root <dir> --memory-dir <dir> [--session id] [--pick N]" }));
+const requestedMemoryDir = arg("memory-dir", "");
+if (!sessionsRoot || !requestedMemoryDir) {
+  console.error(JSON.stringify({ error: "usage: --sessions-root <dir> --memory-dir <new-dir> [--live-memory-dir <dir>] [--session id] [--pick N]" }));
   process.exit(2);
 }
 if (!existsSync(sessionsRoot) || !statSync(sessionsRoot).isDirectory()) {
   console.error(JSON.stringify({ error: `sessions-root is not a directory: ${sessionsRoot}` }));
+  process.exit(2);
+}
+let memoryDir;
+try {
+  const liveMemoryDir = arg("live-memory-dir", "");
+  memoryDir = assertSafeMemoryDir(requestedMemoryDir, sessionsRoot, process.env.DSH_HOME || undefined, liveMemoryDir ? [liveMemoryDir] : []);
+} catch (error) {
+  console.error(JSON.stringify({ error: String(error) }));
   process.exit(2);
 }
 
@@ -65,28 +74,6 @@ const metas = await p.list();
 
 const maxEvents = Number(arg("max-events", "4000"));
 const pick = Number(arg("pick", "12"));
-
-/** Credential-shaped probes extracted from RAW event payloads. */
-function collectSecretProbes(event) {
-  const probes = new Set();
-  const scanText = (text) => {
-    if (typeof text !== "string" || text.length < 8 || text.length > 5000) return;
-    // JSON-style sensitive keys → their values
-    const re = /"(?:password|passwd|pwd|secret|token|api[_-]?key|apiKey|authorization|cookie|privateKey|recoveryCode)"\s*:\s*"([^"]{8,200})"/gi;
-    for (const m of text.matchAll(re)) probes.add(m[1]);
-    // header / URL forms
-    for (const m of text.matchAll(/(?:Bearer|bearer)\s+([A-Za-z0-9_\-./]{16,200})/g)) probes.add(m[1]);
-    for (const m of text.matchAll(/(?:api[_-]?key|token|password|passwd)=([A-Za-z0-9_\-./]{16,200})/gi)) probes.add(m[1]);
-    for (const m of text.matchAll(/Authorization:\s*Basic\s+([A-Za-z0-9+/=]{16,200})/gi)) probes.add(m[1]);
-  };
-  const walk = (v, depth = 0) => {
-    if (v === null || v === undefined || depth > 6) return;
-    if (typeof v === "string") return scanText(v);
-    if (typeof v === "object") for (const k of Object.keys(v)) walk(v[k], depth + 1);
-  };
-  walk(event);
-  return probes;
-}
 
 function trajectoryOf(events) {
   let calls = 0, results = 0, errors = 0, turnEnds = 0;
@@ -169,13 +156,12 @@ for (const meta of metas) {
 candidates.sort((a, b) => b.score - a.score);
 const chosen = wanted ? candidates.filter((c) => c.id === wanted) : candidates.slice(0, Math.min(3, candidates.length));
 if (chosen.length === 0) {
-  console.log(JSON.stringify({ verdict: "no-candidates", scanned, sessionsWithToolCalls: candidates.length, note: "no session with tool calls found under the pick budget" }));
-  process.exit(0);
+  console.log(JSON.stringify({ verdict: "inconclusive", reason: "no-candidates", scanned, sessionsWithToolCalls: candidates.length, note: "no session with tool calls found under the pick budget" }));
+  process.exit(2);
 }
 
 // ── 3. Flush through the REAL capture pipeline into the isolated store ─────
-rmSync(memoryDir, { recursive: true, force: true });
-mkdirSync(memoryDir, { recursive: true });
+mkdirSync(memoryDir);
 const store = new MemoryStore(memoryDir);
 const flushed = [];
 {
@@ -216,31 +202,33 @@ for (const ep of episodes) {
   if (retried.length > 0) retryEvidence.push({ episode: ep.id, status: ep.status, retriedTools: [...new Set(retried)] });
 }
 
-// ── 4. ON-DISK redaction check (raw SQLite bytes, bypassing the store API) ──
-const dbPath = join(memoryDir, "memory.db");
-const dbBytes = readFileSync(dbPath);
-const dbText = dbBytes.toString("latin1");
-const leaks = [];
-for (const probe of secretProbes) {
-  if (probe.length < 8) continue;
-  if (dbText.includes(probe)) leaks.push({ probe: probe.slice(0, 12) + "…", len: probe.length });
+// ── 4. Checkpoint and close before scanning every persisted store artifact. ──
+try {
+  store.checkpoint();
+} finally {
+  store.close();
 }
-// The store must contain redaction markers (something WAS redacted) when the
-// raw sessions contained credential-shaped values.
-const hasMarkers = secretProbes.length === 0 ? true : dbText.includes("[REDACTED]");
-
-store.close();
-
-const verdict = {
-  verdict: leaks.length === 0 ? "pass" : "FAIL",
+const diskScan = scanStoreArtifacts(memoryDir, secretProbes);
+const evidenceVerdict = judgeRolloutEvidence({
+  leaks: diskScan.leaks,
+  secretProbesChecked: secretProbes.length,
+  totalEpisodes: total,
+  retryEpisodes: retryEvidence.length,
+  redactionMarkersOnDisk: diskScan.redactionMarkersOnDisk,
+});
+const verdictData = {
+  verdict: evidenceVerdict.verdict,
   sessionsScanned: scanned,
   flushed,
   episodeCounts: counts,
   totalEpisodes: total,
   retryEvidence,
   secretProbesChecked: secretProbes.length,
-  redactionMarkersOnDisk: hasMarkers,
-  onDiskLeaks: leaks,
+  sqliteArtifactsScanned: diskScan.sqliteArtifacts,
+  storeFilesScanned: diskScan.filesScanned.length,
+  redactionMarkersOnDisk: diskScan.redactionMarkersOnDisk,
+  inconclusiveReasons: evidenceVerdict.inconclusiveReasons,
+  onDiskLeaks: diskScan.leaks,
 };
-console.log(JSON.stringify(verdict, null, 2));
-process.exit(verdict.verdict === "pass" ? 0 : 1);
+console.log(JSON.stringify(verdictData, null, 2));
+process.exitCode = evidenceVerdict.verdict === "pass" ? 0 : evidenceVerdict.verdict === "FAIL" ? 1 : 2;

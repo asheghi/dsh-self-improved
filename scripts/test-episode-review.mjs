@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { MemoryStore } from "../lib/storage.js";
 import { installCapture } from "../lib/capture.js";
 import { assembleSessionEpisodes } from "../lib/episodes.js";
-import { runEpisodeReview, buildReviewPrompt, parseReviewerOutput } from "../lib/episode-review.js";
+import { EpisodeReviewAbortGate, runEpisodeReview, buildReviewPrompt, parseReviewerOutput } from "../lib/episode-review.js";
 
 const root = join(process.env.TEST_DIR ?? "/tmp/dsh-mem-test", "episode-review");
 rmSync(root, { recursive: true, force: true });
@@ -673,5 +673,86 @@ const uni = (arr) => arr.map((f) => Math.round(f));
 }
 
 // ---------------------------------------------------------------------
+// 23) Consent revocation aborts queued and in-flight review work
+// ---------------------------------------------------------------------
+{
+  const gate = new EpisodeReviewAbortGate();
+  gate.setEnabled(true);
+  const previousSignal = gate.getSignal();
+  gate.setEnabled(false);
+  let disabledSignalRejected = false;
+  try { gate.getSignal(); } catch { disabledSignalRejected = true; }
+  gate.setEnabled(true);
+  const nextSignal = gate.getSignal();
+  check("23: revocation aborts the active signal and re-enable creates a fresh one", previousSignal.aborted && disabledSignalRejected && nextSignal !== previousSignal && !nextSignal.aborted);
+  gate.abort();
+  check("23: disposal aborts the current signal", nextSignal.aborted);
+
+  const store = newStore("abort-queued");
+  const flush = seedCapture(store);
+  await flush({
+    id: "sv-abort-queued",
+    header: { cwd: "/tmp/proj-abort" },
+    events: [
+      callEvent(1, 1, 0, "call-abort", "bash", { cmd: "ls" }),
+      resultEvent(2, 1, 0, "call-abort", "ok"),
+      turnEndEvent(3, 1),
+    ],
+  });
+  let releaseFirst;
+  let firstStarted;
+  const started = new Promise((resolve) => { firstStarted = resolve; });
+  const first = review(store, () => {
+    firstStarted();
+    return new Promise((resolve) => { releaseFirst = resolve; });
+  }, { dryRun: true });
+  await started;
+  const controller = new AbortController();
+  let secondCalls = 0;
+  const queued = review(store, async () => {
+    secondCalls++;
+    return memJson([{ content: "must not persist after revocation", confidence: 0.9, evidence_call_ids: ["call-1"] }]);
+  }, { signal: controller.signal });
+  controller.abort(new Error("consent revoked"));
+  releaseFirst(memJson([{ content: "dry run only", confidence: 0.9, evidence_call_ids: ["call-1"] }]));
+  await first;
+  let queuedRejected = false;
+  try { await queued; } catch { queuedRejected = true; }
+  check("23: queued pass checks cancellation after acquiring the review lock", queuedRejected && secondCalls === 0);
+  check("23: queued cancellation leaves episode untouched", store.listMemories({ limit: 10 }).length === 0 && store.listEpisodes({ status: "succeeded", unreviewedOnly: true }).length === 1);
+}
+
+{
+  const store = newStore("abort-in-flight");
+  const flush = seedCapture(store);
+  await flush({
+    id: "sv-abort-in-flight",
+    header: { cwd: "/tmp/proj-abort-flight" },
+    events: [
+      callEvent(1, 1, 0, "call-abort-flight", "bash", { cmd: "ls" }),
+      resultEvent(2, 1, 0, "call-abort-flight", "ok"),
+      turnEndEvent(3, 1),
+    ],
+  });
+  const episode = store.listEpisodes({ status: "succeeded", unreviewedOnly: true })[0];
+  const controller = new AbortController();
+  let receivedSignal;
+  let release;
+  let startedResolve;
+  const started = new Promise((resolve) => { startedResolve = resolve; });
+  const inFlight = review(store, (input) => {
+    receivedSignal = input.signal;
+    startedResolve();
+    return new Promise((resolve) => { release = resolve; });
+  }, { signal: controller.signal });
+  await started;
+  controller.abort(new Error("consent revoked"));
+  release(memJson([{ content: "must not commit", confidence: 0.9, evidence_call_ids: ["call-1"] }]));
+  let inFlightRejected = false;
+  try { await inFlight; } catch { inFlightRejected = true; }
+  check("23: LLM receives the revocable signal", receivedSignal === controller.signal && receivedSignal.aborted);
+  check("23: late model result cannot commit after revocation", inFlightRejected && store.listMemories({ limit: 10 }).length === 0 && store.getEpisode(episode.id)?.status === "succeeded");
+}
+
 console.log(failed === 0 ? "\nALL PASS" : `\n${failed} FAILURES`);
 process.exit(failed === 0 ? 0 : 1);

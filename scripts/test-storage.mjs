@@ -69,6 +69,9 @@ check("sqlite-vec loaded (vectors.db)", existsSync(join(dir, "vectors.db")), "if
 
 // 7) schemaVersion: fresh store is at v2 (v1 + v2 markers recorded)
 check("schemaVersion on fresh store is 2", store.schemaVersion() === 2, String(store.schemaVersion()));
+let checkpointed = true;
+try { store.checkpoint(); } catch { checkpointed = false; }
+check("explicit WAL checkpoint succeeds", checkpointed);
 
 store.close();
 

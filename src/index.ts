@@ -19,7 +19,7 @@ import "@deepseek-ai/dsh-session-query";
 import { MemoryStore, defaultMemoryDir } from "./storage.js";
 import { installCapture, projectKeyFromCwd } from "./capture.js";
 import { closeStalePendingEpisodes, repairEpisodeConsistency, assembleSessionEpisodes } from "./episodes.js";
-import { runEpisodeReview } from "./episode-review.js";
+import { EpisodeReviewAbortGate, runEpisodeReview } from "./episode-review.js";
 import type { EpisodeReviewSummary } from "./episode-review.js";
 import { registerMemoryTools } from "./tools.js";
 import { Extractor, type ExtractSettings } from "./extract.js";
@@ -378,6 +378,8 @@ export function apply(ctx: Context, config: Config): void {
   }, embeddingProvider);
   // Episode-learning runtime state (hot-applied by scope.watch below)
   const episodeState = { enabled: config.episodeLearning.enabled, captureArguments: config.episodeLearning.captureArguments, maxChars: config.episodeLearning.resultExcerptChars, reviewEnabled: config.episodeLearning.reviewEnabled, confidenceFloor: config.episodeLearning.confidenceFloor, expiryDays: config.episodeLearning.expiryDays, operationalRecallEnabled: config.episodeLearning.operationalRecallEnabled, maxRecallResults: config.episodeLearning.maxRecallResults, maxRecallChars: config.episodeLearning.maxRecallChars, skillMinEpisodes: config.episodeLearning.skillMinEpisodes };
+  const episodeReviewGate = new EpisodeReviewAbortGate();
+  episodeReviewGate.setEnabled(state.enabled && episodeState.enabled && episodeState.reviewEnabled);
   installCapture(ctx, store, { enabled: () => readModule("capture") }, () => {
     if (!extractSettings.enabled) return;
     const result = extractor.pump();
@@ -483,7 +485,7 @@ export function apply(ctx: Context, config: Config): void {
       return { sessions: 0, memories: 0, skipped: 0, errors: 1 };
     });
     const episodeReviewPromise =
-      episodeState.enabled && episodeState.reviewEnabled
+      state.enabled && episodeState.enabled && episodeState.reviewEnabled
         ? runEpisodeReview(
             store,
             async ({ system, user, signal }) => episodeReviewLlm({ system, user, signal }),
@@ -491,6 +493,7 @@ export function apply(ctx: Context, config: Config): void {
               confidenceFloor: episodeState.confidenceFloor,
               expiryDays: episodeState.expiryDays,
             },
+            episodeReviewGate.getSignal(),
           )
             .then((s) => { log("episode review:", JSON.stringify(s)); return s; })
             .catch((e) => console.warn("[dsh-self-improved] episode review error:", String(e)))
@@ -619,6 +622,7 @@ export function apply(ctx: Context, config: Config): void {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (ctx as any).on("dispose", () => {
+    episodeReviewGate.abort();
     if (timer) clearInterval(timer);
     if (startupTimer) clearTimeout(startupTimer);
     if (reviewTimer) clearTimeout(reviewTimer);
@@ -709,6 +713,7 @@ export function apply(ctx: Context, config: Config): void {
         expiryDays: episodeState.expiryDays,
         dryRun: dry,
       },
+      episodeReviewGate.getSignal(),
     ).then((s) => {
       log("episode review" + (dry ? " (dry-run)" : "") + ":", JSON.stringify(s));
       try {
@@ -756,6 +761,7 @@ export function apply(ctx: Context, config: Config): void {
     episodeState.enabled = next.episodeLearning.enabled;
     episodeState.captureArguments = next.episodeLearning.captureArguments;
     episodeState.reviewEnabled = next.episodeLearning.reviewEnabled;
+    episodeReviewGate.setEnabled(state.enabled && episodeState.enabled && episodeState.reviewEnabled);
     episodeState.confidenceFloor = next.episodeLearning.confidenceFloor;
     episodeState.expiryDays = next.episodeLearning.expiryDays;
     episodeState.maxChars = next.episodeLearning.resultExcerptChars;

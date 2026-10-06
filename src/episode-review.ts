@@ -36,6 +36,30 @@ export interface EpisodeReviewOptions {
   maxMemories?: number;
 }
 
+/** Shared consent gate for queued and in-flight review passes. */
+export class EpisodeReviewAbortGate {
+  private controller: AbortController | null = null;
+
+  setEnabled(enabled: boolean): void {
+    if (!enabled) {
+      if (this.controller && !this.controller.signal.aborted) this.controller.abort(new Error("episode review disabled"));
+      this.controller = null;
+      return;
+    }
+    if (!this.controller || this.controller.signal.aborted) this.controller = new AbortController();
+  }
+
+  getSignal(): AbortSignal {
+    if (!this.controller || this.controller.signal.aborted) throw new Error("Episode review is disabled");
+    return this.controller.signal;
+  }
+
+  abort(): void {
+    if (this.controller && !this.controller.signal.aborted) this.controller.abort(new Error("episode review disposed"));
+    this.controller = null;
+  }
+}
+
 export interface EpisodeReviewSummary {
   considered: number;
   reviewed: number;
@@ -287,6 +311,7 @@ async function reviewOnce(
   opts: EpisodeReviewOptions,
   signal?: AbortSignal,
 ): Promise<EpisodeReviewSummary> {
+  signal?.throwIfAborted();
   const summary: EpisodeReviewSummary = { considered: 0, reviewed: 0, rejected: 0, memories: 0, dropped: 0, errors: 0 };
   if (opts.dryRun) summary.dryRun = true;
   const limit = opts.limit ?? 10;
@@ -301,7 +326,7 @@ async function reviewOnce(
   if (candidates.length === 0) return summary;
 
   for (const episode of candidates) {
-    if (signal?.aborted) throw new Error("episode review aborted");
+    signal?.throwIfAborted();
     const steps = store.getEpisodeSteps(episode.id);
     // Prompt budget: too many steps → skip the episode whole; no step-list truncation.
     if (steps.length > MAX_PROMPT_STEPS) {
@@ -330,13 +355,15 @@ async function reviewOnce(
     );
     let raw: string;
     try {
+      signal?.throwIfAborted();
       raw = await call({ system: prompt.system, user: prompt.user, signal: signal ?? new AbortController().signal });
     } catch (error) {
+      if (signal?.aborted) signal.throwIfAborted();
       summary.errors += 1; // episode untouched → retried next pass
-      if (signal?.aborted) continue;
       console.warn("[dsh-self-improved] episode review LLM error:", String(error));
       continue;
     }
+    signal?.throwIfAborted();
     const parsed = parseReviewerOutput(raw);
     if (!parsed) {
       summary.errors += 1; // episode untouched
@@ -387,6 +414,7 @@ async function reviewOnce(
         evidence: v.evidence,
       })),
     };
+    signal?.throwIfAborted();
     try {
       const ok = opts.dryRun
         ? store.commitEpisodeLearnings(commitInput, { validateOnly: true })
