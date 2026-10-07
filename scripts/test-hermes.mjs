@@ -407,15 +407,22 @@ check("extraction prompt excludes injected + tool slices",
   });
   const handler = handlers["agent/pre-step"];
 
-  const realMsg = { role: "user", content: [{ type: "text", text: "how does the pnpm workspace work here?" }] };
+  // rc.2 UserMessage requires a source; only source.kind === "user" is direct human input.
+  const realMsg = { role: "user", content: [{ type: "text", text: "how does the pnpm workspace work here?" }], source: { kind: "user" } };
   const decisionOf = () => ({ kind: "enter", messages: [realMsg] });
-  const injectedOf = (out) => out.messages.filter((m) => m.source?.plugin === "dsh-self-improved");
+  const injectedOf = (out) => out.messages.filter((m) => m.source?.kind === "dsh-self-improved" || (m.source?.kind === "plugin" && m.source?.plugin === "dsh-self-improved"));
 
   const out1 = await handler({ step: 1 }, async () => decisionOf());
   check("injection appends a plugin message on first step", injectedOf(out1).length === 1, JSON.stringify(out1.messages.map((m) => m.role)));
-  check("injection block marks provenance roleHint=memory", injectedOf(out1)[0]?.source?.roleHint === "memory");
+  // rc.2 Phase A attribution: the plugin's declared merge-extensible source
+  // kind plus the harness `recall` context form replace the removed legacy
+  // { kind: "plugin", plugin, roleHint } markers.
+  check("injection block carries declared source kind + snapshot supersede form", injectedOf(out1)[0]?.source?.form === "snapshot");
   const out2 = await handler({ step: 1 }, async () => decisionOf());
-  check("session-scoped cache suppresses identical repeat", out2.messages.length === 1, String(out2.messages.length));
+  // rc.2 Phase A: the identical repeat re-admits the CACHED trusted block as a
+  // superseding producer snapshot (no fresh trusted search; updating derived
+  // history supersedes the earlier snapshot instead of accumulating).
+  check("session-scoped cache serves identical repeat without a fresh trusted search", out2.messages.length === 2 && injectedOf(out2).length === 1, String(out2.messages.length));
   sessionIdBeingTested = "s-b";
   const out3 = await handler({ step: 1 }, async () => decisionOf());
   check("different session gets its own injection", injectedOf(out3).length === 1);
@@ -432,23 +439,22 @@ check("extraction prompt excludes injected + tool slices",
   // Generic greeting → no contextual search or trailing user-role memory block.
   // The curated baseline is supplied separately as a system-prompt section.
   const outGreet = await handler({ step: 1 }, async () => ({ kind: "enter", messages: [{ role: "user", content: "hi there thanks" }] }));
-  const greetBlock = outGreet.messages.filter((m) => m.source?.plugin === "dsh-self-improved").map((m) => m.content[0].text).join("");
+  const greetBlock = outGreet.messages.filter((m) => m.source?.kind === "dsh-self-improved" || m.source?.plugin === "dsh-self-improved").map((m) => m.content[0].text).join("");
   check("greeting injects no trailing memory user message", greetBlock === "", greetBlock.slice(0, 160));
 
-  // Production DSH path: register attributed scoped context instead of appending
-  // a second user-role message after the live request.
+  // rc.2 Phase A: scoped systemPrompt.context registration inside pre-step was
+  // mistimed (system prompt + dynamic context are assembled before the
+  // pre-step listeners), so the adapter now admits recall ONLY through the
+  // spread decision message. No client-side context registration is attempted.
   const scopedSections = [];
-  let scopedDisposed = 0;
   const agent = {
     id: "agent-session",
     session: { header: { cwd: "/tmp/workboard" } },
-    ctx: { systemPrompt: { context(section) { scopedSections.push(section); return () => { scopedDisposed++; }; } } },
+    ctx: { systemPrompt: { context(section) { scopedSections.push(section); return () => {}; } } },
   };
   sessionIdBeingTested = "s-context";
   const scopedOut = await handler({ step: 1, agent }, async () => decisionOf());
-  check("DSH path uses scoped context without trailing user message", scopedOut.messages.length === 1 && scopedSections.length === 1 && scopedSections[0].text.includes("long-term-memory-recall"));
-  await handler({ step: 1, agent }, async () => ({ kind: "enter", messages: [{ role: "user", content: "hello thanks" }] }));
-  check("next turn disposes stale scoped recall context", scopedDisposed >= 1);
+  check("rc.2 path injects a decision message instead of scoped context", scopedOut.messages.length === 2 && scopedSections.length === 0 && injectedOf(scopedOut).length === 1, JSON.stringify(scopedOut.messages.length));
 }
 
 // =====================================================================
@@ -836,7 +842,7 @@ legacyOnly.close();
     projectKeyOf: () => "default", // default project key STILL passed to recall
   });
   const stepHandler = handlers["agent/pre-step"];
-  const realMsg = { role: "user", content: [{ type: "text", text: "check the default workspace build cache" }] };
+  const realMsg = { role: "user", content: [{ type: "text", text: "check the default workspace build cache" }], source: { kind: "user" } };
   const decisionOf = async () => ({ kind: "enter", messages: [realMsg] });
 
   // Delayed abort: signal aborted while recall is still in flight
@@ -858,15 +864,10 @@ legacyOnly.close();
     ctx: { systemPrompt: { context(section) { scopedSections.push(section); return () => { disposed.push(section.name); }; } } },
   };
   const out = await stepHandler({ step: 1, agent: agentB }, decisionOf);
-  check("live turn registers scoped context", scopedSections.length === 1 && out.messages.length === 1, JSON.stringify({ sections: scopedSections.length }));
-  check("plugin dispose handler is registered", typeof handlers.dispose === "function");
-  handlers.dispose();
-  check("plugin dispose clears every live scoped context", disposed.includes("dsh-self-improved:recall"), JSON.stringify(disposed));
-  // agent/disposed teardown (cached turn re-registers, replacing the stale one)
-  await stepHandler({ step: 1, agent: agentB }, decisionOf);
-  check("later turn re-arms the scoped context", scopedSections.length === 2, JSON.stringify(scopedSections.length));
-  handlers["agent/disposed"]({ agent: agentB });
-  check("agent/disposed tears down its own scoped context", disposed.includes("dsh-self-improved:recall"), JSON.stringify(disposed.length));
+  // rc.2 Phase A: no scoped-context registration exists anymore; the recall
+  // message is decision-appended, and teardown clears only the dedup cache.
+  check("live turn APPENDS a decision message, no scoped context", out.messages.length === 2 && out.messages.filter((m) => m.source?.kind === "dsh-self-improved").length === 1 && scopedSections.length === 0, JSON.stringify(out.messages.length));
+  check("plugin teardown does not rely on a dispose handler", typeof handlers.dispose === "undefined");
 }
 
 // =====================================================================
@@ -904,9 +905,9 @@ legacyOnly.close();
   const run = async () =>
     opHandler(
       { step: 1 },
-      async () => ({ kind: "enter", messages: [{ role: "user", content: [{ type: "text", text: "how does pnpm install cache work here" }] }] }),
+      async () => ({ kind: "enter", messages: [{ role: "user", content: [{ type: "text", text: "how does pnpm install cache work here" }], source: { kind: "user" } }] }),
     );
-  const blockOf = (out) => out.messages.filter((m) => m.source?.plugin === "dsh-self-improved").map((m) => m.content?.[0]?.text ?? "").join("\n");
+  const blockOf = (out) => out.messages.filter((m) => m.source?.kind === "dsh-self-improved").map((m) => m.content?.[0]?.text ?? "").join("\n");
 
   currentSession = "s-caller";
   const projOut = await run();
@@ -931,25 +932,18 @@ legacyOnly.close();
   check("operationalRecallEnabled=false injects no operational fence", !blockOf(disabledOut).includes("<operational-memory-recall>"), blockOf(disabledOut).slice(0, 100));
 
   // ---------------------------------------------------------------
-  // N2: cached trusted block must serve a FRESH operational lane
-  // (the identical-turn path is exactly where the old code leaked
-  // stale operational content from the injected cache). Uses a scoped
-  // system-prompt agent so cached turns still re-render (message-append
-  // fallbacks never re-append a cached block).
+  // N2 (rc.2 Phase A): cached trusted block must serve a FRESH operational
+  // lane — the identical-turn path is exactly where the legacy code leaked
+  // stale operational content from the injected cache. The decision-message
+  // adapter re-renders the block every step-1; snapshot supersession keeps
+  // derived history from accumulating duplicates.
   // ---------------------------------------------------------------
-  const opScoped = [];
-  const opAgent = {
-    id: "op-scope-agent",
-    ctx: { systemPrompt: { context(section) { opScoped.push(String(section.text ?? "")); return () => {}; } } },
-  };
   const runScoped = async () => {
-    const before = opScoped.length;
-    await opHandler(
-      { step: 1, agent: opAgent },
-      async () => ({ kind: "enter", messages: [{ role: "user", content: [{ type: "text", text: "how does pnpm install cache work here" }] }] }),
+    const out = await opHandler(
+      { step: 1 },
+      async () => ({ kind: "enter", messages: [{ role: "user", content: [{ type: "text", text: "how does pnpm install cache work here" }], source: { kind: "user" } }] }),
     );
-    // A turn that injects NOTHING re-registers nothing: the probe turns empty then.
-    return opScoped.length > before ? opScoped[opScoped.length - 1] : "";
+    return blockOf(out);
   };
 
   opEnabled = true;

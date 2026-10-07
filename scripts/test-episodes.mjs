@@ -66,9 +66,11 @@ const resultEvent = (seq, turn, step, callId, text, opts = {}, time = 2000) => (
   data: {
     turn,
     step,
+    // rc.2 flat ToolResultMessage: toolCallId/isError at message level, plain text content blocks.
     message: {
-      content: [{ type: "tool-result", toolCallId: callId, content: text, ...(opts.blockError ? { isError: true } : {}) }],
-      ...(opts.messageError ? { isError: true } : {}),
+      toolCallId: callId,
+      ...(opts.blockError || opts.messageError ? { isError: true } : {}),
+      content: [{ type: "text", text }],
     },
     ...(opts.error ? { error: opts.error } : {}),
   },

@@ -175,6 +175,9 @@ cutoffStore.close();
         seen.push({ maxTokens: options.maxTokens, purpose: options.purpose, provider: options.provider, model: options.model });
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         yield { type: "text-delta", index: 0, text: "{}" };
+        // rc.2 Phase A: an aux request is complete only on an explicit terminal stop finish.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        yield { type: "finish", reason: { kind: "stop" } };
       },
     },
   };
@@ -186,6 +189,32 @@ cutoffStore.close();
   check("hot-applied maxTokens observed per call", seen[0]?.maxTokens === 256, JSON.stringify(seen[0]));
   check("second LLM call picks up the hot-applied maxTokens", seen[1]?.maxTokens === 4096, JSON.stringify(seen[1]));
   check("configured provider/model forwarded to every LLM call", seen.length === 2 && seen.every((s) => s.provider === "p" && s.model === "m"), JSON.stringify(seen[0]));
+  check("aux request never carries a wire purpose label", seen.every((s) => s.purpose === undefined), JSON.stringify(seen.map((s) => s.purpose)));
+
+  {
+    // rc.2 Phase A gate: a max-tokens (or otherwise non-stop terminal) finish
+    // must FAIL visibly instead of feeding partial output into memory work.
+    const failingCtx = {
+      llm: {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        async *stream(options) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          yield { type: "text-delta", index: 0, text: "{ truncated..." };
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          yield { type: "finish", reason: { kind: "max-tokens" } };
+        },
+      },
+    };
+    const failing = makeLlmCall(failingCtx, { extract: { provider: "p", model: "m" } }, "memory-extract", 128);
+    let refused = false;
+    try {
+      await failing({ system: "s", user: "u", signal: AbortSignal.timeout(1000) });
+    } catch (error) {
+      refused = String(error).includes("max-tokens");
+    }
+    check("incomplete model response (max-tokens) is refused loudly", refused === true);
+    seen.length = 0;
+  }
 }
 
 // ── 11) Deadline-bound vector lane: a slow-but-not-throwing embedding provider
@@ -319,9 +348,9 @@ cutoffStore.close();
     });
     const out = await handlers["agent/pre-step"](
       { step: 1 },
-      async () => ({ kind: "enter", messages: [{ role: "user", content: [{ type: "text", text: "user asks about quiet notifications caps" }] }] }),
+      async () => ({ kind: "enter", messages: [{ role: "user", content: [{ type: "text", text: "user asks about quiet notifications caps" }], source: { kind: "user" } }] }),
     );
-    const block = out.messages.filter((m) => m.source?.plugin === "dsh-self-improved").map((m) => m.content[0].text).join("\n");
+    const block = out.messages.filter((m) => m.source?.kind === "dsh-self-improved").map((m) => m.content[0].text).join("\n");
     check("when over the operational cap the whole operational fence drops", !block.includes("operational-memory-recall"), block.slice(0, 120));
     check("trusted fence survives the operational drop", block.includes("<long-term-memory-recall>") && block.includes("User likes quiet notifications"));
     check("only the trusted hit counts as injected access", JSON.stringify(injectedIds) === JSON.stringify(["t1"]), JSON.stringify(injectedIds));

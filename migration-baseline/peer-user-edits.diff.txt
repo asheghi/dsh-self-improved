@@ -1,0 +1,15 @@
+# Preexisting user-authored package.json peer-dependency edits (preserved verbatim).
+# Recorded 2026 session; these edits existed as uncommitted working-tree changes before any migration work
+# and must be reapplied after any rollback to pre-increment commit 3a3b1e1. These rc.6->rc.2 peer replacements are NOT migration-authored; only dsh-agent-default-model (marked below) is migration-authored.
+@deepseek-ai/dsh-agent: ^0.1.0-rc.6 -> ^0.2.0-rc.2  (authorship: user, preexisting)
+@deepseek-ai/dsh-agent-default-model: None -> ^0.2.0-rc.2  (authorship: MIGRATION increment 1, new peer required by the aux model-route adapter)
+@deepseek-ai/dsh-home-paths: ^0.1.0-rc.6 -> ^0.2.0-rc.2  (authorship: user, preexisting)
+@deepseek-ai/dsh-llm: ^0.1.0-rc.6 -> ^0.2.0-rc.2  (authorship: user, preexisting)
+@deepseek-ai/dsh-schedule: ^0.1.0-rc.6 -> ^0.2.0-rc.2  (authorship: user, preexisting)
+@deepseek-ai/dsh-session: ^0.1.0-rc.6 -> ^0.2.0-rc.2  (authorship: user, preexisting)
+@deepseek-ai/dsh-session-query: ^0.1.0-rc.6 -> ^0.2.0-rc.2  (authorship: user, preexisting)
+@deepseek-ai/dsh-settings: ^0.1.0-rc.6 -> ^0.2.0-rc.2  (authorship: user, preexisting)
+@deepseek-ai/dsh-skill: ^0.1.0-rc.6 -> ^0.2.0-rc.2  (authorship: user, preexisting)
+@deepseek-ai/dsh-storage-domain: ^0.1.0-rc.6 -> ^0.2.0-rc.2  (authorship: user, preexisting)
+@deepseek-ai/dsh-system-prompt: ^0.1.0-rc.6 -> ^0.2.0-rc.2  (authorship: user, preexisting)
+@deepseek-ai/dsh-tools: ^0.1.0-rc.6 -> ^0.2.0-rc.2  (authorship: user, preexisting)

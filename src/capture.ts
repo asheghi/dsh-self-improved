@@ -5,9 +5,11 @@
  * Design alignment: docs/design/dsh-memory-plugin-design.md §4.3
  */
 import type { Context } from "@deepseek-ai/cordis";
+import type { Session } from "@deepseek-ai/dsh-session";
 import type { MemoryStore, ConversationSliceRecord, EpisodeEventInput } from "./storage.js";
 import { redactAndBoundArguments, redactAndBoundResult, boundText, redactFreeText } from "./redact.js";
 import { assembleSessionEpisodes } from "./episodes.js";
+import { readOwnSessionEvents } from "./compat-v02.js";
 
 export interface CaptureController {
   /** Whether currently enabled (master switch && capture module switch) */
@@ -43,16 +45,23 @@ export function installCapture(
   // Episode-event cursor per session (same pattern as lastWritten), seeded from the durable store floor
   const episodeSeq = new Map<string, number>();
 
-  ctx.on("session/flush", async (session) => {
+  ctx.on("session/flush", async (session: Session) => {
     if (!controller.enabled()) return;
     // Delegated-session classification is decided once per session from its
     // immutable header and applied to every slice captured below.
     const delegated = isDelegatedHeader(session.header);
     const captureCtx: SessionCaptureContext = { delegated };
-    const floor = lastWritten.get(session.id) ?? 0;
+    // rc.2 fork boundary: a forked session's inherited prefix belongs to the
+    // parent and is never recaptured; the own-event floor seeds at
+    // `inheritedEventCount - 1` so a legitimate exact seq=0 own event is not
+    // excluded (the legacy floor `?? 0` failed the zero-based log).
+    const sessionFloor = Number.isFinite(Number(session.inheritedEventCount))
+      ? Number(session.inheritedEventCount) - 1
+      : -1;
+    const floor = Math.max(lastWritten.get(session.id) ?? -1, sessionFloor);
     const records: ConversationSliceRecord[] = [];
-    for (const event of session.events) {
-      if (event.seq <= floor) continue;
+    const events = readOwnSessionEvents(session, floor);
+    for (const event of events) {
       const slice = toSlice(session.id, event, captureCtx);
       if (slice) records.push(slice);
     }
@@ -73,8 +82,7 @@ export function installCapture(
       }
       const rows: EpisodeEventInput[] = [];
       let maxRowSeq = epFloor;
-      for (const event of session.events) {
-        if (event.seq <= epFloor) continue;
+      for (const event of readOwnSessionEvents(session, epFloor)) {
         const row = toEpisodeEventRow(event, episodeCtl.maxChars());
         if (row) {
           rows.push(row);
@@ -274,22 +282,15 @@ export function toEpisodeEventRow(event: SessionEventLike, maxChars: number): Ep
       };
     }
     case "tool/result": {
+      // rc.2 flat ToolResultMessage: `toolCallId` lives at message level and
+      // result content is ordinary content blocks (the legacy nested
+      // `tool-result` block shape is gone and would discard every result).
       const message = (data.message ?? {}) as Record<string, unknown>;
       const content = Array.isArray(message.content) ? message.content : [];
-      let toolCallId: string | null = null;
+      let toolCallId: string | null = typeof message.toolCallId === "string" ? message.toolCallId : null;
       let isError = message.isError === true;
-      const innerContents: unknown[] = [];
-      for (const block of content) {
-        if (!block || typeof block !== "object") continue;
-        const b = block as Record<string, unknown>;
-        if (b.type !== "tool-result") continue;
-        if (typeof b.toolCallId === "string") toolCallId = b.toolCallId;
-        if (b.isError === true) isError = true;
-        innerContents.push(b.content ?? "");
-      }
       if (!toolCallId) return null;
-      const text =
-        innerContents.map((c) => textOfContent(c)).filter(Boolean).join("\n") || textOfContent(content);
+      const text = textOfContent(content);
       const bounded = redactAndBoundResult(text, maxChars);
       const error = (data.error ?? null) as Record<string, unknown> | null;
       // error.name/error.code are attacker-influenced strings from tool outputs:

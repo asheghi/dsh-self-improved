@@ -216,7 +216,7 @@ capMem.close();
     type: "tool/result",
     seq,
     time,
-    data: { turn, step, message: { content: [{ type: "tool-result", toolCallId: callId, content: text }] } },
+    data: { turn, step, message: { toolCallId: callId, content: [{ type: "text", text }] } },
   });
   const turnEndEv = (seq, turn, time = 3000) => ({ type: "turn/end", seq, time, data: { turn, reason: { kind: "completed" } } });
 
@@ -358,7 +358,7 @@ capMem.close();
           type: "tool/result",
           seq: 2,
           time: 2000,
-          data: { turn: 1, step: 0, message: { content: [{ type: "tool-result", toolCallId: `c${sessionSeq}`, content: "failed to resolve", isError: true }] } },
+          data: { turn: 1, step: 0, message: { toolCallId: `c${sessionSeq}`, isError: true, content: [{ type: "text", text: "failed to resolve" }] } },
         },
         turnEndEv(3, 1),
       ],

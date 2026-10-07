@@ -59,8 +59,10 @@ const resultEvent = (seq, turn, step, callId, text, opts = {}, time = 2000) => (
     turn,
     step,
     message: {
-      content: [{ type: "tool-result", toolCallId: callId, content: text, ...(opts.blockError ? { isError: true } : {}) }],
-      ...(opts.messageError ? { isError: true } : {}),
+      // rc.2 flat ToolResultMessage result fixture
+      toolCallId: callId,
+      ...(opts.blockError || opts.messageError ? { isError: true } : {}),
+      content: [{ type: "text", text }],
     },
     ...(opts.error ? { error: opts.error } : {}),
   },

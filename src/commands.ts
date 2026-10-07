@@ -3,7 +3,7 @@
  * Handlers are pure functions for easy unit testing; installMemoryCommands registers only when the host provides a commands service.
  */
 import type { Context } from "@deepseek-ai/cordis";
-import { settingsNamespace } from "@deepseek-ai/dsh-settings";
+import "@deepseek-ai/dsh-settings";
 import z from "@deepseek-ai/schemastery";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -605,9 +605,31 @@ export interface BrowserChannel {
   episodeStatus(json: string): void;
 }
 
+/**
+ * Transport abstraction for the browser data channel. rc.2 removed
+ * plugin-owned settings namespaces, so the legacy namespace channel is a
+ * RUNTIME capability that exists only on the legacy (pre-rc.2) settings API:
+ * on rc.2 the channel is inert until the typed business Remote surface
+ * (MIGRATION-V0.2.md Phase A scope) replaces it — it never pretends to work.
+ */
+export interface BrowserTransport {
+  get(): Record<string, string>;
+  replace(full: Record<string, string>): void | Promise<void>;
+  watch(onChange: (next: Record<string, string>) => void): () => void;
+}
+
+/** Legacy (rc.6/rc.8) settings-namespace scope shape used by old hosts and tests. */
+interface LegacySettingsScope {
+  get(): Record<string, string> | null | undefined;
+  replace(next: Record<string, string>): Promise<unknown>;
+  watch(fn: (next: Record<string, string>) => void, options?: unknown): () => void | unknown;
+  [key: string]: unknown;
+}
+
+const BROWSER_CHANNEL_FIELDS = ["snapshot", "action", "detail", "episodeDetail", "episodeStatus"] as const;
+
 export function installBrowserChannel(opts: BrowserChannelOptions): BrowserChannel {
   const log = opts.log ?? (() => {});
-  const browserNs = settingsNamespace("dsh-self-improved-browser");
   const BrowserSchema = z.object({
     snapshot: z.string().default("{}"),
     action: z.string().default(""),
@@ -616,8 +638,19 @@ export function installBrowserChannel(opts: BrowserChannelOptions): BrowserChann
     episodeDetail: z.string().default(""),
     episodeStatus: z.string().default(""),
   });
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const browserScope = opts.ctx.settings.register(browserNs, BrowserSchema);
+  void 0 as unknown as typeof BrowserSchema; // keep schema shape documented; legacy register validates
+  const settingsApi = opts.ctx?.settings as unknown;
+  const legacyRegister = settingsApi && typeof settingsApi === "object"
+    ? (settingsApi as { register?: unknown }).register
+    : undefined;
+  if (typeof legacyRegister !== "function") {
+    log("browser channel unavailable: rc.2 settings has no plugin-owned namespace; typed business Remote surface pending (MIGRATION-V0.2.md Phase A)");
+    return { refresh: () => {}, handle: () => {}, stop: () => {}, episodeStatus: () => {} };
+  }
+  const browserScope = (legacyRegister as (ns: string, schema: unknown) => LegacySettingsScope)(
+    "dsh-self-improved-browser",
+    BrowserSchema,
+  );
   const tracker = opts.tracker ?? new SnapshotTokenTracker(randomBytes(32).toString("hex"));
   const ledger = opts.ledger ?? new ActionChallengeLedger(randomBytes(32).toString("hex"));
   let lastSnapshotJson = "";
@@ -867,10 +900,11 @@ export function installBrowserChannel(opts: BrowserChannelOptions): BrowserChann
     writeScope({ snapshot: lastSnapshotJson, action: "" });
   };
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  browserScope.watch((next: any) => {
+  browserScope.watch((next: Record<string, string>) => {
     if (next.action) handle(next.action);
-  });
+    },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  );
   refresh();
   let timer: ReturnType<typeof setInterval> | null = null;
   const refreshIntervalMs = opts.refreshIntervalMs ?? 60_000;

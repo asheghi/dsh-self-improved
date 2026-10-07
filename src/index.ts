@@ -6,17 +6,22 @@
  */
 import z from "@deepseek-ai/schemastery";
 import type { Context } from "@deepseek-ai/cordis";
-import { settingsNamespace } from "@deepseek-ai/dsh-settings";
 
 // Service type augmentation: pull the `declare module '@deepseek-ai/cordis'` type augmentations from the dsh-* packages into this compilation.
 import "@deepseek-ai/dsh-session";
 import "@deepseek-ai/dsh-agent";
+import type {} from "@deepseek-ai/dsh-agent-default-model";
 import "@deepseek-ai/dsh-system-prompt";
 import "@deepseek-ai/dsh-llm";
 import "@deepseek-ai/dsh-schedule";
 import "@deepseek-ai/dsh-session-query";
+import "@deepseek-ai/dsh-settings";
 
 import { MemoryStore, defaultMemoryDir } from "./storage.js";
+import { BlockAssembler, createUserMessage } from "@deepseek-ai/dsh-llm";
+import type { GenerateOptions } from "@deepseek-ai/dsh-llm";
+import type { Context as CordisContext } from "@deepseek-ai/cordis";
+import { evaluateTerminalFinish } from "./compat-v02.js";
 import { installCapture, projectKeyFromCwd } from "./capture.js";
 import { closeStalePendingEpisodes, repairEpisodeConsistency, assembleSessionEpisodes } from "./episodes.js";
 import { EpisodeReviewAbortGate, runEpisodeReview } from "./episode-review.js";
@@ -29,8 +34,6 @@ import { Consolidator } from "./consolidate.js";
 import { applyDecay, synthesizeSkills, synthesizeSkillsFromEpisodes, deleteSkill } from "./evolve.js";
 import { installMemoryCommands, installBrowserChannel } from "./commands.js";
 import type { BrowserChannel } from "./commands.js";
-import { BlockAssembler, createUserMessage } from "@deepseek-ai/dsh-llm";
-
 export const name = "self-improved";
 
 /** Required host services (Cordis inject list; M1 adds sessionQuery for conversation full-text search) */
@@ -164,56 +167,88 @@ export interface Config {
 // maxTokens may be a getter so settings hot-apply takes effect per call instead
 // of being captured at creation time.
 export function makeLlmCall(
-  ctx: any,
+  ctx: Context,
   config: Config,
+  /** Plugin-internal audit label only; NEVER sent to the model. rc.2's wire `purpose` is reserved for `compaction | session-title`. */
   purpose: string,
   maxTokens: number | (() => number),
 ): (input: { system: string; user: string; sessionId?: string; signal: AbortSignal }) => Promise<string> {
   return async (input: { system: string; user: string; sessionId?: string; signal: AbortSignal }): Promise<string> => {
       const maxOutputTokens = typeof maxTokens === "function" ? maxTokens() : maxTokens;
       const assembler = new BlockAssembler();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const options: any = {
+      // Auxiliary one-shot request: identity-free user input, system prompt in
+      // the system slot. `provider`/`model` must resolve clearly — extraction,
+      // consolidation, review, and skill work never silently ride the wrong
+      // route, and an unconfigured route fails loudly instead of guessing.
+      const { provider, model } = resolveAuxModelRoute(ctx, config);
+      const options: GenerateOptions = {
         messages: [
           createUserMessage({
             content: [{ type: "text", text: input.user }],
-            source: { kind: "plugin", plugin: "dsh-self-improved" },
+            source: { kind: "dsh-self-improved" },
           }),
         ],
         system: input.system,
         maxTokens: maxOutputTokens,
-        purpose,
+        provider,
+        model,
         signal: input.signal,
       };
-      if (input.sessionId) options.sessionId = input.sessionId;
-      // Extraction/consolidation/skill model: explicit config first, then fall back to the DSH default model (agentDefaultModel)
-      let provider = config.extract.provider;
-      let model = config.extract.model;
-      if (!provider || !model) {
-        try {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const dm = (ctx as any).get?.("agentDefaultModel");
-          const sel = dm?.currentSelection?.();
-          if (sel && typeof sel.provider === "string" && typeof sel.model === "string") {
-            provider = provider || sel.provider;
-            model = model || sel.model;
-          }
-        } catch {
-          /* stay unconfigured when there is no default model */
-        }
-      }
-      if (provider) options.provider = provider;
-      if (model) options.model = model;
+      if (input.sessionId) options.sessionId = input.sessionId as GenerateOptions["sessionId"];
+      // Terminal-finish validation: only an explicit `stop|tool-calls` finish
+      // yields completed text; `max-tokens|aborted|error` or a truncated stream
+      // (no finish chunk) must fail rather than feed partial reviews back.
+      let finishKind: string | null = null;
       for await (const chunk of ctx.llm.stream(options)) {
         input.signal.throwIfAborted();
         assembler.push(chunk);
+        if (chunk.type === "finish") finishKind = chunk.reason.kind;
       }
-      return assembler
+      input.signal.throwIfAborted();
+      const verdict = evaluateTerminalFinish(finishKind ?? "absent", finishKind !== null);
+      if (verdict.blocked) {
+        throw new Error(`[dsh-self-improved] ${purpose}: incomplete model response (finish reason: ${verdict.kind}); not accepted as a completed review`);
+      }
+      const text = assembler
         .blocks()
         .filter((b) => b.type === "text")
         .map((b) => b.text)
         .join("");
+      if (!text.trim()) {
+        throw new Error(`[dsh-self-improved] ${purpose}: model returned no text`);
+      }
+      return text;
     };
+}
+
+/**
+ * Resolve the concrete aux-call model route. Explicit plugin config wins
+ * (correct for a dedicated memory model); otherwise the host default model
+ * selection is used when the host provides it; otherwise the call fails
+ * visibly. MIGRATION-V0.2.md excludes any provider fallback guessing.
+ */
+function resolveAuxModelRoute(ctx: Context, config: Config): { provider: string; model: string } {
+  let provider = config.extract.provider?.trim() ?? "";
+  let model = config.extract.model?.trim() ?? "";
+  if (provider && model) return { provider, model };
+  try {
+    const selection = (ctx as CordisContext).agentDefaultModel?.currentSelection?.();
+    if (selection && typeof selection.provider === "string" && typeof selection.model === "string") {
+      provider = provider || selection.provider;
+      model = model || selection.model;
+    }
+  } catch {
+    /* stay unconfigured when there is no default model service */
+  }
+  if (!provider) {
+    throw new Error(
+      "dsh-self-improved: no model provider configured — set extract.provider/extract.model (e.g. provider 'go-opencode', model 'glm-5.3-flash')",
+    );
+  }
+  if (!model) {
+    throw new Error(`dsh-self-improved: model provider '${provider}' selected but extract.model is empty`);
+  }
+  return { provider, model };
 }
 export const Config = z.object({
   enabled: z.boolean().default(true),
@@ -311,10 +346,27 @@ export function apply(ctx: Context, config: Config): void {
     if (config.debug) console.log("[dsh-self-improved]", ...args);
   };
 
-  // ① Settings namespace: the web UI settings page auto-renders the form + hot-apply via settings/updated (the core of the anytime on/off switch)
-  const ns = settingsNamespace("dsh-self-improved");
-  const scope = ctx.settings.register(ns, Config, { base: config });
-  log("settings namespace registered");
+  // ① Settings page policy (rc.2): Config comes from the Loader entry, so the
+  //    legacy `settingsNamespace`/`register`/`watch` pipeline is gone. We only
+  //    opt into the settings UI's auto-generated config page. Changing a
+  //    (nonvolatile) entry restarts this fiber — unload runs every dispose and
+  //    apply() re-runs with the new validated config. Hot continuous state is
+  //    intentionally NOT rebuilt here: Phase A keeps restart semantics, which
+  //    are conservative (well-tested disable-then-reapply behavior) and avoid
+  //    the legacy mutation-mirror bugs.
+  // Effect-owned: the page-policy disposer runs on fiber unload (config change restart or disable).
+  ctx.effect(
+    () => {
+      try {
+        return ctx.settings.configure({ auto: true });
+      } catch (error) {
+        console.warn("[dsh-self-improved] settings page policy registration unavailable:", String(error));
+        return () => {};
+      }
+    },
+    "settings page policy",
+  );
+  log("settings page policy registered (restart-on-change semantics)");
 
   // Runtime mutable state (M5: master/module switches can be flipped at any time without a restart)
   const state = { enabled: config.enabled, modules: { ...config.modules } };
@@ -376,7 +428,7 @@ export function apply(ctx: Context, config: Config): void {
     }
     return extractLlm({ system, user, sessionId, signal });
   }, embeddingProvider);
-  // Episode-learning runtime state (hot-applied by scope.watch below)
+  // Episode-learning runtime state (re-read at every apply; config is nonvolatile/restart)
   const episodeState = { enabled: config.episodeLearning.enabled, captureArguments: config.episodeLearning.captureArguments, maxChars: config.episodeLearning.resultExcerptChars, reviewEnabled: config.episodeLearning.reviewEnabled, confidenceFloor: config.episodeLearning.confidenceFloor, expiryDays: config.episodeLearning.expiryDays, operationalRecallEnabled: config.episodeLearning.operationalRecallEnabled, maxRecallResults: config.episodeLearning.maxRecallResults, maxRecallChars: config.episodeLearning.maxRecallChars, skillMinEpisodes: config.episodeLearning.skillMinEpisodes };
   const episodeReviewGate = new EpisodeReviewAbortGate();
   episodeReviewGate.setEnabled(state.enabled && episodeState.enabled && episodeState.reviewEnabled);
@@ -620,15 +672,21 @@ export function apply(ctx: Context, config: Config): void {
   };
   syncSchedulers();
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (ctx as any).on("dispose", () => {
-    episodeReviewGate.abort();
-    if (timer) clearInterval(timer);
-    if (startupTimer) clearTimeout(startupTimer);
-    if (reviewTimer) clearTimeout(reviewTimer);
-    if (commandsDispose) commandsDispose();
-    store.close();
-  });
+  // Effect-owned teardown (Phase A): every owned job drains or is cancelled
+  // before the store closes; timers lock out first (below on the old handler).
+  ctx.effect(
+    () => () => {
+      episodeReviewGate.abort();
+      if (timer) clearInterval(timer);
+      if (startupTimer) clearTimeout(startupTimer);
+      if (reviewTimer) clearTimeout(reviewTimer);
+      if (toolsDispose) toolsDispose();
+      if (commandsDispose) commandsDispose();
+      if (browserChannel) browserChannel.stop();
+      store.close();
+    },
+    "shutdown drain + store close",
+  );
   log("schedulers armed (15min maintenance, nightly review, 60s startup backfill); disabling master switch stops all timers");
 
   // ④ Memory tools (M1/M4): runtime-toggleable (tools module)
@@ -651,14 +709,14 @@ export function apply(ctx: Context, config: Config): void {
 
   // ⑤ Recall injection (M3): automatically inject relevant memories at agent/pre-step.
   // Scope comes directly from the event's owning Agent, never mutable cross-session state.
-  const projectKeyOfPayload = (payload: unknown): string => {
+  const projectKeyOfAgent = (agent: unknown): string => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const cwd = (payload as any)?.agent?.session?.header?.cwd;
+    const cwd = (agent as any)?.session?.header?.cwd;
     return projectKeyFromCwd(typeof cwd === "string" ? cwd : "");
   };
-  const sessionIdForPayload = (payload: unknown): string => {
+  const sessionIdForAgent = (agent: unknown): string => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const id = (payload as any)?.agent?.id;
+    const id = (agent as any)?.id;
     return typeof id === "string" ? id : "";
   };
   const rec: { recallSettings: RecallSettings } = { recallSettings: {
@@ -675,8 +733,8 @@ export function apply(ctx: Context, config: Config): void {
     maxHits: config.recall.maxResults,
     maxChars: config.recall.maxInjectChars,
     debug: config.debug,
-    projectKeyOf: projectKeyOfPayload,
-    sessionIdOf: sessionIdForPayload,
+    projectKeyOf: projectKeyOfAgent,
+    sessionIdOf: sessionIdForAgent,
     maxInjectPerTurn: config.recall.maxInjectPerTurn,
     onInjected: (ids: string[]) => store.recordAccess(ids),
     // Phase 4: operational lane (live getters so settings hot-apply reaches each pre-step)
@@ -751,92 +809,11 @@ export function apply(ctx: Context, config: Config): void {
   };
   syncCommands();
 
-  // ⑦ Hot apply: settings/updated → update runtime state (toggle anytime, no restart).
-  //    Every settings field the UI exposes is applied to its live consumer object:
-  //    extract/recall/consolidate read their settings objects per operation, and the
-  //    decay/skill/housekeeping rounds rebuild options from `config` each run.
-  scope.watch((next) => {
-    state.enabled = next.enabled;
-    state.modules = { ...next.modules };
-    episodeState.enabled = next.episodeLearning.enabled;
-    episodeState.captureArguments = next.episodeLearning.captureArguments;
-    episodeState.reviewEnabled = next.episodeLearning.reviewEnabled;
-    episodeReviewGate.setEnabled(state.enabled && episodeState.enabled && episodeState.reviewEnabled);
-    episodeState.confidenceFloor = next.episodeLearning.confidenceFloor;
-    episodeState.expiryDays = next.episodeLearning.expiryDays;
-    episodeState.maxChars = next.episodeLearning.resultExcerptChars;
-    episodeState.operationalRecallEnabled = next.episodeLearning.operationalRecallEnabled;
-    episodeState.maxRecallResults = next.episodeLearning.maxRecallResults;
-    episodeState.maxRecallChars = next.episodeLearning.maxRecallChars;
-    episodeState.skillMinEpisodes = next.episodeLearning.skillMinEpisodes;
-    config.episodeLearning.retentionDays = next.episodeLearning.retentionDays;
-    extractSettings.enabled = readModule("extract");
-    extractSettings.intervalMinutes = next.extract.intervalMinutes;
-    extractSettings.batchMaxChars = next.extract.batchMaxChars;
-    extractSettings.maxOutputTokens = next.extract.maxOutputTokens;
-    extractSettings.timeoutMs = next.extract.timeoutMs;
-    extractSettings.dedup = next.extract.dedup;
-    extractSettings.fallbackOnBadJson = next.extract.fallbackOnBadJson;
-    extractSettings.minImportance = next.extract.minImportance;
-    extractSettings.flushDrain = next.extract.flushDrain;
-    extractSettings.provenanceFilter = next.extract.provenanceFilter === "off" ? ("off" as const) : ("strict" as const);
-    extractSettings.requireEvidence = next.extract.requireEvidence;
-    rec.recallSettings.strategy = next.recall.strategy === "hybrid" ? "hybrid" : "keyword";
-    rec.recallSettings.maxResults = next.recall.maxResults;
-    rec.recallSettings.scoreThreshold = next.recall.scoreThreshold;
-    rec.recallSettings.timeoutMs = next.recall.timeoutMs;
-    rec.recallSettings.relevanceMargin = next.recall.relevanceMargin;
-    rec.recallSettings.minImportance = next.recall.minImportance;
-    injectionCtl.maxHits = next.recall.maxResults;
-    injectionCtl.maxChars = next.recall.maxInjectChars;
-    injectionCtl.maxInjectPerTurn = next.recall.maxInjectPerTurn;
-    injectionCtl.debug = next.debug;
-    consolidateSettings.scenesEnabled = next.consolidate.scenesEnabled;
-    consolidateSettings.sceneMaxMemories = next.consolidate.sceneMaxMemories;
-    consolidateSettings.personaMaxMemories = next.consolidate.personaMaxMemories;
-    consolidateSettings.sceneBatchSize = next.consolidate.sceneBatchSize;
-    // Per-round option builders read the config object: keep it in sync so the
-    // next decay/skill/housekeeping round and the shared LLM route pick up changes.
-    config.debug = next.debug;
-    config.extract.intervalMinutes = next.extract.intervalMinutes;
-    config.extract.provider = next.extract.provider;
-    config.extract.model = next.extract.model;
-    config.evolve.decay.enabled = next.evolve.decay.enabled;
-    config.evolve.decay.minAgeDays = next.evolve.decay.minAgeDays;
-    config.evolve.decay.threshold = next.evolve.decay.threshold;
-    config.evolve.decay.retentionDays = next.evolve.decay.retentionDays;
-    config.evolve.decay.maxActiveMemories = next.evolve.decay.maxActiveMemories;
-    config.evolve.skillSynthesis.enabled = next.evolve.skillSynthesis.enabled;
-    config.evolve.skillSynthesis.minImportance = next.evolve.skillSynthesis.minImportance;
-    config.evolve.skillSynthesis.skillsRoot = next.evolve.skillSynthesis.skillsRoot;
-    config.evolve.skillSynthesis.prefix = next.evolve.skillSynthesis.prefix;
-    config.evolve.skillSynthesis.maxSkills = next.evolve.skillSynthesis.maxSkills;
-    config.housekeeping.personaVersions = next.housekeeping.personaVersions;
-    config.housekeeping.maxScenes = next.housekeeping.maxScenes;
-    config.housekeeping.sceneActiveRatio = next.housekeeping.sceneActiveRatio;
-    config.housekeeping.conversationRetentionDays = next.housekeeping.conversationRetentionDays;
-    config.recall.embedding.baseUrl = next.recall.embedding.baseUrl;
-    config.recall.embedding.apiKey = next.recall.embedding.apiKey;
-    config.recall.embedding.model = next.recall.embedding.model;
-    config.recall.embedding.dimensions = next.recall.embedding.dimensions;
-    config.recall.embedding.timeoutMs = next.recall.embedding.timeoutMs;
-    // The embedding provider reads the shared config object per call, so the
-    // fields above hot-apply without rebuilding it.
-    // Tool default result limit: cheap to re-register when it changes.
-    if (next.searchLimit !== config.searchLimit) {
-      config.searchLimit = next.searchLimit;
-      if (toolsDispose) { toolsDispose(); toolsDispose = null; }
-    }
-    syncTools();
-    syncCommands(); // master switch off → unregister the /memory command; on → register again
-    // Nightly review time/switch hot-changed: re-arm the timers
-    if (next.review.enabled !== config.review.enabled || next.review.time !== config.review.time) {
-      config.review = { enabled: next.review.enabled, time: next.review.time };
-    }
-    // Any runtime config change → re-arm the feature timers uniformly (master switch off = all timers stop immediately)
-    syncSchedulers();
-    log("runtime config applied:", "enabled=", next.enabled, "modules=", JSON.stringify(next.modules));
-  });
+  // ⑦ Hot apply (legacy) replaced by rc.2 restart semantics: every Config field
+  // is nonvolatile in Phase A, so a settings change unloads this fiber cleanly
+  // (running all effect-owned disposers, incl. the shutdown drain) and reloads
+  // it with the new validated config. Runtime consumers re-read config at
+  // every apply; no mutation-mirroring scope.watch path remains.
 
   // ⑧ Memory browser data channel (see installBrowserChannel in commands.ts).
   // Mutating ops run a 3-step one-shot challenge handshake: the executing
@@ -854,8 +831,6 @@ export function apply(ctx: Context, config: Config): void {
       episodeState.enabled && episodeState.reviewEnabled ? episodeReviewRun(true) : null,
     log,
   });
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (ctx as any).on("dispose", () => browserChannel.stop());
   log("memory browser channel ready (dsh-self-improved-browser)");
 
   // ⑥ Background pipeline (from M2 on: extract/consolidate/evolve, driven by dsh-schedule)
