@@ -195,9 +195,11 @@ export function makeLlmCall(
         signal: input.signal,
       };
       if (input.sessionId) options.sessionId = input.sessionId as GenerateOptions["sessionId"];
-      // Terminal-finish validation: only an explicit `stop|tool-calls` finish
-      // yields completed text; `max-tokens|aborted|error` or a truncated stream
-      // (no finish chunk) must fail rather than feed partial reviews back.
+      // Terminal-finish validation: ONLY an explicit `stop` finish yields
+      // completed text for these tool-less auxiliary reviews; `tool-calls`,
+      // `max-tokens`, `aborted`, `error`, unknown reasons, and a truncated
+      // stream (no finish chunk) must all fail rather than feed partial
+      // reviews back (evaluateTerminalFinish implements the matrix).
       let finishKind: string | null = null;
       for await (const chunk of ctx.llm.stream(options)) {
         input.signal.throwIfAborted();

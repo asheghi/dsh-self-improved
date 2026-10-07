@@ -419,10 +419,13 @@ check("extraction prompt excludes injected + tool slices",
   // { kind: "plugin", plugin, roleHint } markers.
   check("injection block carries declared source kind + snapshot supersede form", injectedOf(out1)[0]?.source?.form === "snapshot");
   const out2 = await handler({ step: 1 }, async () => decisionOf());
-  // rc.2 Phase A: the identical repeat re-admits the CACHED trusted block as a
-  // superseding producer snapshot (no fresh trusted search; updating derived
-  // history supersedes the earlier snapshot instead of accumulating).
-  check("session-scoped cache serves identical repeat without a fresh trusted search", out2.messages.length === 2 && injectedOf(out2).length === 1, String(out2.messages.length));
+  // Unchanged-snapshot gate (independent rc.2 review): every admitted decision
+  // message is durably appended as `user/message` and no rc.2 consumer prunes
+  // earlier producer snapshots from deriveMessages(), so an identical repeat
+  // turn must NOT append a second identical snapshot — the cached trusted
+  // block is served without a fresh search, but the earlier snapshot in
+  // derived history keeps carrying that unchanged state.
+  check("session-scoped cache serves identical repeat without a fresh trusted search", out2.messages.length === 1 && injectedOf(out2).length === 0, String(out2.messages.length));
   sessionIdBeingTested = "s-b";
   const out3 = await handler({ step: 1 }, async () => decisionOf());
   check("different session gets its own injection", injectedOf(out3).length === 1);
@@ -932,11 +935,11 @@ legacyOnly.close();
   check("operationalRecallEnabled=false injects no operational fence", !blockOf(disabledOut).includes("<operational-memory-recall>"), blockOf(disabledOut).slice(0, 100));
 
   // ---------------------------------------------------------------
-  // N2 (rc.2 Phase A): cached trusted block must serve a FRESH operational
-  // lane — the identical-turn path is exactly where the legacy code leaked
-  // stale operational content from the injected cache. The decision-message
-  // adapter re-renders the block every step-1; snapshot supersession keeps
-  // derived history from accumulating duplicates.
+  // N2 (rc.2 Phase A): the operational lane is recomputed fresh on every
+  // step-1; the unchanged-snapshot gate admits a NEW decision message only
+  // when the rendered block actually changed. Re-arming byte-identical
+  // content relies on the earlier snapshot still in derived history; a
+  // changed fence (forget/expiry/pause) re-admits immediately below.
   // ---------------------------------------------------------------
   const runScoped = async () => {
     const out = await opHandler(
@@ -950,7 +953,7 @@ legacyOnly.close();
   currentProject = "workboard";
   currentSession = "s-caller"; // same cache key as the first turn above
   const refreshOn = await runScoped();
-  check("identical turn re-arms the operational fence when re-enabled", refreshOn.includes("<operational-memory-recall>") && refreshOn.includes(opRow.content), refreshOn.slice(0, 140));
+  check("fence re-arm with byte-identical content does not duplicate the snapshot (emit-on-change)", refreshOn === "" || !refreshOn.includes("<operational-memory-recall>"), refreshOn.slice(0, 140) || "(no new snapshot; unchanged gate)");
   opStore.forgetMemory(opRow.id);
   currentSession = "s-caller"; // deliberately identical again
   const afterForget = await runScoped();

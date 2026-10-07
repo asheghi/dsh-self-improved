@@ -5,7 +5,11 @@
  * timing — the returned decision's messages are exactly what the step admits
  * and the harness logs; dynamic-context/system-prompt registries avoid this
  * adapter because prompting assembly/pre-step ordering made them mistimed for
- * the first request (MIGRATION-V0.2.md §recall timing).
+ * the first request (MIGRATION-V0.2.md §recall timing). Because every admitted
+ * decision message becomes a durable `user/message` event and rc.2 request
+ * assembly does not prune earlier producer snapshots, the adapter applies
+ * emit-on-change discipline: a repeat turn re-admits only when the rendered
+ * recall changed, otherwise the earlier snapshot in history keeps serving.
  *
  * Remaining behavior (M7 rules preserved):
  * - Inject only at step 1 (before the conversation starts):
@@ -16,7 +20,12 @@
  *   identical queries in different sessions each get their own recall;
  * - The block is delimited, marked fallible and subordinate to current user
  *   instructions, and attributed with the plugin's declared source kind plus
- *   the harness `recall` context form;
+ *   the harness `snapshot` context form; an unchanged repeat turn is not
+ *   re-admitted (unchanged-snapshot gate), a changed one re-admits by
+ *   re-emitting the newest state;
+ * - The search query comes ONLY from the last verified direct-human user
+ *   message; harness runtime-context snapshots and injected producer context
+ *   that follow it are skipped, not refused;
  * - Memories from the current session are never injected back (self-echo guard);
  * - Successful injection bumps access counts;
  * - Search timeout/failure → skip injection, never block the turn;
@@ -61,21 +70,44 @@ export interface InjectController {
 const CACHE_MAX = 128;
 
 /**
- * Current request text for retrieval. ONLY the last user-role message is
- * eligible and only when its provenance is verified human (`source.kind ===
- * "user"`, the only direct-human producer kind): an earlier genuine message
- * never lends authority to a later coordinator/relay/tool turn, and a
- * user-role message with missing provenance is untrusted — rc.2 UserMessage
- * carries a REQUIRED source, so absent provenance is malformed, not implicit
- * human input.
+ * Current request text for retrieval. ONLY the last DIRECT-HUMAN user-role
+ * message is eligible and only when its provenance verifies as human
+ * (`source.kind === "user"`): an earlier genuine message never lends
+ * authority to a later coordinator/relay/tool turn, and a user-role message
+ * with missing provenance is untrusted — rc.2 UserMessage carries a REQUIRED
+ * source, so absent provenance is malformed, not implicit human input.
+ *
+ * Two producer-context exceptions are SKIPPED (scanning continues backward),
+ * because they are not requests at all and may legitimately sit AFTER the
+ * genuine turn inside the same pre-step decision:
+ * - `kind: "runtime-context"` — the harness agent-loop appends its own
+ *   runtime-context snapshot message (`[...claimed, context]`, see
+ *   dsh-agent-loop preStep) as the LAST decision message; refusing on it
+ *   would silently skip recall on every turn whose dynamic context changed.
+ * - injected-context shapes ({@link isInjectedContextUserSource}): our own
+ *   recalled snapshots and legacy plugin/injection kinds.
+ * Any other (unknown) producer kind on the last user-role message still
+ * refuses the step: observed authority must never silently widen.
+ *
+ * Known rc.2 limitation (documented here rather than papered over): the
+ * SubAgent service admits model-authored delegation prompts with
+ * `source: { kind: "user" }` (dsh-subagent submitMaterialized), so kind alone
+ * cannot distinguish the delegating coordinator's model-authored task brief
+ * from direct human input. For the retrieval-query path this is intentional
+ * (the child agent works from that task and benefits from project recall);
+ * direct-human AUTHORITY for extraction is anchored separately
+ * (capture.ts isDelegatedHeader + Phase B request-header provenance).
  */
 export function lastUserText(messages: unknown[]): string {
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i] as { role?: unknown; source?: unknown; content?: unknown } | null;
     if (!msg || msg.role !== "user") continue;
     const src = msg.source as { kind?: unknown } | undefined;
-    if (src === undefined || src === null || src.kind !== "user") return "";
-    return textOfContent(msg.content);
+    if (src === undefined || src === null) return "";
+    const kind = src.kind;
+    if (kind === "user") return textOfContent(msg.content);
+    if (kind === "runtime-context" || isInjectedContextUserSource(src)) continue;
+    return "";
   }
   return "";
 }
@@ -99,6 +131,23 @@ export function installRecallInjection(ctx: Context, recall: RecallService, cont
   // trusted rendered block ONLY (the operational lane is recomputed fresh so
   // runtime revocations take effect on the next identical query).
   const injectedCache = new Map<string, string>();
+  // Last ADMISSION record per query cache key: the exact rendered block this
+  // plugin last had admitted into the step decision for that
+  // (project, session, query). rc.2 admits every pre-step decision message as
+  // a durable `user/message` event (dsh-agent-loop step()), and no rc.2
+  // consumer prunes earlier producer snapshots from derived history, so
+  // re-admitting an UNCHANGED snapshot on a repeated identical turn
+  // accumulated duplicate recall in the model-visible request forever — the
+  // documented "later snapshot supersedes earlier one" presentation contract
+  // is not enforced by rc.2 request assembly. Compare with the harness's own
+  // RuntimeContextProjection, which emits its snapshot ONLY when the rendered
+  // text changed; this plugin now applies the same discipline: skip the
+  // admission when the rendered block is unchanged (the earlier snapshot
+  // already carries that state), re-admit when it changed (correction,
+  // forget, expiry, or an operational-fence update), and never admit on the
+  // first absent state change either. Restart clears the gate, so the first
+  // post-restart repeat re-admits at most one (bounded) duplicate.
+  const admittedBlock = new Map<string, string>();
   const onInjected = controller.onInjected;
 
   const teardown = typeof ctx.effect === "function"
@@ -141,9 +190,11 @@ export function installRecallInjection(ctx: Context, recall: RecallService, cont
       const cacheKey = `${projectKey}:${sessionId || "no-session"}:${hashText(query)}`;
       // Trusted lane result is cached per (project, session, query); the
       // operational lane ALWAYS recomputes so revocation/expiry/pause are
-      // visible on the very next identical query. A repeat turn re-admits its
-      // (possibly updated) block as a producer snapshot message, whose later
-      // snapshot supersedes the earlier one in derived history.
+      // visible on the very next identical query. A repeat turn whose rendered
+      // block CHANGED re-admits it as a newer producer snapshot (the newest
+      // copy arrives closest to the live request); an unchanged block is not
+      // re-admitted (see the unchanged-snapshot gate — rc.2 request assembly
+      // nowhere prunes earlier producer snapshots from derived history).
       const trustedCached = injectedCache.has(cacheKey);
       let trustedBlock = trustedCached ? injectedCache.get(cacheKey) ?? "" : "";
       let trustedHits: Array<{ id: string; kind: string; content: string; importance: number; score: number }> = [];
@@ -235,6 +286,16 @@ export function installRecallInjection(ctx: Context, recall: RecallService, cont
       }
       if (!block) return decision;
 
+      // UNCHANGED-SNAPSHOT GATE (rc.2 accumulation fix): a repeated identical
+      // turn whose rendered block equals the last admitted one for this query
+      // must not append a second identical durable snapshot — the earlier one
+      // is already in history and nothing prunes it. A changed snapshot
+      // (verified content above) still re-admits below.
+      if (admittedBlock.get(cacheKey) === block) {
+        if (controller.debug) console.log("[dsh-self-improved] injection unchanged since last admission; snapshot not duplicated");
+        return decision;
+      }
+
       // Cache (LRU-cap: evict the oldest, never wipe fresh entries wholesale) —
       // trusted block only, AFTER any combined-cap shrink, so the next identical
       // turn replays exactly this trusted text.
@@ -261,6 +322,15 @@ export function installRecallInjection(ctx: Context, recall: RecallService, cont
       // message; `startsRequestSeries` (and any future decision fields) are
       // preserved verbatim.
       if (decision.kind === "enter") {
+        // Record the admission BEFORE returning, so a subsequent identical
+        // turn is recognized as unchanged (see the gate above). Same
+        // LRU-cap discipline as the trusted cache.
+        while (admittedBlock.size >= CACHE_MAX) {
+          const oldestAdmitted = admittedBlock.keys().next().value;
+          if (oldestAdmitted === undefined) break;
+          admittedBlock.delete(oldestAdmitted);
+        }
+        admittedBlock.set(cacheKey, block);
         // SPREAD, never reconstruct: extension fields beyond the documented
         // union keep flowing (verified by scripts/test-phase-a.mjs).
         return {

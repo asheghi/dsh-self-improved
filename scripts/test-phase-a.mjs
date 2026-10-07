@@ -193,6 +193,100 @@ function check(ok, name, detail) {
   check(isInjectedContextUserSource({ kind: "user" }) === false, "genuine user input is not an injected context");
 }
 
+// ── Unchanged-snapshot gate: identical repeat turns never duplicate the snapshot ──
+// Evidence base: rc.2 agent-loop durably appends every admitted decision
+// message as `user/message` and no rc.2 consumer prunes earlier producer
+// snapshots from deriveMessages(); without this gate N identical turns
+// accumulated N recall snapshots in every later request (verified against the
+// genuine rc.2 Session/agent-loop admission code with an isolated fixture).
+{
+  const handlers = {};
+  const fakeCtx = { on: (name, fn) => { handlers[name] = fn; } };
+  let searches = 0;
+  let opsEnabled = false;
+  const recallStub = {
+    async search() { searches++; return [{ id: "h1", kind: "fact", content: "stable content", importance: 7, score: 1 }]; },
+    searchOperational: () => (opsEnabled ? [{ id: "op1", kind: "lesson", content: "fresh fence", confidence: 0.9 }] : []),
+  };
+  installRecallInjection(fakeCtx, recallStub, {
+    enabled: () => true, maxHits: 5, maxChars: 4000, sessionIdOf: () => "s1", projectKeyOf: () => "p1",
+    operational: { enabled: () => opsEnabled, maxResults: 2, maxChars: 600, confidenceFloor: 0.8 },
+  });
+  const handler = handlers["agent/pre-step"];
+  const run = (turn) => handler({ step: 1, agent: { id: "s1" }, signal: undefined }, async () => ({
+    kind: "enter",
+    messages: [{ role: "user", content: [{ type: "text", text: "stable topic" }], source: { kind: "user" } }],
+  }));
+  const d1 = await run(1);
+  check(d1.messages.length === 2, "first qualifying turn admits exactly one recall snapshot");
+  const d2 = await run(2);
+  check(
+    d2.messages.length === 1,
+    "identical repeat turn does NOT re-admit an unchanged snapshot (rc.2 has no pruner; duplication would grow every later request)",
+    `messages=${d2.messages.length}`,
+  );
+  check(searches === 1, "repeat turn with unchanged trusted content does not re-search (cache serve)", String(searches));
+  // Operational fence change → the snapshot CHANGED → must re-admit the newest state.
+  opsEnabled = true;
+  const d3 = await run(3);
+  const last = d3.messages[d3.messages.length - 1];
+  check(
+    d3.messages.length === 2 && last.source?.kind === "dsh-self-improved",
+    "changed render (operational fence update) re-admits a newer snapshot with the fresh fence",
+    `messages=${d3.messages.length}`,
+  );
+  check(
+    last.content?.[0]?.text.includes("fresh fence"),
+    "re-admitted snapshot carries the changed (latest) content",
+    JSON.stringify(last.content?.[0]?.text?.slice(-80)),
+  );
+}
+
+// ── Harness runtime-context snapshot AFTER the genuine turn must not suppress recall ──
+// Evidence base: rc.2 agent-loop preStep decision shape is `[...claimed, context]`
+// — the runtime-context snapshot is the LAST user-role decision message, so the
+// previous blanket refusal made recall silently skip on every turn whose
+// dynamic context changed (verified with a genuine rc.2-shaped fixture).
+{
+  const handlers = {};
+  const fakeCtx = { on: (name, fn) => { handlers[name] = fn; } };
+  let searched = 0;
+  installRecallInjection(fakeCtx, { async search() { searched++; return [{ id: "h9", kind: "fact", content: "hit", importance: 7, score: 1 }]; }, searchOperational: () => [] }, { enabled: () => true, maxHits: 5, sessionIdOf: () => "s2", projectKeyOf: () => "p2" });
+  const handler = handlers["agent/pre-step"];
+  const out = await handler({ step: 1, agent: { id: "s2" }, signal: undefined }, async () => ({
+    kind: "enter",
+    messages: [
+      { role: "user", content: [{ type: "text", text: "genuine human turn" }], source: { kind: "user" } },
+      // exact harness runtime-context decision tail: {kind:"runtime-context"}
+      { role: "user", content: [{ type: "text", text: "Current runtime context: …" }], source: { kind: "runtime-context" } },
+      // full formed variant too: {kind:"runtime-context", form:"snapshot", sections}
+      { role: "user", content: [{ type: "text", text: "Current runtime context: …" }], source: { kind: "runtime-context", form: "snapshot", sections: [{ name: "ctx", text: "…" }] } },
+    ],
+  }));
+  check(searched === 1, "harness runtime-context snapshots following the user turn are skipped, not refused", String(searched));
+  check(
+    out.messages?.some((m) => m.source?.kind === "dsh-self-improved"),
+    "recall is still admitted for the verified human turn behind the harness snapshot",
+  );
+}
+
+// ── Unknown producer AFTER a genuine user turn still refuses (no authority widening) ──
+{
+  const handlers = {};
+  const fakeCtx = { on: (name, fn) => { handlers[name] = fn; } };
+  let searched = 0;
+  installRecallInjection(fakeCtx, { async search() { searched++; return []; }, searchOperational: () => [] }, { enabled: () => true, maxHits: 5, sessionIdOf: () => "s3", projectKeyOf: () => "p3" });
+  const handler = handlers["agent/pre-step"];
+  await handler({ step: 1, agent: { id: "s3" }, signal: undefined }, async () => ({
+    kind: "enter",
+    messages: [
+      { role: "user", content: [{ type: "text", text: "earlier genuine human turn" }], source: { kind: "user" } },
+      { role: "user", content: [{ type: "text", text: "late untrusted text" }], source: { kind: "coordinator-unknown" } },
+    ],
+  }));
+  check(searched === 0, "an unknown producer after the genuine turn still refuses the step (authority not widened)", String(searched));
+}
+
 const rootScratch = null;
 void rootScratch;
 if (failures > 0) {

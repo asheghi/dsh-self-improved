@@ -7,10 +7,14 @@
  * - `MessageSourceMap` is merge-extensible: this plugin declares its own source
  *   kind `dsh-self-improved` instead of the removed `plugin` catch-all kind.
  *   Model-visible injected context uses the harness `snapshot` context form:
- *   recall is current state whose later snapshot from the same producer
- *   supersedes the earlier one, so a per-turn re-admission never accumulates
- *   duplicated recall in derived history (the superseding behavior is the
- *   harness's `snapshot` contract, not a plugin-side cache trick).
+ *   recall is current state and a later snapshot from a producer is presented
+ *   as superseding. NOTE (reviewed against rc.2 request assembly): the
+ *   superseding is a presentation contract only — no rc.2 consumer prunes
+ *   earlier producer snapshot messages from derived history, and the
+ *   agent-loop durably appends every admitted decision message as
+ *   `user/message`. inject.ts therefore applies emit-on-change gating
+ *   (unchanged snapshots are not re-admitted) instead of relying on
+ *   supersession to dedupe.
  * - Session event reads: rc.2 deprecates synchronous `session.events` access;
  *   own events after the fork-inherited prefix are read through
  *   `session.ownEvents()` with the exact fork boundary
@@ -58,6 +62,14 @@ export function createRecallContextMessage(text: string): ReturnType<typeof crea
  * coordinator relays read back from logs): any producer kind that is not
  * `user` is never treated as direct human authority. Unknown kinds stay
  * untrusted by definition of the merge-extensible vocabulary.
+ *
+ * Necessary-but-NOT-sufficient rc.2 caveat (reviewed round): the SubAgent
+ * service admits model-authored delegation prompts with
+ * `source: { kind: "user" }` (dsh-subagent submitMaterialized), so kind `user`
+ * cannot alone prove direct-human provenance. Retrieval planning uses this
+ * check for REQUEST TEXT only; extraction/authority decisions must combine
+ * the session-header delegation classification (capture.isDelegatedHeader)
+ * and Phase B request-header provenance, never kind alone.
  */
 export function isDirectHumanUserSource(source: unknown): boolean {
   return !!source && typeof source === "object"
