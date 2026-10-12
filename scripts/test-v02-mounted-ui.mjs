@@ -205,10 +205,22 @@ function serverEnv(home, stubPort) {
   };
 }
 
+const SEED_ACTIVATED_DRAFT = "seeded-learned-skill";
+
 async function seedStore(storeDir) {
   const { MemoryStore } = await import(pathToFileURL(join(ROOT, "lib", "storage.js")).href);
   const store = new MemoryStore(storeDir);
   try {
+    // DSI_E2E_ACTIVATED_SKILL: one draft that is ALREADY durably activated, so
+    // the plugin's boot restore has something real to replay.
+    if (process.env.DSI_E2E_ACTIVATED_SKILL === "1") {
+      const markdown = ["---", `name: ${SEED_ACTIVATED_DRAFT}`, "description: Seeded activated skill for the mounted activation gate",
+        "whenToUse: when the mounted fixture asks", 'source_episodes: ["ep-seed-1","ep-seed-2"]', "generated_at: 2026-01-01T00:00:00.000Z",
+        "---", "1. do the seeded thing", "2. confirm the seeded thing happened"].join("\n");
+      store.getJournalSqlite().prepare(`INSERT INTO skill_drafts(id,project_id,fingerprint,name,markdown,source_episode_ids,status,evaluation_version,evaluation_report,active_path,created_at,updated_at)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`).run("draft-seeded", "mounted-ui", "fp-seeded", SEED_ACTIVATED_DRAFT, markdown,
+          '["ep-seed-1","ep-seed-2"]', "activated", "static-eval-1", null, null, Date.now(), Date.now());
+    }
     for (const content of SEED_ROWS) {
       store.insertMemory(
         { kind: "fact", content, importance: 7 },

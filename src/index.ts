@@ -1489,6 +1489,17 @@ export function apply(ctx: Context, rawConfig: RuntimeConfig): void {
         readContinuityUiOfferNotes(store, ctx.sessionQuery, targetSessionId, jobId, continuityUiGates, continuityHandoffReader?.(), signal),
       // Overview status: WHY nothing can be continued, as bounded counts plus an
       // actionable reason. Counts only — never an id, body or envelope.
+      // Reading the live activation lane first DROPS any skill whose support is
+      // no longer activated, so what an operator observes is what is still
+      // eligible; the sweep only ever removes, and is bounded by live skills.
+      learnedSkills: () => {
+        const lane = skillActivation;
+        if (!lane) return { available: false, active: [], deactivated: 0 };
+        const sweep = lane.sweep();
+        return { available: true, deactivated: sweep.deactivated,
+          active: lane.list().slice(0, 50).map((entry) => ({ name: entry.name,
+            evaluationVersion: entry.evaluationVersion, activatedAt: entry.activatedAt })) };
+      },
       continuityLane: () => readContinuityLaneStatus(store, {
         enabled: config.continuity?.enabled === true,
         bodyEnabled: summaryEnabled(),

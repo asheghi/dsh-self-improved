@@ -1705,7 +1705,16 @@ window.__ModuleLoader__.load({
             laneLine("Processing attempts failed", lane.failed || 0),
             laneLine("Latest boundary cut", lane.lastCut === null || lane.lastCut === undefined ? "none" : String(lane.lastCut))),
           lane.reason ? h("p", { className: "__dsi_status", role: "status" }, lane.reason) : null,
-          h("p", null, "Continuing is an operator action in the Sessions tab. Processing counts are not task success, and a handoff is unverified orientation only.")) : null);
+          h("p", null, "Continuing is an operator action in the Sessions tab. Processing counts are not task success, and a handoff is unverified orientation only.")) : null,
+        data && data.learnedSkills && data.learnedSkills.available ? h("section", null,
+          h("h3", null, "Learned skills (active)"),
+          (data.learnedSkills.active || []).length
+            ? h("ul", null, (data.learnedSkills.active || []).map(function (skill) {
+                return h("li", { key: skill.name },
+                  skill.name + " \u00b7 evaluation " + (skill.evaluationVersion || "none recorded \u2014 activated on human review alone"));
+              }))
+            : h("p", { role: "status" }, "No learned skill is active."),
+          h("p", null, "User-invocable only: the model's catalog does not see these. Approve, activate and roll back with /memory skill-approve | skill-activate | skill-rollback.")) : null);
     }
     function SessionsSection(props) {
       var targetPair = react.useState(""), target = targetPair[0], setTarget = targetPair[1];

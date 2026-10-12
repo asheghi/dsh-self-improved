@@ -67,6 +67,19 @@ await check('Overview reports the continuity lane factually, including why nothi
   assert.doesNotMatch(body, /healthy/i, 'the status is facts, never a health badge');
   h.unmount();
 });
+await check('Overview lists the active learned skills with their evaluation state', async () => {
+  const value = { memories: [], pending: 0, episodes: { counts: { reviewed: 0 } }, skills: [], continuity: null,
+    learnedSkills: { available: true, deactivated: 0, active: [
+      { name: 'seeded-learned-skill', evaluationVersion: 'static-eval-1', activatedAt: 1700000000000 },
+      { name: 'reviewed-only-skill', evaluationVersion: null, activatedAt: 1700000000000 } ] } };
+  const h = harness(sut.OverviewSection, props({ snapshot: async () => ({ ok: true, value }) }));
+  h.render(); await flush(); const body = text(h.render());
+  assert.match(body, /Learned skills \(active\)/);
+  assert.match(body, /seeded-learned-skill/); assert.match(body, /static-eval-1/);
+  assert.match(body, /reviewed-only-skill/); assert.match(body, /none recorded/);
+  assert.match(body, /user-invocable only/i);
+  h.unmount();
+});
 await check('Overview renders no continuity section when the host serves no lane status', async () => {
   const h = harness(sut.OverviewSection, props({ snapshot: async () => ({ ok: true, value: { memories: [], pending: 0, episodes: { counts: { reviewed: 0 } }, skills: [], continuity: null } }) }));
   h.render(); await flush(); const tree = h.render();

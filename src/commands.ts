@@ -567,6 +567,8 @@ export function browserSnapshot(
   episodeEnabled = false,
   /** Bounded, body-free continuity lane status (counts + an actionable reason). */
   continuity?: Record<string, unknown> | null,
+  /** Live learned skills (names, evaluation state, activation time). */
+  learnedSkills?: Record<string, unknown> | null,
 ): Record<string, unknown> {
   const memories = store.listMemories({ limit: 300 })
     // Stable ordering: same-millisecond ties fall back to createdAt then id, so
@@ -623,6 +625,7 @@ export function browserSnapshot(
     pending: store.pendingSessions().length,
     episodes,
     continuity: continuity ?? null,
+    learnedSkills: learnedSkills ?? null,
     updatedAt: Date.now(),
   };
 }

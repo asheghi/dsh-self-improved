@@ -187,6 +187,9 @@ export interface MemoryBusinessDeps {
   /** Bounded, body-free continuity lane status for the Overview tab. Must never
    *  throw and must never return ids or content; a failure means "no status". */
   continuityLane?: () => Record<string, unknown> | null;
+  /** Live learned skills: names, evaluation state and activation time only.
+   *  Absent = this host exposes no skills service. Never throws. */
+  learnedSkills?: () => Record<string, unknown> | null;
   /** Shared journal mutation policy (src/index.ts wiring). Absent = the op
    *  still executes with its documented store semantics and this module emits
    *  a visible warning naming the GAP; it never silently claims the journal
@@ -467,8 +470,10 @@ export function createMemoryBusiness(deps: MemoryBusinessDeps): MemoryBusinessAp
       assertNotAborted(signal);
       let lane: Record<string, unknown> | null = null;
       try { lane = deps.continuityLane?.() ?? null; } catch { lane = null; }
+      let skills: Record<string, unknown> | null = null;
+      try { skills = deps.learnedSkills?.() ?? null; } catch { skills = null; }
       try {
-        return browserSnapshot(deps.store, deps.skillsPrefix(), deps.skillsRoot?.() ?? "", deps.episodeEnabled() === true, lane);
+        return browserSnapshot(deps.store, deps.skillsPrefix(), deps.skillsRoot?.() ?? "", deps.episodeEnabled() === true, lane, skills);
       } catch (error) {
         throw rejected(`memory snapshot failed: ${error instanceof Error ? error.message : String(error)}`);
       }
