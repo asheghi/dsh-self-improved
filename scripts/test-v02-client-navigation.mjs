@@ -43,6 +43,16 @@ await check('real generated descriptor, cancellation parameter and namespace ide
   assert.equal(cont.cancellation.parameter, 'signal');
   const namespace = Object.create({ snapshot() {} }); assert.equal(sut.businessApi({ get: () => namespace }), namespace); await mounting.dispose();
 });
+await check('shipped UI honours the interface-guideline rules the audit found missing', () => {
+  // These were real defects: the offers/processing tables were referenced but
+  // had NO rule at all, and no reduced-motion block existed anywhere.
+  assert.match(source, /\.__dsi_table\{/, 'the table class must be styled, not only referenced');
+  assert.match(source, /font-variant-numeric:tabular-nums/, 'numeric columns need tabular figures');
+  assert.match(source, /@media \(prefers-reduced-motion: reduce\)/, 'motion must honour the user preference');
+  assert.match(source, /touch-action:manipulation/, 'buttons must not wait for double-tap detection');
+  assert.doesNotMatch(source, /transition:\s*all/, 'transition: all is an anti-pattern');
+  assert.doesNotMatch(source, /outline:\s*none/, 'focus must never be removed without a replacement');
+});
 await check('actual four-tab state, panel IDs, roving focus and keyboard navigation', async () => {
   const h = harness(sut.MainSection, props({})); let tree = h.render(); const tabs = nodes(tree, n => n.props.role === 'tab'); assert.equal(tabs.length, 4);
   assert.equal(tabs.filter(n => n.props.tabIndex === 0).length, 1); const panel = nodes(tree, n => n.props.role === 'tabpanel')[0]; assert.equal(panel.props.id, tabs[0].props['aria-controls']);

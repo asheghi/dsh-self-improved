@@ -60,8 +60,9 @@ window.__ModuleLoader__.load({
       ".__dsi_row{display:flex;align-items:center;gap:8px}" +
       ".__dsi_check{accent-color:var(--dsw-alias-state-business-primary);width:16px;height:16px}" +
       ".__dsi_actions{display:flex;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap}" +
-      ".__dsi_btn{height:34px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);color:var(--dsw-alias-label-primary);border-radius:12px;padding:6px 14px;font:inherit;font-size:14px;line-height:22px;cursor:pointer}" +
-      ".__dsi_btn:hover:not(:disabled),.__dsi_btn:focus-visible{border-color:var(--dsw-alias-state-business-primary);outline:none}" +
+      ".__dsi_btn{height:34px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);color:var(--dsw-alias-label-primary);border-radius:12px;padding:6px 14px;font:inherit;font-size:14px;line-height:22px;cursor:pointer;touch-action:manipulation}" +
+      ".__dsi_btn:hover:not(:disabled){border-color:var(--dsw-alias-state-business-primary)}" +
+      ".__dsi_btn:focus-visible{border-color:var(--dsw-alias-state-business-primary);outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:1px}" +
       ".__dsi_btn:disabled{opacity:.5;cursor:default}" +
       ".__dsi_btnPrimary{border-color:var(--dsw-alias-state-business-primary);background:var(--dsw-alias-state-business-primary);color:var(--dsw-alias-label-on-accent)}" +
       ".__dsi_btnDanger{border-color:var(--dsw-alias-state-error-primary);color:var(--dsw-alias-state-error-primary)}" +
@@ -94,7 +95,8 @@ window.__ModuleLoader__.load({
       // Collapsible panel (button semantics: keyboard toggles)
       ".__dsi_collapse{display:flex;flex-direction:column;gap:8px}" +
       ".__dsi_collapseHeader{display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;border:1px solid var(--dsw-alias-border-l2);border-radius:12px;padding:8px 12px;background:var(--dsw-alias-bg-layer-2);font:inherit;text-align:left;width:100%}" +
-      ".__dsi_collapseHeader:hover,.__dsi_collapseHeader:focus-visible{border-color:var(--dsw-alias-state-business-primary);outline:none}" +
+      ".__dsi_collapseHeader:hover{border-color:var(--dsw-alias-state-business-primary)}" +
+      ".__dsi_collapseHeader:focus-visible{border-color:var(--dsw-alias-state-business-primary);outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:2px}" +
       ".__dsi_collapseTitle{flex:1;font-size:14px;font-weight:600;line-height:22px;color:var(--dsw-alias-label-primary)}" +
       ".__dsi_collapseCount{font-size:12px;color:var(--dsw-alias-label-tertiary)}" +
       ".__dsi_collapseChevron{font-size:12px;color:var(--dsw-alias-label-tertiary);transition:transform .15s}" +
@@ -109,7 +111,12 @@ window.__ModuleLoader__.load({
       ".__dsi_modalBody{padding:16px 18px;overflow:auto;display:flex;flex-direction:column;gap:12px}" +
       ".__dsi_modalContent{white-space:pre-wrap;word-break:break-all;font-size:14px;line-height:22px;color:var(--dsw-alias-label-primary);border:1px solid var(--dsw-alias-border-l2);border-radius:12px;padding:12px 14px;background:var(--dsw-alias-bg-layer-2)}" +
       ".__dsi_modalMeta{display:grid;grid-template-columns:auto 1fr;gap:6px 16px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary)}" +
-      ".__dsi_modalMeta b{font-weight:600;color:var(--dsw-alias-label-primary)}";
+      ".__dsi_modalMeta b{font-weight:600;color:var(--dsw-alias-label-primary)}" +
+      ".__dsi_table{width:100%;border-collapse:collapse;font-size:13px;font-variant-numeric:tabular-nums}" +
+      ".__dsi_table caption{text-align:left;padding:0 0 6px;color:var(--dsw-alias-label-secondary);font-size:12px}" +
+      ".__dsi_table th,.__dsi_table td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--dsw-alias-border-l2);overflow-wrap:anywhere}" +
+      ".__dsi_table th{color:var(--dsw-alias-label-secondary);font-weight:600}" +
+      "@media (prefers-reduced-motion: reduce){.__dsi_tab,.__dsi_collapseChevron,.__dsi_switchTrack,.__dsi_btn{transition:none;animation:none}}";
     var tagId = "dsh-self-improved/main.css";
     if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId) + "]") === null) {
       var tag = document.createElement("style");
@@ -127,8 +134,8 @@ window.__ModuleLoader__.load({
     var zh = {
       nav: "进化记忆",
       tabOverview: "Overview",
-       tabSessions: "Sessions",
-       tabConfig: "Settings",
+      tabSessions: "Sessions",
+      tabConfig: "Settings",
       tabMemories: "Memory",
       intro: "Long-term memory & self-evolution: captures conversations, extracts memories, injects recall before turns, and consolidates/forgets/evolves over time.",
       helpTitle: "About this plugin",
@@ -332,8 +339,8 @@ window.__ModuleLoader__.load({
     var en = {
       nav: "进化记忆",
       tabOverview: "Overview",
-       tabSessions: "Sessions",
-       tabConfig: "Settings",
+      tabSessions: "Sessions",
+      tabConfig: "Settings",
       tabMemories: "Memory",
       intro: "Long-term memory & self-evolution: captures conversations, extracts memories, injects recall before turns, and consolidates/forgets/evolves over time.",
       helpTitle: "About this plugin",
@@ -1797,6 +1804,7 @@ window.__ModuleLoader__.load({
       }
       return h("div", { className: "__dsi_root" },
         h("label", null, "Native target session ID", h("input", { className: "__dsi_input", value: target,
+          name: "sessionId", autoComplete: "off", spellCheck: false,
           onChange: function (event) { read.cancel(); setTarget(event.target.value); },
           onKeyDown: function (event) { if (event.key === "Enter" && target.trim()) { event.preventDefault(); read.refresh(target); } } })),
         h("button", { type: "button", className: "__dsi_btn", disabled: !target.trim(), onClick: function () { read.refresh(target); } }, props.t("browserRefresh")),

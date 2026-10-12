@@ -95,7 +95,10 @@ assert.ok(/role\("secret"\)|secret/.test(src), "the secret hint explains presenc
 
 // ── 5. Lost-draft protection: draft state lives in the apply-scoped binding ─
 assert.match(src, /var formBinding = bindSettingsForm\(ctx\);/, "settings-form binding created once in apply()");
-assert.match(src, /tab === "config" \? h\(MemorySection, props\) : h\(BrowserSection, props\)/,
+// The panel is the INTENDED four-tab composition (Overview/Sessions/Settings/
+// Memory); the earlier two-tab literal is superseded, and the section wiring
+// must still be keyed by the active tab.
+assert.match(src, /tab === "overview" \? h\(OverviewSection, Object\.assign\(\{ key: tab \}, props\)\) : tab === "sessions" \? h\(SessionsSection, Object\.assign\(\{ key: tab \}, props\)\) : tab === "config" \? h\(MemorySection, Object\.assign\(\{ key: tab \}, props\)\) : h\(BrowserSection, Object\.assign\(\{ key: tab \}, props\)\)/,
   "tab switching mounts the SAME shared binding (no per-tab state loss)");
 
 // ── 6. Typed business remote is wired (no Config-as-RPC rows) ──────────────
