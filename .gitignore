@@ -10,3 +10,8 @@ package-lock.json
 # Local docs (design/research/ops notes, kept out of the repo)
 docs/
 .diag*
+
+# Migration scratch lanes: generated logs, temp stores, file backups
+.tmp-*/
+# Generated per-run fixture homes/DBs/native caches
+fixtures/**/temp/
