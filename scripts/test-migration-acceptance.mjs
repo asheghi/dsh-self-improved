@@ -13,7 +13,7 @@ if (!runtime || !isAbsolute(runtime) || !existsSync(join(runtime, 'node_modules'
 }
 const groups = {
   increments: ['test-v02-continuity-runtime-v03', 'test-v02-continuity-sessions-v03', 'test-v02-continuity-provider-worker-v03', 'test-episode-evaluation'],
-  memory: ['test-phase-a', 'test-storage', 'test-redact', 'test-episodes', 'test-episode-review', 'test-episode-rollout', 'test-extract', 'test-recall', 'test-evolve', 'test-commands', 'test-hermes', 'test-audit-skills', 'test-settings-ui', 'test-user-edit-preservation'],
+  memory: ['test-phase-a', 'test-v02-recall-ledger', 'test-storage', 'test-redact', 'test-episodes', 'test-episode-review', 'test-episode-rollout', 'test-extract', 'test-recall', 'test-evolve', 'test-commands', 'test-hermes', 'test-audit-skills', 'test-settings-ui', 'test-user-edit-preservation'],
   import: ['test-v02-import-lane', 'test-v02-import-audit', 'test-v02-import-gates', 'test-v02-import-seam', 'test-migration-v02', 'test-v02-policy-lane', 'test-v02-fact-policy', 'test-v02-minimization', 'test-v02-revocation'],
   packaging: ['test-v02-package', 'test-v02-typecheck-modes', 'test-v02-remote-cancellation', 'test-v02-client-smoke'],
   skills: ['test-v02-skill-activation', 'test-v02-skill-activation-drafts', 'test-v02-skill-evaluation-structural'],

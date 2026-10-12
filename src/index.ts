@@ -32,6 +32,7 @@ import { installRecallInjection } from "./inject.js";
 import { Consolidator } from "./consolidate.js";
 import { applyDecay, createSkillDraftsFromEpisodes, deleteSkill } from "./evolve.js";
 import { installMemoryCommands, installBrowserChannel } from "./commands.js";
+import { RecallLedger } from "./recall-ledger.js";
 import { readValue, assignPlainTree } from "./runtime-config.js";
 import { createMemoryBusiness, type MemoryJournalMutationPolicy, registerMemoryBusinessRemote } from "./business.js";
 // Phase A shutdown boundary (bounded safe close of accepted work) lives in
@@ -1416,7 +1417,11 @@ export function apply(ctx: Context, rawConfig: RuntimeConfig): void {
     projectKeyOf: projectKeyOfAgent,
     sessionIdOf: sessionIdForAgent,
     maxInjectPerTurn: config.recall.maxInjectPerTurn,
-    onInjected: (ids: string[]) => store.recordAccess(ids),
+    onInjected: (ids: string[], delivery?: { sessionId?: string; query?: string }) => {
+      store.recordAccess(ids);
+      // Explanation, not evidence: a bounded runtime record of what was shown.
+      recallLedger.record(delivery?.sessionId ?? "", { query: delivery?.query ?? "", ids });
+    },
     // Phase 4: operational lane (live getters so settings hot-apply reaches each pre-step)
     operational: {
       enabled: () => readModule("recall") && episodeState.enabled && episodeState.operationalRecallEnabled,
@@ -1467,6 +1472,8 @@ export function apply(ctx: Context, rawConfig: RuntimeConfig): void {
     }
   });
 
+  /** Bounded, evictable record of what recall rendered (never evidence). */
+  const recallLedger = new RecallLedger();
   let browserChannel: BrowserChannel | null = null;
   let businessApi: ReturnType<typeof createMemoryBusiness> | null = null;
   try {
@@ -1625,6 +1632,7 @@ export function apply(ctx: Context, rawConfig: RuntimeConfig): void {
       // Phase E: live when the skills service mounted; the commands refuse
       // (never pretend) when this host exposes no skills service.
       skillActivation: () => skillActivation,
+      recallLedger: () => recallLedger,
     });
     if (commandsDispose) {
       log("memory command installed (/memory)");

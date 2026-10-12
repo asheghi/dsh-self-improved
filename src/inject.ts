@@ -71,8 +71,10 @@ export interface InjectController {
   debug?: boolean;
   /** Cap of dsh-self-improved blocks already proposed in this step (0 = no cap) */
   maxInjectPerTurn?: number;
-  /** Called with the ids of memories actually injected (access tracking; host wires store.recordAccess) */
-  onInjected?: (ids: string[]) => void;
+  /** Called with the ids of memories actually injected (access tracking; host
+   *  wires store.recordAccess) plus, when known, the session and query that
+   *  produced them so a bounded delivery ledger can explain them. */
+  onInjected?: (ids: string[], context?: { sessionId?: string; query?: string }) => void;
   /** Project key resolution from the pre-step payload (cwd/workspace-based scoping) */
   projectKeyOf?: (agent: unknown) => string;
   /** Session id of the current conversation for cache scoping + self-echo guard */
@@ -592,7 +594,7 @@ export function installRecallInjection(ctx: Context, recall: RecallService, cont
           ...(trustedFromCache ? [] : trustedBlock ? trustedHits.map((h) => h.id) : []),
           ...opsForRender.map((h) => h.id),
         ];
-        if (ids.length > 0) onInjected(ids);
+        if (ids.length > 0) onInjected(ids, { sessionId, query });
       }
 
       // ADMISSION: spread the decision and append the attributed recall

@@ -41,6 +41,10 @@ export function handleMemoryCommand(
     episodeEnabled?: () => boolean;
     /** Project scope of the command's receiving session for private draft inspection. */
     skillDraftProjectId?: string;
+    /** Receiving session identity, for the recall-delivery inspector. */
+    recallSessionId?: string;
+    /** What recall actually rendered into this session (bounded runtime state). */
+    recallLedger?: () => { list(sessionId: string): ReadonlyArray<{ at: number; query: string; ids: readonly string[] }> } | null;
     /** rc.2 typed business lane: when provided, browser/forget/correct run
      *  through it (one operation, shared with the typed browser remote). */
     business?: MemoryBusinessApi;
@@ -304,6 +308,20 @@ export function handleMemoryCommand(
         ...(truncated ? [`[truncated at ${maxChars} chars; draft remains stored]`] : []),
       ].join("\n"));
     }
+    case "used": {
+      const ledger = opts?.recallLedger?.() ?? null;
+      if (!ledger) return err("The recall-delivery ledger is unavailable on this host.");
+      const deliveries = ledger.list(opts?.recallSessionId ?? "");
+      if (deliveries.length === 0) return ok("No memory has been injected into this session yet.");
+      const lines = [...deliveries].reverse().map((delivery) =>
+        `[${new Date(delivery.at).toISOString()}] ${delivery.ids.length} memor${delivery.ids.length === 1 ? "y" : "ies"} for query "${delivery.query}"\n  ${delivery.ids.join(", ")}`);
+      return ok([
+        "What recall actually rendered into THIS session (newest first):",
+        ...lines,
+        "",
+        "Runtime state only: bounded, evicted, and lost on restart. It is not evidence that any of it helped.",
+      ].join("\n"));
+    }
     case "skill-evaluate": {
       if (opts?.episodeEnabled?.() !== true) return err("Skill evaluation requires episodeLearning.enabled");
       const projectId = opts?.skillDraftProjectId;
@@ -389,6 +407,7 @@ export function handleMemoryCommand(
       return ok(
         "dsh-self-improved memory commands:\n" +
           "/memory search <keyword>\n" +
+          "/memory used (what recall rendered into this session)\n" +
           "/memory list\n" +
           "/memory browser --json\n" +
           "/memory baseline | pin <id> [slot] | unpin <slot>\n" +
@@ -720,6 +739,8 @@ export function installMemoryCommands(
     business?: MemoryBusinessApi;
     /** Phase 6: async episode-review runner (dry = validateOnly); gating lives in the delegate */
     episodeReview?: (dry: boolean) => Promise<unknown>;
+    /** What recall actually rendered into this session (bounded runtime state). */
+    recallLedger?: () => { list(sessionId: string): ReadonlyArray<{ at: number; query: string; ids: readonly string[] }> } | null;
     /** Phase E live activations (see handleMemoryCommand); absent = unsupported host. */
     skillActivation?: () => {
       activate(draftId: string, projectId?: string): { ok: boolean; reason: string };
@@ -766,7 +787,8 @@ export function installMemoryCommands(
         }
       }
       const skillDraftProjectId = invocation.agent?.id ? store.getSessionProject(invocation.agent.id) : undefined;
-      return handleMemoryCommand(store, rawInput, { ...opts, skillDraftProjectId });
+      const recallSessionId = invocation.agent?.id ? String(invocation.agent.id) : undefined;
+      return handleMemoryCommand(store, rawInput, { ...opts, skillDraftProjectId, recallSessionId });
     },
   });
 }
