@@ -1713,8 +1713,9 @@ window.__ModuleLoader__.load({
         return lines.join("\n");
       }
       /** Queue the reviewed handoff as ONE user message in the target session —
-       *  the same route the chat uses when you press send. Only the operator can
-       *  reach it: the agent has no browser peer and no composer. */
+       *  the same route the chat uses when you press send. Reached only from
+       *  this rendered panel; the agent's tool path has no composer and no
+       *  gateway peer (see the boundary note above). */
       function sendHandoff() {
         var session = props.session && props.session.current;
         if (!session || typeof session.prompt !== "function") {
@@ -1742,8 +1743,10 @@ window.__ModuleLoader__.load({
        * The click mints a peer- and args-bound one-shot confirm through the
        * browser business remote and only then reads the bounded handoff notes.
        * A message the model wrote, a tool call, or any other in-process caller
-       * carries no gateway peer, so the host refuses it — this action cannot be
-       * triggered by the agent, only by the operator in this UI.
+       * carries no gateway peer, so the host refuses it: the agent's ordinary
+       * paths cannot reach this. Measured limit — this runtime admits every
+       * loopback /api request as the operator peer, so a process with shell
+       * access could; that residual risk is disclosed, not hidden.
        */
       function continueOffer(jobId) {
         setSend({ busy: false, error: null, sent: null });

@@ -382,14 +382,25 @@ export function createMemoryBusiness(deps: MemoryBusinessDeps): MemoryBusinessAp
    *
    * DSH labels a model-authored delegation prompt with the same
    * `{kind:'user', rpcId}` source as a human prompt, so NO message marker can
-   * authorize resuming work. The browser door can: only a Gateway-dispatched
-   * remote call carries a peer, and the operator's confirmation is a second,
-   * deliberate round trip bound to that peer AND these exact arguments.
+   * authorize resuming work. The browser door can: a Gateway-dispatched call
+   * carries a peer, and the operator's confirmation is a second, deliberate
+   * round trip bound to that peer AND these exact arguments.
    *
    * In-process callers — the agent tool lane, other plugins, the /memory
    * command lane — carry no peer and are refused here even though they are
    * trusted code, because "trusted code" is precisely what cannot be told
    * apart from a model on the message path.
+   *
+   * MEASURED BOUNDARY, not a claim: this is not an authentication boundary.
+   * The installed rc.2 runtime admits EVERY loopback `/api` request as the same
+   * OperatorPeer (its browser-authentication call is patched off in this
+   * installation — see MIGRATION-PROGRESS round 2 of the operator-door work and
+   * scripts/test-v02-continuity-door-mounted.mjs, which asserts the running
+   * host's actual behaviour). So a process that can open a loopback connection
+   * reaches this door. It stops the agent's ordinary paths (tools, message-
+   * driven plugins, in-process callers); it does not stop a shell. A
+   * Host-issued authenticated receipt is the real fix, and it cannot be built
+   * in this plugin.
    */
   const assertContinueArgs = (targetSessionId: unknown, jobId: unknown): { target: string; job: string } => {
     if (typeof targetSessionId !== "string" || targetSessionId.length === 0 || targetSessionId.length > 512 || targetSessionId.includes("\0")) {
