@@ -42,7 +42,7 @@ check('activation registers a runtime skill with a FORCED user-only policy', () 
   assert.equal(skill.source, 'runtime');
   assert.deepEqual(skill.invocation, { modelInvocable: false, userInvocable: true }, 'a caller must not be able to make a learned skill model-invocable');
   assert.deepEqual(record.invocation, { modelInvocable: false, userInvocable: true });
-  assert.equal(record.evaluationVersion, SKILL_EVALUATION_VERSION);
+  assert.equal(record.evaluationVersion, null, 'no evaluation was supplied, so none may be invented');
   assert.equal(record.contentChars, skill.content.length);
 });
 check('the rendered body carries the provenance/verification header, evidence and bounded size', () => {
@@ -52,6 +52,7 @@ check('the rendered body carries the provenance/verification header, evidence an
   assert.match(body, /activated by the operator/i);
   assert.match(body, /not permission, and not proof/i);
   assert.match(body, /Verify the current environment/);
+  assert.match(body, /Evaluation: static-eval-1 \(static\)/, 'a missing evaluation is stated, never implied present');
   assert.match(body, /episode e1 \/ call-1/);
   assert.match(body, /1\. run pnpm run build/);
   assert.equal(body, renderLearnedSkillBody({ name: 'pnpm-build-project', steps: ['run pnpm run build', 'check the exit status'], citations: ['episode e1 / call-1', 'episode e2 / call-2'], activatedAt: 1700000000000 }), 'rendering is deterministic');

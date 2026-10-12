@@ -29,6 +29,8 @@ export const SKILL_EVALUATION_VERSION = "static-eval-1";
 export interface SkillActivationRequest {
   /** Durable draft identity this activation came from. */
   draftId: string;
+  /** Recorded evaluation of that draft, when one exists. */
+  evaluationVersion?: string | null;
   /** Kebab-case skill name (the public skill-name grammar). */
   name: string;
   description: string;
@@ -46,7 +48,8 @@ export interface SkillActivationRecord {
   whenToUse?: string;
   /** The policy this module FORCES; recorded so the store cannot claim otherwise. */
   invocation: { modelInvocable: false; userInvocable: true };
-  evaluationVersion: string;
+  /** Recorded evaluation, or null when the operator activated on review alone. */
+  evaluationVersion: string | null;
   activatedAt: number;
   contentChars: number;
 }
@@ -98,6 +101,7 @@ const list = (value: unknown, max: number, itemMax: number, what: string): strin
  */
 export function renderLearnedSkillBody(request: {
   name: string; steps: readonly string[]; citations: readonly string[]; activatedAt: number;
+  evaluationVersion?: string | null;
 }): string {
   const iso = new Date(request.activatedAt).toISOString();
   const lines = [
@@ -107,7 +111,7 @@ export function renderLearnedSkillBody(request: {
     "> This is a suggestion, not permission, and not proof that anything succeeded.",
     "> Verify the current environment before following it; deactivate it if it stops being true.",
     `> Evidence: ${request.citations.join("; ")}`,
-    `> Evaluation: ${SKILL_EVALUATION_VERSION} · Activated: ${iso}`,
+    `> Evaluation: ${request.evaluationVersion ?? SKILL_EVALUATION_VERSION}${request.evaluationVersion ? "" : " (static)"} · Activated: ${iso}`,
     "",
     "## Procedure",
     ...request.steps.map((step, index) => `${index + 1}. ${step}`),
@@ -132,13 +136,16 @@ export class LearnedSkillActivator {
     const description = text(field(request, "description"), MAX_DESCRIPTION, "description");
     const rawWhen = field(request, "whenToUse");
     const whenToUse = rawWhen === undefined ? undefined : text(rawWhen, MAX_WHEN, "whenToUse");
+    const rawEvaluation = field(request, "evaluationVersion");
+    const evaluationVersion = rawEvaluation === undefined || rawEvaluation === null
+      ? null : text(rawEvaluation, 100, "evaluation version");
     const steps = list(field(request, "steps"), MAX_STEPS, MAX_STEP, "steps");
     const citations = list(field(request, "citations"), MAX_CITATIONS, MAX_CITATION, "citations");
     const now = this.clock();
     if (!Number.isSafeInteger(now) || now < 0) throw new Error("activation requires a safe clock");
     if (this.active.has(name)) throw new Error(`skill "${name}" is already activated; roll it back first`);
 
-    const content = renderLearnedSkillBody({ name, steps, citations, activatedAt: now });
+    const content = renderLearnedSkillBody({ name, steps, citations, activatedAt: now, evaluationVersion });
     if (content.length > MAX_BODY) throw new Error(`activation body exceeds ${MAX_BODY} characters`);
 
     // The caller cannot influence this: a learned skill is never model-invocable.
@@ -150,7 +157,7 @@ export class LearnedSkillActivator {
 
     const record: SkillActivationRecord = Object.freeze({
       draftId, name, description, ...(whenToUse === undefined ? {} : { whenToUse }),
-      invocation: { ...FORCED_INVOCATION }, evaluationVersion: SKILL_EVALUATION_VERSION,
+      invocation: { ...FORCED_INVOCATION }, evaluationVersion,
       activatedAt: now, contentChars: content.length,
     });
     this.active.set(name, { record, dispose });

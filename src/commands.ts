@@ -43,6 +43,14 @@ export function handleMemoryCommand(
     /** rc.2 typed business lane: when provided, browser/forget/correct run
      *  through it (one operation, shared with the typed browser remote). */
     business?: MemoryBusinessApi;
+    /** Phase E live activations. Absent when the host exposes no skills service,
+     *  in which case the skill commands refuse instead of pretending. */
+    skillActivation?: () => {
+      activate(draftId: string, projectId?: string): { ok: boolean; reason: string };
+      rollback(name: string): { ok: boolean; reason: string };
+      sweep(): { deactivated: number; failed: string[] };
+      list(): Array<{ name: string; draftId: string; evaluationVersion: string | null; activatedAt: number }>;
+    } | null;
   },
 ): CommandOutcome {
   const args = rawInput.trim().split(/\s+/).filter(Boolean);
@@ -295,6 +303,63 @@ export function handleMemoryCommand(
         ...(truncated ? [`[truncated at ${maxChars} chars; draft remains stored]`] : []),
       ].join("\n"));
     }
+    case "skill-approve": {
+      if (opts?.episodeEnabled?.() !== true) return err("Skill approval requires episodeLearning.enabled");
+      const projectId = opts?.skillDraftProjectId;
+      if (!projectId) return err("Skill approval requires an active project scope");
+      const id = args[1];
+      if (!id) return err("Usage: /memory skill-approve <draft-id>");
+      const draft = store.getSkillDraft(id, projectId);
+      if (!draft) return err(`Skill draft not found: ${id}`);
+      // Human review is the authority for activation. The evaluation, when one
+      // was ever run, is stated so approval is never mistaken for a measurement.
+      if (!store.transitionSkillDraft(id, ["draft", "evaluated"], "approved", { projectId })) {
+        return err(`Skill draft ${id} is ${store.getSkillDraft(id, projectId)?.status ?? "unknown"}; only a draft or evaluated draft can be approved`);
+      }
+      return ok([
+        `Approved ${draft.name} (${id}) on your review.`,
+        `Evaluation: ${draft.evaluationVersion ?? "none recorded — this activation will rest on human review alone"}`,
+        `Activate with: /memory skill-activate ${id}`,
+      ].join("\n"));
+    }
+    case "skill-activate": {
+      if (opts?.episodeEnabled?.() !== true) return err("Skill activation requires episodeLearning.enabled");
+      const projectId = opts?.skillDraftProjectId;
+      if (!projectId) return err("Skill activation requires an active project scope");
+      const activation = opts?.skillActivation?.() ?? null;
+      if (!activation) return err("Skills are unavailable on this host (no skills service); nothing can be activated.");
+      const id = args[1];
+      if (!id) return err("Usage: /memory skill-activate <draft-id>");
+      const sweep = activation.sweep();
+      const result = activation.activate(id, projectId);
+      if (!result.ok) return err(`Activation refused: ${result.reason}`);
+      const live = activation.list().find(entry => entry.draftId === id);
+      return ok([
+        `Activated ${live?.name ?? id} as a USER-INVOCABLE runtime skill: you can invoke it, the model's catalog does not see it.`,
+        `Evaluation: ${live?.evaluationVersion ?? "none recorded"}`,
+        `Roll back with: /memory skill-rollback ${live?.name ?? "<name>"}`,
+        ...(sweep.deactivated ? [`Also deactivated ${sweep.deactivated} skill(s) whose support was invalidated.`] : []),
+      ].join("\n"));
+    }
+    case "skill-rollback": {
+      if (opts?.episodeEnabled?.() !== true) return err("Skill rollback requires episodeLearning.enabled");
+      const activation = opts?.skillActivation?.() ?? null;
+      if (!activation) return err("Skills are unavailable on this host (no skills service).");
+      const name = args[1];
+      if (!name) return err("Usage: /memory skill-rollback <skill-name>");
+      const result = activation.rollback(name);
+      return result.ok ? ok(`Rolled back ${name}.`) : err(`Rollback refused: ${result.reason}`);
+    }
+    case "skill-active": {
+      if (opts?.episodeEnabled?.() !== true) return err("Skill inspection requires episodeLearning.enabled");
+      const activation = opts?.skillActivation?.() ?? null;
+      if (!activation) return err("Skills are unavailable on this host (no skills service).");
+      const sweep = activation.sweep();
+      const live = activation.list();
+      return ok(live.length
+        ? live.map(entry => `${entry.name} · draft ${entry.draftId} · evaluation ${entry.evaluationVersion ?? "none"} · since ${new Date(entry.activatedAt).toISOString()}`).join("\n")
+        : `No learned skill is active.${sweep.deactivated ? ` (${sweep.deactivated} deactivated because their support was invalidated.)` : ""}`);
+    }
     default:
       return ok(
         "dsh-self-improved memory commands:\n" +
@@ -308,6 +373,7 @@ export function handleMemoryCommand(
           "/memory episodes [status] [limit] | episode <id> | episode-purge [days|all] [--project <id>] (also forgets linked derived memories)\n" +
           "/memory episode-review [--dry]\n" +
           "/memory skill-drafts | skill-draft <id> [--full]\n" +
+          "/memory skill-approve <draft-id> | skill-activate <draft-id> | skill-rollback <name> | skill-active\n" +
           "/memory status",
       );
   }
@@ -626,6 +692,13 @@ export function installMemoryCommands(
     business?: MemoryBusinessApi;
     /** Phase 6: async episode-review runner (dry = validateOnly); gating lives in the delegate */
     episodeReview?: (dry: boolean) => Promise<unknown>;
+    /** Phase E live activations (see handleMemoryCommand); absent = unsupported host. */
+    skillActivation?: () => {
+      activate(draftId: string, projectId?: string): { ok: boolean; reason: string };
+      rollback(name: string): { ok: boolean; reason: string };
+      sweep(): { deactivated: number; failed: string[] };
+      list(): Array<{ name: string; draftId: string; evaluationVersion: string | null; activatedAt: number }>;
+    } | null;
   },
 ): (() => void) | null {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

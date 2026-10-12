@@ -57,6 +57,8 @@ import { ContinuityStoreV02, fenceExistingContinuity } from "./continuity-store-
 import { mountContinuityRuntime } from "./continuity-runtime-v02.js";
 import { ContinuityWorkerV02 } from "./continuity-worker-v02.js";
 import { ContinuityHandoffV02 } from "./continuity-handoff-v02.js";
+import { LearnedSkillActivator } from "./skill-activation.js";
+import { activateDraftSkill, deactivateInvalidatedDrafts, restoreActivatedDrafts, rollbackDraftSkill } from "./skill-activation-runtime.js";
 import { readContinuityLaneStatus, readContinuityUiInventory, readContinuityUiOfferNotes, type ContinuityUiHandoffReader } from "./continuity-inventory-ui.js";
 import { continuityCanonicalDigest, continuityCanonicalHeader } from "./continuity-checkpoint-v02.js";
 import { claimContinuitySummaryHumanV02, continuitySummaryLedgersReadyV02,
@@ -1426,6 +1428,45 @@ export function apply(ctx: Context, rawConfig: RuntimeConfig): void {
   installRecallInjection(ctx, recall, injectionCtl);
   log("recall injection installed (strategy:", rec.recallSettings.strategy, ", project scoping on)");
 
+  /**
+   * Phase E live activations. The skills service is OPTIONAL on other hosts, so
+   * this is an inject child: without it the skill commands refuse instead of
+   * pretending, and every other lane is unaffected. Learned skills are
+   * registered as user-invocable only and are disposed with this child, so an
+   * activation is always reversible and never outlives the plugin.
+   */
+  let skillActivation: {
+    activate(draftId: string, projectId?: string): { ok: boolean; reason: string };
+    rollback(name: string): { ok: boolean; reason: string };
+    sweep(): { deactivated: number; failed: string[] };
+    list(): Array<{ name: string; draftId: string; evaluationVersion: string | null; activatedAt: number }>;
+  } | null = null;
+  ctx.inject(["skills"], (skillsChild) => {
+    try {
+      const activator = new LearnedSkillActivator({ register: (skill) => skillsChild.skills.register(skill) });
+      const deps = { store, activator };
+      // Boot order matters: drop anything whose support is already invalidated,
+      // then replay only drafts that are STILL durably activated.
+      const swept = deactivateInvalidatedDrafts(deps);
+      if (swept.failed.length) console.warn("[dsh-self-improved] skill deactivation failed for:", swept.failed.join(", "));
+      const restored = restoreActivatedDrafts(deps);
+      if (restored.failed.length) console.warn("[dsh-self-improved] skill restore failed for:", restored.failed.join(", "));
+      if (restored.restored > 0) log(`skills: restored ${restored.restored} activated learned skill(s)`);
+      skillsChild.effect(() => () => { activator.dispose(); skillActivation = null; }, "dsh-self-improved: learned skill activations");
+      skillActivation = {
+        activate: (draftId, projectId) => activateDraftSkill(deps, draftId, projectId),
+        rollback: (name) => rollbackDraftSkill(deps, name),
+        sweep: () => deactivateInvalidatedDrafts(deps),
+        list: () => activator.list().map((record) => ({ name: record.name, draftId: record.draftId,
+          evaluationVersion: record.evaluationVersion, activatedAt: record.activatedAt })),
+      };
+      log("skills: learned skill activations available (user-invocable only)");
+    } catch (error) {
+      console.warn("[dsh-self-improved] skill activation lane unavailable:", String(error instanceof Error ? error.message : error));
+      skillActivation = null;
+    }
+  });
+
   let browserChannel: BrowserChannel | null = null;
   let businessApi: ReturnType<typeof createMemoryBusiness> | null = null;
   try {
@@ -1570,6 +1611,9 @@ export function apply(ctx: Context, rawConfig: RuntimeConfig): void {
       // rc.2: browse/forget/correct run the shared business lane (one
       // operation, shared with the typed browser remote).
       business: businessApi ?? undefined,
+      // Phase E: live when the skills service mounted; the commands refuse
+      // (never pretend) when this host exposes no skills service.
+      skillActivation: () => skillActivation,
     });
     if (commandsDispose) {
       log("memory command installed (/memory)");

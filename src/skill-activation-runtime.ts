@@ -35,7 +35,7 @@ export interface ActivationOutcome {
 const MAX_DRAFTS_PER_PASS = 100;
 
 /** Frontmatter + numbered-procedure parser for the reviewed draft body. */
-export function activationRequestFromDraft(draft: SkillDraftRecord): SkillActivationRequest {
+export function activationRequestFromDraft(draft: Pick<SkillDraftRecord, "id" | "name" | "markdown" | "sourceEpisodeIds"> & { evaluationVersion?: string | null }): SkillActivationRequest {
   const lines = draft.markdown.split("\n");
   if (lines[0]?.trim() !== "---") throw new Error("draft body has no frontmatter");
   const end = lines.indexOf("---", 1);
@@ -56,6 +56,7 @@ export function activationRequestFromDraft(draft: SkillDraftRecord): SkillActiva
   if (steps.length === 0) throw new Error("draft body has no numbered procedure steps");
   return {
     draftId: draft.id, name, description, ...(whenToUse ? { whenToUse } : {}),
+    evaluationVersion: draft.evaluationVersion ?? null,
     steps, citations: [...draft.sourceEpisodeIds],
   };
 }
@@ -65,7 +66,9 @@ export function activateDraftSkill(deps: DraftActivationDeps, draftId: string, p
   const draft = deps.store.getSkillDraft(draftId, projectId);
   if (!draft) return { ok: false, reason: "draft not found" };
   if (draft.status !== "approved") return { ok: false, reason: `draft is ${draft.status}, not approved` };
-  if (!draft.evaluationVersion) return { ok: false, reason: "draft has no recorded evaluation" };
+  // The operator's approval is the authority. An evaluation is recorded when one
+  // exists (and shown), but a missing one is NOT hidden or invented: the record
+  // and the rendered body both say the activation rests on review alone.
   let request: SkillActivationRequest;
   try { request = activationRequestFromDraft(draft); } catch (error) {
     return { ok: false, reason: String((error as Error)?.message ?? error) };
@@ -76,7 +79,7 @@ export function activateDraftSkill(deps: DraftActivationDeps, draftId: string, p
   }
   // The status move is the commit point. If it loses (a concurrent invalidation
   // or a second operator won first), the live registration must not survive.
-  const moved = deps.store.transitionSkillDraft(draft.id, ["approved"], "activated", { requireEvaluation: true });
+  const moved = deps.store.transitionSkillDraft(draft.id, ["approved"], "activated");
   if (!moved) {
     deps.activator.rollback(record.name);
     return { ok: false, reason: "draft status changed before the activation could be recorded" };

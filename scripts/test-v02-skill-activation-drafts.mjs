@@ -24,6 +24,7 @@ const { MemoryStore } = await import(join(repo, 'lib/storage.js'));
 const { LearnedSkillActivator } = await import(join(repo, 'lib/skill-activation.js'));
 const { activateDraftSkill, rollbackDraftSkill, restoreActivatedDrafts, deactivateInvalidatedDrafts, activationRequestFromDraft } =
   await import(join(repo, 'lib/skill-activation-runtime.js'));
+const { handleMemoryCommand } = await import(join(repo, 'lib/commands.js'));
 
 let passes = 0, failures = 0;
 const check = (name, fn) => {
@@ -118,13 +119,56 @@ withStore((store) => {
     assert.equal(store.getSkillDraft('draft-1').status, 'invalidated', 'invalidation is a stronger fact than a rollback and must survive');
     assert.deepEqual(restoreActivatedDrafts({ store, activator: activator3 }), { restored: 0, skipped: 0, failed: [] });
   });
-  check('a non-approved draft, an unevaluated draft and a corrupt body never activate', () => {
+  check('the operator commands approve, activate, list and roll back through the real runtime', () => {
+    const cmdHost = recordingHost(), cmdActivator = new LearnedSkillActivator(cmdHost, () => 5000);
+    const cmdDeps = { store, activator: cmdActivator };
+    const opts = { episodeEnabled: () => true, skillDraftProjectId: 'proj-1',
+      skillActivation: () => ({
+        activate: (id, projectId) => activateDraftSkill(cmdDeps, id, projectId),
+        rollback: (name) => rollbackDraftSkill(cmdDeps, name),
+        sweep: () => deactivateInvalidatedDrafts(cmdDeps),
+        list: () => cmdActivator.list().map((r) => ({ name: r.name, draftId: r.draftId, evaluationVersion: r.evaluationVersion, activatedAt: r.activatedAt })),
+      }) };
+    addDraft(db, { id: 'draft-cmd', name: 'cmd-flow-skill', status: 'draft', fingerprint: 'fp-cmd',
+      markdown: body('cmd-flow-skill', 'Command lane flow', ['first step']), evaluationVersion: null });
+    const tooEarly = handleMemoryCommand(store, 'skill-activate draft-cmd', opts);
+    assert.equal(tooEarly.kind, 'error');
+    assert.match(tooEarly.text, /not approved/);
+    const approved = handleMemoryCommand(store, 'skill-approve draft-cmd', opts);
+    assert.equal(approved.kind, 'success', approved.text);
+    assert.match(approved.text, /none recorded/, 'approval states that no evaluation was ever run');
+    const activated = handleMemoryCommand(store, 'skill-activate draft-cmd', opts);
+    assert.equal(activated.kind, 'success', activated.text);
+    assert.match(activated.text, /USER-INVOCABLE/);
+    assert.match(activated.text, /none recorded/);
+    assert.match(handleMemoryCommand(store, 'skill-active', opts).text, /cmd-flow-skill/);
+    const rolled = handleMemoryCommand(store, 'skill-rollback cmd-flow-skill', opts);
+    assert.equal(rolled.kind, 'success', rolled.text);
+    assert.equal(cmdActivator.size, 0);
+    assert.equal(store.getSkillDraft('draft-cmd').status, 'rolled-back');
+    assert.match(handleMemoryCommand(store, 'skill-active', opts).text, /No learned skill is active/);
+  });
+  check('skill commands refuse instead of pretending when the host has no skills service', () => {
+    const opts = { episodeEnabled: () => true, skillDraftProjectId: 'proj-1' };
+    for (const input of ['skill-activate draft-1', 'skill-rollback any-name', 'skill-active']) {
+      const outcome = handleMemoryCommand(store, input, opts);
+      assert.equal(outcome.kind, 'error', input);
+      assert.match(outcome.text, /unavailable/, input);
+    }
+  });
+  check('a non-approved draft and a corrupt body never activate; an unevaluated one states that fact', () => {
     const host4 = recordingHost(), activator4 = new LearnedSkillActivator(host4, () => 4000);
     const deps4 = { store, activator: activator4 };
     addDraft(db, { id: 'draft-2', name: 'still-a-claim', status: 'draft', fingerprint: 'fp-2' });
     assert.match(activateDraftSkill(deps4, 'draft-2').reason, /not approved/);
-    addDraft(db, { id: 'draft-3', name: 'never-evaluated', status: 'approved', evaluationVersion: null, fingerprint: 'fp-3' });
-    assert.match(activateDraftSkill(deps4, 'draft-3').reason, /no recorded evaluation/);
+    // An approved-but-unevaluated draft IS activatable — the operator is the
+    // authority — but the activation must SAY there is no evaluation.
+    addDraft(db, { id: 'draft-3', name: 'reviewed-without-evaluation', status: 'approved', evaluationVersion: null, fingerprint: 'fp-3',
+      markdown: body('reviewed-without-evaluation', 'Reviewed by a human only', ['do the thing']) });
+    const unevaluated = activateDraftSkill(deps4, 'draft-3');
+    assert.equal(unevaluated.ok, true, unevaluated.reason);
+    assert.equal(unevaluated.record.evaluationVersion, null);
+    assert.match(host4.registered[0].content, /Evaluation: static-eval-1 \(static\)/);
     addDraft(db, { id: 'draft-4', name: 'wrong-name-in-body', status: 'approved', fingerprint: 'fp-4',
       markdown: body('a-different-name', 'desc', ['step']) });
     assert.match(activateDraftSkill(deps4, 'draft-4').reason, /does not match/);
@@ -132,7 +176,7 @@ withStore((store) => {
       markdown: ['---', 'name: no-steps-at-all', 'description: d', '---', ''].join('\n') });
     assert.match(activateDraftSkill(deps4, 'draft-5').reason, /no numbered procedure/);
     assert.equal(activateDraftSkill(deps4, 'missing-draft').reason, 'draft not found');
-    assert.equal(host4.registered.length, 0, 'nothing refused may reach the skill registry');
+    assert.equal(host4.registered.length, 1, 'only the human-approved draft reached the skill registry');
   });
   check('the parser refuses a body whose frontmatter name disagrees with the row', () => {
     assert.throws(() => activationRequestFromDraft({ id: 'x', name: 'a-name', markdown: body('b-name', 'd', ['s']), sourceEpisodeIds: [] }), /does not match/);
