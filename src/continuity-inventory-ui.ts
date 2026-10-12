@@ -88,6 +88,76 @@ async function resolveTarget(
   }
 }
 
+/**
+ * Bounded, body-free lane status for the Overview tab: WHY nothing can be
+ * continued, in the operator's words, plus counts only. It never returns a
+ * session/project id, a checkpoint envelope, a note or any source text, and it
+ * never writes. The counts are durable facts, not health claims.
+ */
+export interface ContinuityLaneStatus {
+  structural: "on" | "off" | "unavailable";
+  body: "on" | "off";
+  route: boolean;
+  /** First blocking reason, actionable and jargon-free; "" when nothing blocks. */
+  reason: string;
+  pending: number;
+  failed: number;
+  handoffs: number;
+  lastCut: number | null;
+}
+
+const LANE_OFF = "Structural continuity is off, so nothing is captured or offered. Turn it on under Settings \u2192 Session continuity.";
+const LANE_BODY_OFF = "Capture is on, but handoff summaries are off, so nothing can be offered to continue. Turn on summary consent under Settings \u2192 Session continuity.";
+const LANE_NO_ROUTE = "No model route resolves, so no handoff can be produced. Set the extraction provider and model under Settings, or select a default model.";
+const LANE_UNHEALTHY = "Continuity storage is not ready, so the lane is not running. Check the plugin log, then retry.";
+const LANE_EMPTY = "Nothing captured yet. Send a message in a session to start; the first handoff appears after that turn ends.";
+
+export function readContinuityLaneStatus(
+  owner: { getJournalSqlite(): DatabaseSync },
+  state: { enabled: boolean; bodyEnabled: boolean; route: boolean; healthy: boolean },
+): ContinuityLaneStatus {
+  const status: ContinuityLaneStatus = {
+    structural: "unavailable", body: state.bodyEnabled && state.enabled ? "on" : "off", route: state.route === true,
+    reason: LANE_UNHEALTHY, pending: 0, failed: 0, handoffs: 0, lastCut: null,
+  };
+  if (!state.healthy) return status;
+  status.structural = state.enabled ? "on" : "off";
+  // Counters are read-only and bounded; an absent or foreign schema is simply
+  // "no data yet" rather than an error the operator has to interpret.
+  try {
+    const db = owner.getJournalSqlite();
+    // Per-query guard: the optional work/handoff pair only exists after the
+    // lane creates it, and ONE missing table must zero only its own counter
+    // instead of discarding the counters that could still be read.
+    const count = (sql: string): number => {
+      try {
+        const row = db.prepare(sql).get() as { n?: number } | undefined;
+        return typeof row?.n === "number" && Number.isSafeInteger(row.n) && row.n >= 0 ? row.n : 0;
+      } catch { return 0; }
+    };
+    status.pending = count("SELECT COUNT(*) AS n FROM main.continuity_jobs WHERE status='pending'");
+    status.failed = count("SELECT COUNT(*) AS n FROM main.continuity_work WHERE status='failed'");
+    status.handoffs = count("SELECT COUNT(*) AS n FROM main.continuity_handoff");
+    try {
+      const cut = db.prepare("SELECT MAX(cut) AS cut FROM main.continuity_jobs").get() as { cut?: number } | undefined;
+      if (typeof cut?.cut === "number" && Number.isSafeInteger(cut.cut) && cut.cut >= -1) status.lastCut = cut.cut;
+    } catch { status.lastCut = null; }
+  } catch {
+    status.pending = 0; status.failed = 0; status.handoffs = 0; status.lastCut = null;
+  }
+  if (!state.enabled) { status.reason = LANE_OFF; return status; }
+  if (!state.bodyEnabled) { status.reason = LANE_BODY_OFF; return status; }
+  if (!state.route) { status.reason = LANE_NO_ROUTE; return status; }
+  if (status.handoffs > 0) {
+    status.reason = `${status.handoffs} unfinished work item(s) have a handoff that can be continued in the Sessions tab.`;
+    return status;
+  }
+  status.reason = status.pending > 0
+    ? `${status.pending} piece(s) of unfinished work are captured; no handoff has been produced yet.${status.failed > 0 ? ` ${status.failed} processing attempt(s) failed — check the plugin log.` : ""}`
+    : LANE_EMPTY;
+  return status;
+}
+
 /** Same-project completed handoffs as bounded offer metadata. Never bodies. */
 function readOffers(
   handoffs: ContinuityUiHandoffReader | undefined, projectId: string, targetSessionId: string,

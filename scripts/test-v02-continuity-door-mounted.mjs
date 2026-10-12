@@ -101,6 +101,19 @@ if (minted) {
   check("Continue refuses an empty target identity", malformed.result?.ok === false && /target session identity/.test(malformed.result.error?.message ?? ""), JSON.stringify(malformed).slice(0, 200));
 }
 
+// ── 6. The Overview lane status rides the snapshot: facts + counts only ─────
+{
+  const snapshot = await rpc("selfImproved/snapshot", {});
+  const lane = snapshot.result?.ok === true ? snapshot.result.value?.continuity : null;
+  check("the Overview snapshot carries the continuity lane status",
+    !!lane && typeof lane.structural === "string" && typeof lane.reason === "string"
+      && typeof lane.pending === "number" && typeof lane.handoffs === "number",
+    JSON.stringify(snapshot).slice(0, 260));
+  const serialized = JSON.stringify(lane ?? {});
+  check("the lane status carries no session or project identity",
+    !!lane && !serialized.includes("session-") && !serialized.includes("pj-"), serialized.slice(0, 200));
+}
+
 // ── 6. Boundary disclosure (NOT a gate this plugin can pass) ────────────────
 // The installed rc.2 runtime admits every loopback /api request as the single
 // OperatorPeer (its browser-authentication call is patched off in this

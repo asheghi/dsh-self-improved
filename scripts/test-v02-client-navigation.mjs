@@ -55,6 +55,23 @@ await check('Overview actually calls authorized snapshot and renders bounded cou
   let calls = 0; const h = harness(sut.OverviewSection, props({ snapshot: async signal => { calls++; assert.ok(signal instanceof AbortSignal); return { ok: true, value: { memories: [{}, {}], pending: 3, episodes: { counts: { reviewed: 4 } }, skills: [{}] } }; } }));
   h.render(); await flush(); const tree = h.render(); assert.equal(calls, 1); assert.match(text(tree), /bounded/); assert.deepEqual(nodes(tree, n => n.type === 'dd').map(text), ['2', '3', '4', '1']); h.unmount();
 });
+await check('Overview reports the continuity lane factually, including why nothing can be continued', async () => {
+  const lane = { structural: 'on', body: 'off', route: true, reason: 'Capture is on, but handoff summaries are off, so nothing can be offered to continue.', pending: 2, failed: 1, handoffs: 0, lastCut: 17 };
+  const h = harness(sut.OverviewSection, props({ snapshot: async () => ({ ok: true, value: { memories: [], pending: 0, episodes: { counts: { reviewed: 0 } }, skills: [], continuity: lane } }) }));
+  h.render(); await flush(); const tree = h.render();
+  const body = text(tree);
+  assert.match(body, /Session continuity/);
+  assert.match(body, /Handoff summaries \(uses the model\)/);
+  assert.match(body, /Capture is on, but handoff summaries are off/);
+  assert.match(body, /Latest boundary cut/); assert.match(body, /17/);
+  assert.doesNotMatch(body, /healthy/i, 'the status is facts, never a health badge');
+  h.unmount();
+});
+await check('Overview renders no continuity section when the host serves no lane status', async () => {
+  const h = harness(sut.OverviewSection, props({ snapshot: async () => ({ ok: true, value: { memories: [], pending: 0, episodes: { counts: { reviewed: 0 } }, skills: [], continuity: null } }) }));
+  h.render(); await flush(); const tree = h.render();
+  assert.doesNotMatch(text(tree), /Session continuity/); h.unmount();
+});
 await check('Sessions sends exact selected identity with signal and renders rows without inventing an offer', async () => {
   const calls = []; const h = harness(sut.SessionsSection, props({ continuityStatus: async (id, signal) => { calls.push({ id, signal }); return { ok: true, value: { availability: 'ready', canContinue: false, reason: 'No offer.', rows: [{ id: 'job', sessionId: 'source-id', cut: 8, status: 'running', attempts: 1 }], offers: [] } }; } }));
   let tree = h.render(); nodes(tree, n => n.type === 'input')[0].props.onChange({ target: { value: 'native-target' } }); tree = h.render();

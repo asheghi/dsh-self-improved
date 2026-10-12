@@ -1679,6 +1679,11 @@ window.__ModuleLoader__.load({
       var read = useOwnedRead(props.api, "snapshot"), state = read.state;
       react.useEffect(function () { read.refresh(); }, [read.refresh]);
       var data = state.data, counts = data && data.episodes && data.episodes.counts;
+      var lane = data && data.continuity ? data.continuity : null;
+      /** Factual lane state: on/off facts, bounded counts, and the first reason
+       *  nothing can be continued. Never a "healthy" badge — an off switch, a
+       *  missing route and a failed worker all read differently. */
+      function laneLine(label, value) { return [h("dt", { key: label }, label), h("dd", { key: label + "-v" }, String(value))]; }
       return h("div", { className: "__dsi_root" },
         h("p", { className: "__dsi_status" }, "Read-only stored data. Paused data remains inspectable; these counts do not establish task success or measured improvement."),
         h("button", { type: "button", className: "__dsi_btn", disabled: state.busy, onClick: function () { read.refresh(); } }, props.t("browserRefresh")),
@@ -1688,7 +1693,19 @@ window.__ModuleLoader__.load({
           h("dt", null, "Memory rows shown (bounded)"), h("dd", null, String((data.memories || []).length)),
           h("dt", null, "Pending extraction sessions"), h("dd", null, String(data.pending || 0)),
           h("dt", null, "Reviewed evidence episodes"), h("dd", null, String(counts && counts.reviewed || 0)),
-          h("dt", null, "Skill files listed (not activation evidence)"), h("dd", null, String((data.skills || []).length))) : null);
+          h("dt", null, "Skill files listed (not activation evidence)"), h("dd", null, String((data.skills || []).length))) : null,
+        lane ? h("section", null,
+          h("h3", null, "Session continuity"),
+          h("dl", null,
+            laneLine("Structural capture", lane.structural === "on" ? "on" : lane.structural === "off" ? "off" : "unavailable"),
+            laneLine("Handoff summaries (uses the model)", lane.body === "on" ? "on" : "off"),
+            laneLine("Model route resolves", lane.route ? "yes" : "no"),
+            laneLine("Unfinished work captured", lane.pending || 0),
+            laneLine("Handoffs ready to continue", lane.handoffs || 0),
+            laneLine("Processing attempts failed", lane.failed || 0),
+            laneLine("Latest boundary cut", lane.lastCut === null || lane.lastCut === undefined ? "none" : String(lane.lastCut))),
+          lane.reason ? h("p", { className: "__dsi_status", role: "status" }, lane.reason) : null,
+          h("p", null, "Continuing is an operator action in the Sessions tab. Processing counts are not task success, and a handoff is unverified orientation only.")) : null);
     }
     function SessionsSection(props) {
       var targetPair = react.useState(""), target = targetPair[0], setTarget = targetPair[1];

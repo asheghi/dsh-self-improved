@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { fixture, loadOwn, z } from './continuity-v03-provider-fixture.mjs';
-const { readContinuityUiInventory } = await loadOwn('continuity-inventory-ui');
+const { readContinuityUiInventory, readContinuityLaneStatus } = await loadOwn('continuity-inventory-ui');
 const { ContinuityStoreV02 } = await loadOwn('continuity-store-v02');
 const { bindContinuityCheckpoint } = await loadOwn('continuity-checkpoint-v02');
 const { initContinuityProjection, applyContinuityProjection } = await loadOwn('continuity-projection-v02');
@@ -65,6 +65,33 @@ try {
     const unavailable = createMemoryBusiness({ ...deps, continuityStatus: undefined }); assert.equal((await unavailable.continuityStatus({ source: 'remote', peerId: 'synthetic' }, f.root.id)).availability, 'unavailable');
     const late = createMemoryBusiness({ ...deps, continuityStatus: async () => { ac.abort(); return { availability: 'ready', canContinue: false, reason: '', rows: [] }; } });
     await assert.rejects(late.continuityStatus({ source: 'remote', peerId: 'synthetic' }, f.root.id, ac.signal));
+  });
+  await check('lane status names the FIRST blocking reason and reports bounded counters', async () => {
+    const states = [
+      [{ enabled: false, bodyEnabled: false, route: false, healthy: true }, 'off', /Structural continuity is off/],
+      [{ enabled: true, bodyEnabled: false, route: true, healthy: true }, 'on', /handoff summaries are off/],
+      [{ enabled: true, bodyEnabled: true, route: false, healthy: true }, 'on', /No model route resolves/],
+      [{ enabled: true, bodyEnabled: true, route: true, healthy: false }, 'unavailable', /not ready/],
+    ];
+    for (const [state, structural, pattern] of states) {
+      const lane = readContinuityLaneStatus(owner, state);
+      assert.equal(lane.structural, structural, JSON.stringify(state));
+      assert.match(lane.reason, pattern);
+      assert.equal(typeof lane.pending, 'number'); assert.equal(typeof lane.handoffs, 'number');
+    }
+    const ready = readContinuityLaneStatus(owner, { enabled: true, bodyEnabled: true, route: true, healthy: true });
+    // Counts must equal the durable rows (state-independent, so this holds
+    // whatever the earlier checks left behind) and the reason must match the
+    // branch those counts select.
+    // This fixture never creates the optional work/handoff pair, so the reader
+    // must treat an absent table as "no data yet" — exactly what a real lane
+    // does before its first handoff.
+    const countOr0 = (sql) => { try { return db.prepare(sql).get().n; } catch { return 0; } };
+    const pending = countOr0("SELECT COUNT(*) AS n FROM main.continuity_jobs WHERE status='pending'");
+    const handoffs = countOr0("SELECT COUNT(*) AS n FROM main.continuity_handoff");
+    assert.equal(ready.pending, pending); assert.equal(ready.handoffs, handoffs);
+    assert.match(ready.reason, handoffs > 0 ? /have a handoff that can be continued/ : pending > 0 ? /no handoff has been produced yet/ : /Nothing captured yet/);
+    assert.ok(!JSON.stringify(ready).includes('session-'), 'lane status must never carry a session/project identity');
   });
   console.log(`${passes} actual native read-only inventory/business gates PASS; no authenticated Continue or live browser acceptance claimed`);
 } finally { db.close(); await f.close(); }

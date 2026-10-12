@@ -57,7 +57,7 @@ import { ContinuityStoreV02, fenceExistingContinuity } from "./continuity-store-
 import { mountContinuityRuntime } from "./continuity-runtime-v02.js";
 import { ContinuityWorkerV02 } from "./continuity-worker-v02.js";
 import { ContinuityHandoffV02 } from "./continuity-handoff-v02.js";
-import { readContinuityUiInventory, readContinuityUiOfferNotes, type ContinuityUiHandoffReader } from "./continuity-inventory-ui.js";
+import { readContinuityLaneStatus, readContinuityUiInventory, readContinuityUiOfferNotes, type ContinuityUiHandoffReader } from "./continuity-inventory-ui.js";
 import { continuityCanonicalDigest, continuityCanonicalHeader } from "./continuity-checkpoint-v02.js";
 import { claimContinuitySummaryHumanV02, continuitySummaryLedgersReadyV02,
   continuitySummaryPolicyFingerprintV02, syncContinuitySummaryPolicyV02 } from "./continuity-summary-ledger-owner.js";
@@ -1446,6 +1446,14 @@ export function apply(ctx: Context, rawConfig: RuntimeConfig): void {
         readContinuityUiInventory(store, ctx.sessionQuery, sessionId, continuityUiGates, signal, Date.now(), continuityHandoffReader?.()),
       continuityOfferNotes: (targetSessionId: string, jobId: string, signal?: AbortSignal) =>
         readContinuityUiOfferNotes(store, ctx.sessionQuery, targetSessionId, jobId, continuityUiGates, continuityHandoffReader?.(), signal),
+      // Overview status: WHY nothing can be continued, as bounded counts plus an
+      // actionable reason. Counts only — never an id, body or envelope.
+      continuityLane: () => readContinuityLaneStatus(store, {
+        enabled: config.continuity?.enabled === true,
+        bodyEnabled: summaryEnabled(),
+        route: currentSummaryRoute() !== null,
+        healthy: !shuttingDown && continuityStorePolicyHealthy,
+      }) as unknown as Record<string, unknown>,
       skillsPrefix: () => config.evolve.skillSynthesis.prefix,
       skillsRoot: () => skillsRootLive(),
       episodeEnabled: () => episodeState.enabled,

@@ -172,6 +172,13 @@ check("business: reads, presence-only snapshot, mutating handshake and peer/args
 
   // Snapshot: redacted rows, no legacy Config-channel credential chips.
   const snap = business.snapshot(peerA, undefined);
+  // Continuity lane status rides the snapshot as bounded facts, and a lane
+  // reader that throws must degrade to null instead of breaking the read.
+  const laneFacts = { structural: "off", body: "off", route: false, reason: "synthetic lane reason", pending: 0, failed: 0, handoffs: 0, lastCut: null };
+  const withLane = createMemoryBusiness({ store, enabled: () => true, skillsPrefix: () => "dsi-", skillsRoot: () => "", episodeEnabled: () => false, log: () => {}, continuityLane: () => laneFacts });
+  assert.deepEqual(withLane.snapshot(peerA, undefined).continuity, laneFacts, "the lane status is served with the snapshot");
+  const brokenLane = createMemoryBusiness({ store, enabled: () => true, skillsPrefix: () => "dsi-", skillsRoot: () => "", episodeEnabled: () => false, log: () => {}, continuityLane: () => { throw new Error("lane reader exploded"); } });
+  assert.equal(brokenLane.snapshot(peerA, undefined).continuity, null, "a failing lane reader degrades to null, never an error or a stale claim");
   assert.ok(Array.isArray(snap.memories) && snap.memories.length >= 2, "snapshot serves memory rows");
   const rawSnap = JSON.stringify(snap);
   assert.ok(!rawSnap.includes("actionToken"), "the typed business snapshot carries no namespace-published action token");

@@ -499,6 +499,8 @@ export function browserSnapshot(
   skillsRoot = "",
   /** Phase 6: recent episode rows (redacted) are served only while episode learning is enabled; counts are always included */
   episodeEnabled = false,
+  /** Bounded, body-free continuity lane status (counts + an actionable reason). */
+  continuity?: Record<string, unknown> | null,
 ): Record<string, unknown> {
   const memories = store.listMemories({ limit: 300 })
     // Stable ordering: same-millisecond ties fall back to createdAt then id, so
@@ -554,6 +556,7 @@ export function browserSnapshot(
     skills: listSkills(100, skillsPrefix, skillsRoot),
     pending: store.pendingSessions().length,
     episodes,
+    continuity: continuity ?? null,
     updatedAt: Date.now(),
   };
 }

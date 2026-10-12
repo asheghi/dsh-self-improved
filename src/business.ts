@@ -184,6 +184,9 @@ export interface MemoryBusinessDeps {
   /** Operator-door Continue: the bounded notes of ONE currently offered
    *  same-project handoff. Read only for an explicitly confirmed action. */
   continuityOfferNotes?: (targetSessionId: string, jobId: string, signal?: AbortSignal) => Promise<ContinuityUiOfferNotes | null>;
+  /** Bounded, body-free continuity lane status for the Overview tab. Must never
+   *  throw and must never return ids or content; a failure means "no status". */
+  continuityLane?: () => Record<string, unknown> | null;
   /** Shared journal mutation policy (src/index.ts wiring). Absent = the op
    *  still executes with its documented store semantics and this module emits
    *  a visible warning naming the GAP; it never silently claims the journal
@@ -462,8 +465,10 @@ export function createMemoryBusiness(deps: MemoryBusinessDeps): MemoryBusinessAp
     snapshot(caller, signal) {
       assertInProcessOrPeer(caller);
       assertNotAborted(signal);
+      let lane: Record<string, unknown> | null = null;
+      try { lane = deps.continuityLane?.() ?? null; } catch { lane = null; }
       try {
-        return browserSnapshot(deps.store, deps.skillsPrefix(), deps.skillsRoot?.() ?? "", deps.episodeEnabled() === true);
+        return browserSnapshot(deps.store, deps.skillsPrefix(), deps.skillsRoot?.() ?? "", deps.episodeEnabled() === true, lane);
       } catch (error) {
         throw rejected(`memory snapshot failed: ${error instanceof Error ? error.message : String(error)}`);
       }
