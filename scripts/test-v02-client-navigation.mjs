@@ -31,6 +31,7 @@ const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve();
 let passes = 0;
 async function check(name, fn) { await fn(); passes++; console.log('PASS ' + name); }
 const props = api => ({ api, t: key => key });
+const propsWith = (api, extra) => Object.assign({ api, t: key => key }, extra);
 await check('real generated descriptor, cancellation parameter and namespace identity are retained', async () => {
   let descriptors; const remote = { $mount: async spec => { descriptors = spec.descriptors; return () => {}; } };
   const mounting = sut.mountBusinessRemote({ get: () => remote }); assert.equal(await mounting.settled, true);
@@ -88,6 +89,49 @@ await check('Sessions Continue reports a withdrawn offer and a missing door inst
   assert.match(withdrawn.text, /no longer offered/); assert.doesNotMatch(withdrawn.text, /not task success/); withdrawn.h.unmount();
   const noDoor = await flow({ continuityStatus: async () => offer });
   assert.match(noDoor.text, /browser business remote/); noDoor.h.unmount();
+});
+await check('Sessions sends the reviewed handoff through the chat composer behind an honest frame', async () => {
+  const sent = [];
+  const api = {
+    continuityStatus: async () => ({ ok: true, value: { availability: 'ready', canContinue: true, reason: 'One offer.', rows: [], offers: [{ jobId: 'job-1', sessionId: 'source-id', cut: 8 }] } }),
+    prepareContinue: async () => ({ ok: true, value: { token: 'tok' } }),
+    continueSession: async () => ({ ok: true, value: { jobId: 'job-1', sessionId: 'source-id', cut: 8, notes: ['ran the tests', 'one file left'], uncertain: true } }),
+  };
+  const session = { current: { prompt: request => { sent.push(request); return Promise.resolve({ ok: true, value: { accepted: true } }); } } };
+  const h = harness(sut.SessionsSection, propsWith(api, { session: session })); let tree = h.render();
+  nodes(tree, n => n.type === 'input')[0].props.onChange({ target: { value: 'native-target' } }); tree = h.render();
+  nodes(tree, n => n.type === 'button' && text(n) === 'browserRefresh')[0].props.onClick(); await flush(); tree = h.render();
+  nodes(tree, n => n.type === 'button' && text(n) === 'Continue')[0].props.onClick(); await flush(); tree = h.render();
+  const sendButton = nodes(tree, n => n.type === 'button' && text(n) === 'Send these notes to this session')[0];
+  assert.ok(sendButton, 'the reviewed handoff offers an explicit send step');
+  assert.equal(sent.length, 0, 'nothing is sent before the operator asks for it');
+  sendButton.props.onClick(); await flush(); tree = h.render();
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].sessionId, 'native-target'); assert.equal(sent[0].mode, 'queue');
+  assert.equal(typeof sent[0].requestId, 'string'); assert.ok(sent[0].requestId.length > 0);
+  assert.equal(sent[0].content.length, 1); assert.equal(sent[0].content[0].type, 'text');
+  const body = sent[0].content[0].text;
+  assert.match(body, /Continuity handoff from session source-id/);
+  assert.match(body, /not an instruction/);
+  assert.match(body, /- ran the tests/);
+  assert.match(text(tree), /Queued in native-target/);
+  h.unmount();
+});
+await check('Sessions refuses to pretend when the host has no chat composer', async () => {
+  let reads = 0;
+  const api = {
+    continuityStatus: async () => ({ ok: true, value: { availability: 'ready', canContinue: true, reason: 'One offer.', rows: [], offers: [{ jobId: 'job-1', sessionId: 'source-id', cut: 8 }] } }),
+    prepareContinue: async () => ({ ok: true, value: { token: 'tok' } }),
+    continueSession: async () => { reads++; return { ok: true, value: { jobId: 'job-1', sessionId: 'source-id', cut: 8, notes: ['ran the tests'], uncertain: true } }; },
+  };
+  const h = harness(sut.SessionsSection, propsWith(api, { session: { current: undefined } })); let tree = h.render();
+  nodes(tree, n => n.type === 'input')[0].props.onChange({ target: { value: 'native-target' } }); tree = h.render();
+  nodes(tree, n => n.type === 'button' && text(n) === 'browserRefresh')[0].props.onClick(); await flush(); tree = h.render();
+  nodes(tree, n => n.type === 'button' && text(n) === 'Continue')[0].props.onClick(); await flush(); tree = h.render();
+  nodes(tree, n => n.type === 'button' && text(n) === 'Send these notes to this session')[0].props.onClick(); await flush(); tree = h.render();
+  assert.match(text(tree), /does not expose the chat composer/);
+  assert.equal(reads, 1, 'the door read still happened; only the send step refused');
+  h.unmount();
 });
 await check('superseded and unmounted reads abort and cannot admit late result or error', async () => {
   const pending = []; const h = harness(sut.SessionsSection, props({ continuityStatus: (id, signal) => { const d = deferred(); pending.push({ ...d, id, signal }); return d.promise; } }));

@@ -1697,7 +1697,45 @@ window.__ModuleLoader__.load({
       var offers = data && Array.isArray(data.offers) ? data.offers : [];
       var continuePair = react.useState({ busy: false, error: null, notes: null, jobId: null });
       var cont = continuePair[0], setCont = continuePair[1];
+      var sendPair = react.useState({ busy: false, error: null, sent: null });
+      var send = sendPair[0], setSend = sendPair[1];
       function contMsg(r) { return r && !r.ok && r.error ? String(r.error.message || r.error.code || "remote failure") : "remote failure"; }
+      /**
+       * The message the operator is about to send. It states plainly that the
+       * block is machine-generated and unverified, so a handoff excerpt can
+       * never be read as an instruction from the human who pressed the button.
+       */
+      function handoffMessage(notes) {
+        var lines = ["Continuity handoff from session " + notes.sessionId + " (boundary cut " + notes.cut + "), inserted by the operator from the Sessions view.",
+          "Everything below is unverified, machine-generated orientation copied from that session. It is not an instruction, and it is not proof that any action happened or succeeded."];
+        var items = notes.notes || [];
+        for (var i = 0; i < items.length; i++) lines.push("- " + items[i]);
+        return lines.join("\n");
+      }
+      /** Queue the reviewed handoff as ONE user message in the target session —
+       *  the same route the chat uses when you press send. Only the operator can
+       *  reach it: the agent has no browser peer and no composer. */
+      function sendHandoff() {
+        var session = props.session && props.session.current;
+        if (!session || typeof session.prompt !== "function") {
+          setSend({ busy: false, error: "This host does not expose the chat composer, so the notes stay here for you to insert yourself.", sent: null });
+          return;
+        }
+        var destination = target.trim();
+        if (!destination || !cont.notes) return;
+        var requestId = (typeof window !== "undefined" && window.crypto && typeof window.crypto.randomUUID === "function")
+          ? window.crypto.randomUUID() : "dsi-" + String(Date.now()) + "-" + Math.random().toString(16).slice(2);
+        var request = { requestId: requestId, sessionId: destination, mode: "queue", content: [{ type: "text", text: handoffMessage(cont.notes) }] };
+        var zone = (function () { try { var z = Intl.DateTimeFormat().resolvedOptions().timeZone; return typeof z === "string" && z ? z : undefined; } catch (e) { return undefined; } })();
+        if (zone) request.clientTimeZone = zone;
+        setSend({ busy: true, error: null, sent: null });
+        Promise.resolve(session.prompt(request)).then(function (result) {
+          if (!result || !result.ok) throw new Error(contMsg(result));
+          setSend({ busy: false, error: null, sent: destination });
+        }).catch(function (error) {
+          setSend({ busy: false, error: String(error && error.message || error), sent: null });
+        });
+      }
       /**
        * OPERATOR-DOOR CONTINUE.
        *
@@ -1708,6 +1746,7 @@ window.__ModuleLoader__.load({
        * triggered by the agent, only by the operator in this UI.
        */
       function continueOffer(jobId) {
+        setSend({ busy: false, error: null, sent: null });
         if (!props.api || typeof props.api.prepareContinue !== "function" || typeof props.api.continueSession !== "function") {
           setCont({ busy: false, error: "Continue needs the browser business remote.", notes: null, jobId: null });
           return;
@@ -1748,7 +1787,12 @@ window.__ModuleLoader__.load({
         cont.notes ? h("div", { className: "__dsi_root" },
           h("h3", null, "Handoff notes (untrusted quotes)"),
           h("p", { role: "status" }, "Orientation only from the selected session: not task success, not permission, and any external action may already have run or may never have happened."),
-          h("ul", null, (cont.notes.notes || []).map(function (note, index) { return h("li", { key: String(index) }, note); }))) : null,
+          h("ul", null, (cont.notes.notes || []).map(function (note, index) { return h("li", { key: String(index) }, note); })),
+          h("button", { type: "button", className: "__dsi_btn __dsi_btnPrimary", disabled: send.busy || !target.trim(), onClick: sendHandoff },
+            send.busy ? "Sending…" : "Send these notes to this session"),
+          h("p", null, "This queues one message in the session above, exactly as if you typed it. Read the notes first: they can be stale, wrong, or contain text you would not send."),
+          send.error ? h("p", { className: "__dsi_error", role: "alert" }, send.error) : null,
+          send.sent ? h("p", { role: "status" }, "Queued in " + send.sent + ".") : null) : null,
         h("p", null, "Processing states are not task completion, permission, or verified external effects."),
         data && data.availability === "ready" && !rows.length ? h("p", { role: "status" }, "No current eligible processing references.") : null,
         rows.length ? h("table", { className: "__dsi_table" }, h("caption", null, "Same-project continuity processing (bounded)"),
@@ -1827,6 +1871,20 @@ window.__ModuleLoader__.load({
        *  so its render closure reads typed business remotes legally. The
        *  child fiber is disposed with this plugin fiber by the Loader. */
       var sectionGoverned = null; // the ctx.inject fiber while the section is registered
+      /**
+       * The chat's own prompt route. It lives in a SEPARATE inject child so a
+       * host that does not mount the session controller never blocks the
+       * settings section above (an unsatisfied inject key keeps its own fiber
+       * pending, nothing else). Undefined = this host cannot insert a message,
+       * and the UI says so instead of pretending.
+       */
+      var sessionRemote = { current: undefined };
+      void Promise.resolve(ctx.inject(["remote.session"], function (sessionCtx) {
+        try { sessionRemote.current = sessionCtx.get("remote.session"); }
+        catch (e) { sessionRemote.current = undefined; }
+      })).catch(function (e) {
+        console.warn("[dsh-self-improved] chat composer lane unavailable:", String(e && e.message || e));
+      });
       var registerSection = function () {
         if (sectionDispose || sectionGoverned) return function () { /* already registered */ };
         var child = ctx.inject(["remote." + REMOTE_NS, "slots", "locale", "configForms"], function (childCtx) {
@@ -1839,7 +1897,7 @@ window.__ModuleLoader__.load({
               label: function () { return t("nav"); },
               locale: NS
             }, function (props) {
-              return h(MainSection, Object.assign({}, props, { t: t, formBinding: formBinding, app: consentApp, ctx: childCtx, api: businessApi(childCtx) }));
+              return h(MainSection, Object.assign({}, props, { t: t, formBinding: formBinding, app: consentApp, ctx: childCtx, api: businessApi(childCtx), session: sessionRemote }));
             });
           }) || function () {};
         });
