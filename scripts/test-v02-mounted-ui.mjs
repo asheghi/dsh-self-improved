@@ -365,6 +365,73 @@ async function stageVerify() {
   process.exitCode = failed.length ? 1 : 0;
 }
 
+/**
+ * A pid read from a fixture file is namespace-local and may have been reused,
+ * so NEVER signal it blindly. This proves the process is this fixture's own dsh
+ * server (its cmdline names the fixture profile and its environment carries
+ * THIS run's DSH_HOME) before the caller is allowed to touch it. Only sound
+ * inside the originating managed job, which is where `restart` is meant to run.
+ */
+function assertOwnedServerPid(facts) {
+  const pid = facts.server?.pid;
+  if (!Number.isInteger(pid) || pid <= 0) throw new Error("restart: facts carry no server pid");
+  let cmdline = "", environ = "";
+  try { cmdline = readFileSync(`/proc/${pid}/cmdline`, "utf8"); environ = readFileSync(`/proc/${pid}/environ`, "utf8"); }
+  catch { throw new Error("restart: the recorded server is not running in this job"); }
+  if (!cmdline.includes(facts.profileName)) throw new Error("restart: pid does not belong to this fixture profile");
+  if (!environ.split("\0").includes(`DSH_HOME=${facts.home}`)) throw new Error("restart: pid does not own this fixture home");
+  return pid;
+}
+
+/** Spawn one isolated GUI server for an already-composed fixture home. */
+async function spawnServer(runDir, home, stubPort, profileName, logFlags) {
+  const env = serverEnv(home, stubPort);
+  const argv = [DSH_BIN, "--profile", profileName, "--no-open", "--port", "0"];
+  const proc = spawn("node", argv, { env, stdio: ["ignore", "pipe", "pipe"], detached: true });
+  const serverLog = join(runDir, "server.log");
+  const serverLogStream = createWriteStream(serverLog, { flags: logFlags });
+  let out = "";
+  const url = await new Promise((resolve) => {
+    const timer = setInterval(() => { const m = out.match(/dsh web: (http\S+)/); if (m) { clearInterval(timer); resolve(m[1]); } }, 100);
+    proc.stdout.on("data", (d) => { const text = String(d); out += text; serverLogStream.write(text); });
+    proc.stderr.on("data", (d) => { serverLogStream.write(String(d)); });
+    setTimeout(() => { clearInterval(timer); resolve(null); }, 40000);
+  });
+  if (!url) throw new Error("fixture server did not report a URL\n" + out);
+  proc.unref();
+  return { proc, url, serverLog };
+}
+
+/**
+ * `restart` — stop this fixture's server and start a NEW one against the SAME
+ * home, so a mounted gate can prove durable progress survives a real host
+ * restart. It must run inside the same managed job that ran `up` (pid identity
+ * is verified against /proc before anything is signalled).
+ */
+async function stageRestart() {
+  const run = flagValue("--run") ?? "";
+  let runDir, guardedRoot;
+  try { runDir = realpathSync(run); guardedRoot = realpathSync(TEMP); }
+  catch { throw new Error("bad owned run path"); }
+  if (!runDir.startsWith(guardedRoot + "/") || !existsSync(join(runDir, OWNER_MARKER)))
+    throw new Error("restart refuses a path outside the owned fixture tree");
+  const factsPath = join(runDir, "facts.json");
+  const facts = JSON.parse(readFileSync(factsPath, "utf8"));
+  if (facts.runDir !== runDir) throw new Error("run identity mismatch");
+  const pid = assertOwnedServerPid(facts);
+  try { process.kill(pid, "SIGKILL"); } catch { /* already gone */ }
+  for (let i = 0; i < 100; i++) {
+    try { await fetch(new URL("/", new URL(facts.url).origin), { signal: AbortSignal.timeout(400) }); await new Promise((r) => setTimeout(r, 100)); }
+    catch { break; }
+  }
+  const next = await spawnServer(runDir, facts.home, facts.stub.port, facts.profileName, "a");
+  facts.server = { pid: next.proc.pid, log: next.serverLog, restartedAt: Date.now() };
+  facts.restarts = (facts.restarts ?? 0) + 1;
+  facts.url = next.url;
+  writeFileSync(factsPath, JSON.stringify(facts, null, 2));
+  console.log(JSON.stringify({ runid: facts.runid, restarts: facts.restarts, url: facts.url, server: facts.server }, null, 2));
+}
+
 async function stageDown() {
   const run = flagValue("--run") ?? "";
   let runDir, guardedRoot;
@@ -391,4 +458,4 @@ async function stageDown() {
   console.log(cleaned ? `down: cleaned ${runDir}` : `down: guarded kept ${runDir}`);
 }
 
-await (mode === "up" ? stageUp() : mode === "verify" ? stageVerify() : mode === "down" ? stageDown() : Promise.reject(new Error("usage: up | verify --run <dir> | down --run <dir>")));
+await (mode === "up" ? stageUp() : mode === "verify" ? stageVerify() : mode === "restart" ? stageRestart() : mode === "down" ? stageDown() : Promise.reject(new Error("usage: up | verify --run <dir> | restart --run <dir> | down --run <dir>")));
