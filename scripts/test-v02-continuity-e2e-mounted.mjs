@@ -37,6 +37,7 @@ const token = flag("--token");
 if (!base) { console.error("usage: --base <url> (--token <t> | --cookie <c>) [--cwd <dir>] [--timeout ms] [--run <dir>]"); process.exit(2); }
 
 const MARKER = "CONTINUITY-E2E-MARKER-7788";
+const MARKER_OTHER = "CONTINUITY-E2E-MARKER-9911";
 let passes = 0, failures = 0;
 const check = (name, ok, detail) => {
   if (ok) { passes++; console.log("PASS " + name); }
@@ -60,6 +61,22 @@ const rpc = async (endpoint, argsObject) => {
   return { http: response.status, result: envelope && envelope.result };
 };
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+/** Every offer currently served for a target session (bounded list). */
+const offersFor = async (targetSessionId) => {
+  const inventory = await rpc("selfImproved/continuityStatus", { targetSessionId });
+  const offers = inventory.result?.ok === true ? inventory.result.value?.offers : null;
+  return Array.isArray(offers) ? offers : [];
+};
+/** Wait until this project's own session is offered, then return the list. */
+const waitForOffer = async (targetSessionId, wantedSessionId, until) => {
+  let list = [];
+  while (Date.now() < until) {
+    list = await offersFor(targetSessionId);
+    if (list.some((item) => item.sessionId === wantedSessionId)) return list;
+    await wait(1000);
+  }
+  return list;
+};
 
 try {
   if (!cookie && token) {
@@ -132,6 +149,42 @@ try {
   const sent = await rpc("session/prompt", { request: { requestId: randomUUID(), sessionId: targetId, mode: "queue", content: [{ type: "text", text: handoffMessage }] } });
   check("the reviewed handoff is accepted into the target session", sent.result?.ok === true && sent.result.value?.accepted === true, JSON.stringify(sent).slice(0, 300));
   if (sent.result?.ok !== true) diagnostics();
+
+  // ── 8. PROJECT ISOLATION: unrelated projects see nothing ─────────────────
+  // A second, unrelated project directory gets its own source/target pair. The
+  // two projects must never see each other's unfinished work, in EITHER
+  // direction, even though both hold a completed handoff.
+  const otherDir = `${projectDir}-other`;
+  const otherSource = await rpc("session/create", { request: { cwd: otherDir } });
+  const otherSourceId = otherSource.result?.ok === true ? otherSource.result.value?.sessionId : null;
+  check("a session exists in an unrelated project directory", typeof otherSourceId === "string" && otherSourceId !== sourceId, JSON.stringify(otherSource).slice(0, 200));
+  const otherTurn = await rpc("session/prompt", {
+    request: { requestId: randomUUID(), sessionId: otherSourceId, mode: "queue",
+      content: [{ type: "text", text: `Unrelated project check: ${MARKER_OTHER} is still open.` }] },
+  });
+  check("the unrelated project's direct-human turn is accepted", otherTurn.result?.ok === true, JSON.stringify(otherTurn).slice(0, 200));
+  const otherTarget = await rpc("session/create", { request: { cwd: otherDir } });
+  const otherTargetId = otherTarget.result?.ok === true ? otherTarget.result.value?.sessionId : null;
+  check("the unrelated project has its own second session", typeof otherTargetId === "string" && otherTargetId !== targetId, JSON.stringify(otherTarget).slice(0, 200));
+
+  const p2Offers = await waitForOffer(otherTargetId, otherSourceId, Date.now() + timeoutMs);
+  check("the unseen project's own work IS offered inside that project", p2Offers.some((item) => item.sessionId === otherSourceId), JSON.stringify(p2Offers).slice(0, 240));
+  const p1Offers = await offersFor(targetId);
+  check("an unrelated project's session is never offered across projects",
+    !p1Offers.some((item) => item.sessionId === otherSourceId) && !p2Offers.some((item) => item.sessionId === sourceId),
+    `p1=${JSON.stringify(p1Offers).slice(0, 200)} p2=${JSON.stringify(p2Offers).slice(0, 200)}`);
+  check("each project still sees its own work after the cross-project check",
+    p1Offers.some((item) => item.sessionId === sourceId) && p2Offers.some((item) => item.sessionId === otherSourceId));
+
+  // The other project's own notes must quote ITS words, never the first project's.
+  const otherOffer = p2Offers.find((item) => item.sessionId === otherSourceId);
+  const otherPrepared = await rpc("selfImproved/prepareContinue", { targetSessionId: otherTargetId, jobId: otherOffer.jobId });
+  const otherToken = otherPrepared.result?.ok === true ? otherPrepared.result.value?.token : null;
+  const otherNotes = otherToken
+    ? await rpc("selfImproved/continueSession", { targetSessionId: otherTargetId, jobId: otherOffer.jobId, authorization: { token: otherToken } })
+    : null;
+  const otherText = otherNotes?.result?.ok === true ? otherNotes.result.value?.notes?.join("\n") ?? "" : "";
+  check("the unrelated project's notes quote only its own session", otherText.includes(MARKER_OTHER) && !otherText.includes(MARKER), otherText.slice(0, 200));
 } catch (error) {
   failures++;
   console.log("FAIL end-to-end run threw :: " + String(error && error.message || error));
