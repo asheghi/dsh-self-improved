@@ -2567,6 +2567,30 @@ export class MemoryStore {
     });
   }
 
+  /**
+   * Atomic compare-and-set on a draft's status. Callers state exactly which
+   * states they will move FROM, so two operators — or an operator and the
+   * invalidation sweep — can never both win. Returns false when the draft is
+   * absent, owned by another project, in an unexpected state, or (with
+   * requireEvaluation) has never been statically evaluated.
+   */
+  transitionSkillDraft(
+    id: string,
+    from: readonly SkillDraftStatus[],
+    to: SkillDraftStatus,
+    options: { projectId?: string; requireEvaluation?: boolean } = {},
+  ): boolean {
+    if (typeof id !== "string" || id.length === 0 || id.length > 512) return false;
+    if (!Array.isArray(from) || from.length === 0 || !SKILL_DRAFT_STATUSES.has(to)) return false;
+    for (const status of from) if (!SKILL_DRAFT_STATUSES.has(status)) return false;
+    const now = Date.now();
+    const params: Array<string | number> = [to, now, id, ...from];
+    let sql = `UPDATE skill_drafts SET status = ?, updated_at = ? WHERE id = ? AND status IN (${from.map(() => "?").join(", ")})`;
+    if (options.projectId !== undefined) { sql += " AND project_id = ?"; params.push(options.projectId); }
+    if (options.requireEvaluation === true) sql += " AND evaluation_version IS NOT NULL";
+    return this.runInImmediateTransaction(() => Number(this.db.prepare(sql).run(...params).changes) === 1);
+  }
+
   getSkillDraft(id: string, projectId?: string): SkillDraftRecord | undefined {
     const row = (projectId
       ? this.db.prepare("SELECT * FROM skill_drafts WHERE id = ? AND project_id = ?").get(id, projectId)
@@ -2801,6 +2825,10 @@ export interface EpisodeSessionProvenanceRecord extends EpisodeSessionProvenance
 }
 
 export type SkillDraftStatus = "draft" | "evaluated" | "approved" | "rejected" | "invalidated" | "activated" | "rolled-back";
+/** Runtime mirror of the table's status CHECK, so a transition cannot invent one. */
+export const SKILL_DRAFT_STATUSES: ReadonlySet<SkillDraftStatus> = new Set<SkillDraftStatus>([
+  "draft", "evaluated", "approved", "rejected", "invalidated", "activated", "rolled-back",
+]);
 
 export interface CreateSkillDraftInput {
   projectId: string;
