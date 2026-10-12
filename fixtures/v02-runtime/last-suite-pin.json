@@ -1,0 +1,1352 @@
+{
+  "captured": 1791643275745,
+  "pinned": "4ec7b3f5a7667e9df2f0c6c60a563173737678c4372cd56bdf4a54a3c7dcadff",
+  "files": {
+    "business.js": "6340dd213977d6c912fe0bde07f1d0dfdfc3dd677b174f7bf4401ffb26bb766e",
+    "capture.js": "83ab688d8c65f712b2bcff9b7d2ff89bff7a0378d005fa030e0d5af740753667",
+    "commands.js": "717f370ccc120ad138254f0c5ecd5bdead54b45bdd5221f4a08950894bec3fef",
+    "compat-v02.js": "8b4836fbe273856f495e054dc8dcf6baed23550851af1d272fb185a7367dd056",
+    "consolidate.js": "fc02a97b16fe1b8231432afbc83af868fa17d2a8b513b380b8203da64b4441d8",
+    "continuity-checkpoint-v02.js": "cf6f4c082c01bbd370accd72e1b6c6c1ca750bca2d8564899a8ebabbf4fce0f9",
+    "continuity-handoff-v02.js": "106116152380934f2fc67f42812f2b624e9d3d60bd86e636e6faa4c6e358b646",
+    "continuity-owner-v02.js": "f4bac31c7a830d94ace1ebeb223f366153d68b4f6e04ee35c0e24be0c3f42693",
+    "continuity-projection-v02.js": "c718ef60f242a0574ae142c2294c51914f0dc535074f9052741049ad387f6100",
+    "continuity-registry-v02.js": "edb675fd4ba2390a104598622207595ab4ed14e1da8274ae4f44c17e42714817",
+    "continuity-runtime-v02.js": "bb46117d447e9bc43039c2a94e272a6e2b5d4d07ca9c49bd2e5566dba26dbf39",
+    "continuity-source-v02.js": "d64affbb34faf56e4b0933d6a3f0343a9bcf40414905230f0040ea43fdc174b9",
+    "continuity-store-v02.js": "814eab1db82463bf3ff916a4a1ffb0ba466af33e497f3ead725f6921a73ccc3f",
+    "continuity-work-v02.js": "c4f3a9ac47eb3caf46511a8bc3a734b5fc16f5e8eab3c31817112104e6914cfc",
+    "continuity-worker-v02.js": "cf5a8e9650d1fa1770b61fa4534243213b43d67575c393d6c3d3c912b2f8bf74",
+    "dedupe.js": "ac063a7fb21e5d1b3d850def4fada8ef50f1fb6ded2523aeab2bbab03a8de70a",
+    "episode-review.js": "f54e22bc4e0e3e58f1e463feb8b6823b5d980de81f01a8a9af75e08104ba741b",
+    "episodes.js": "bbeafef880b80be29fd6d742bf721a06af674384e883f38b46cd194a62d6e4cf",
+    "evolve.js": "8df2a1b768884d8a0f34a44105d6e0a2ec39c2cd2e30737f14d40e8be0716e75",
+    "extract-journal-v02.js": "635e7cea2ecaa676ee7d4f31a5a13b0bce98fc4a6a4d02c3b8321bf5973aef38",
+    "extract.js": "27755bad04d807d3473c501e1c17b034652b90d60fb97972d1d213bf4d02a08c",
+    "import-v02.js": "ddf93820d1f61939d165036edb4b0dd792c2067f467d27dd72099d6ca0162e9f",
+    "index.js": "27e7280744e781cf5c9c131adaecf5491749cafa5a5d0acc99d16adc05945c42",
+    "inject.js": "8edb41b586357802eee4ea80e4f3877a6d11477fedfcbc77fc24404cccddabc4",
+    "memory-journal-v02.js": "7254f0914662e4ba8ebcfd859ef141e407c1a2aade8e2b17f19608ad2e73219d",
+    "migration-v02.js": "cfbf39ddfe7e538e7db0003b553b9a2a03e87f8e89e2376745d67d6e1b318e77",
+    "recall.js": "2e1ca25d8410a8447a94bed50ba4f69a0875eeeb993429110987d1eb5ba587d6",
+    "redact.js": "86f442d0e210f7e3a97a7387a9276c16e6288efa3e6b197c6e71f87d204f9ad4",
+    "runtime-config.js": "9d0c8ac1bebc370ed04c402616ad9d2b313a248f1127d3e61e24454741dc2f73",
+    "shutdown-v02.js": "53f64b08848d1c5df970656f25275bc523ffe77d0ad3458bee934af6c2b0c8ec",
+    "storage.js": "b3e91bf8a2684515fe61e55bd0fb08c80fee12af88df002a1714202b2f502a02",
+    "tools.js": "1a61a7ab85eced391bff9c30b3f8415b86d296fcd0a72f04ec95b9e7cb494646"
+  },
+  "suiteEndComposite": "4ec7b3f5a7667e9df2f0c6c60a563173737678c4372cd56bdf4a54a3c7dcadff",
+  "changedDuringSuite": false,
+  "perCase": {
+    "case1": "4ec7b3f5a7667e9df2f0c6c60a563173737678c4372cd56bdf4a54a3c7dcadff",
+    "case2": "4ec7b3f5a7667e9df2f0c6c60a563173737678c4372cd56bdf4a54a3c7dcadff",
+    "case3-row": "4ec7b3f5a7667e9df2f0c6c60a563173737678c4372cd56bdf4a54a3c7dcadff",
+    "case3-config": "4ec7b3f5a7667e9df2f0c6c60a563173737678c4372cd56bdf4a54a3c7dcadff",
+    "case4": "4ec7b3f5a7667e9df2f0c6c60a563173737678c4372cd56bdf4a54a3c7dcadff",
+    "case5": "4ec7b3f5a7667e9df2f0c6c60a563173737678c4372cd56bdf4a54a3c7dcadff"
+  },
+  "results": [
+    {
+      "name": "case1/composition dump accepts the mount overlay",
+      "class": "check",
+      "ok": true,
+      "detail": "rue\n      tools: true\n    extract:\n      provider: deepseek-official\n      model: deepseek-flash\n      flushDrain: true\n"
+    },
+    {
+      "name": "case1/composed tree contains the plugin row",
+      "class": "check",
+      "ok": true,
+      "detail": "line 384"
+    },
+    {
+      "name": "case1/composed tree carries the session-telemetry-otel row explicitly disabled in the fixture composition (verified dialect: no auto-initiating external exporter is even mountable)",
+      "class": "check",
+      "ok": true,
+      "detail": "- id: session-telemetry-otel |   name: '@deepseek-ai/dsh-session-telemetry-otel' |   config: |     mode: !!js process.env.DSH_TELEMETRY_MODE || 'FEEDBACK_ONLY' |     shutdownTimeoutMillis: 3000"
+    },
+    {
+      "name": "case1/egress guard log written",
+      "class": "check",
+      "ok": true,
+      "detail": "entries=14"
+    },
+    {
+      "name": "case1/egress guard booted (guard.ready recorded)",
+      "class": "check",
+      "ok": true,
+      "detail": "layers=[\"dns\",\"net\",\"dgram\",\"http\",\"https\",\"fetch\"]"
+    },
+    {
+      "name": "case1/egress guard selftest completed",
+      "class": "check",
+      "ok": true,
+      "detail": "selftest entries=11"
+    },
+    {
+      "name": "case1/egress guard selftest all layers armed",
+      "class": "check",
+      "ok": true,
+      "detail": "5 layer probes denied as designed"
+    },
+    {
+      "name": "case1/no non-loopback network attempt during the guarded run",
+      "class": "check",
+      "ok": true,
+      "detail": "zero blocked attempts recorded"
+    },
+    {
+      "name": "case1/every planned egress interception layer patched (none silently skipped)",
+      "class": "check",
+      "ok": true,
+      "detail": "no patch.failed entries"
+    },
+    {
+      "name": "case1/all outbound connects from the runtime child kept loopback",
+      "class": "check",
+      "ok": true,
+      "detail": "loopback connect records=2"
+    },
+    {
+      "name": "case1/every outbound loopback connect targeted this run's stub port",
+      "class": "check",
+      "ok": true,
+      "detail": "all loopback connects → stub port"
+    },
+    {
+      "name": "case1/child env only carries verified allowlist keys (no inherited credential/home/profile variables)",
+      "class": "check",
+      "ok": true,
+      "detail": "extras=none; present=DEEPSEEK_API_KEY,DEEPSEEK_BASE_URL,DSH_FIXTURE_EGRESS_LOG,DSH_HOME,DSH_PERMISSION_MODE,DSH_TELEMETRY_DISABLED,HOME,LANG,NODE_OPTIONS,PATH,TMPDIR (LANG/LC_ALL inherit only when set)"
+    },
+    {
+      "name": "case1/the only credential variable is the synthetic per-run fixture key",
+      "class": "check",
+      "ok": true,
+      "detail": "synthetic-fixture-key-case1-1791643264191-8b5aa5"
+    },
+    {
+      "name": "case1/the provider route is this run's loopback stub (config, not network enforcement)",
+      "class": "check",
+      "ok": true,
+      "detail": "http://127.0.0.1:40189"
+    },
+    {
+      "name": "case1/telemetry opt-out and permission mode are the verified rc.2 launcher values",
+      "class": "check",
+      "ok": true,
+      "detail": "telemetry=1 permission=workspace-write"
+    },
+    {
+      "name": "case1/run exit code 0",
+      "class": "check",
+      "ok": true,
+      "detail": "exit=0 :: 2026-10-10T14:41:06.207Z (+1821ms) [err] (node:18) ExperimentalWarning: SQLite is an experimental feature and might change at any time | 2026-10-10T14:41:06.207Z (+1821ms) [err] (Use `node --trace-warnings ...` to show where the warning was created) | "
+    },
+    {
+      "name": "case1/unmount drain completes without plugin extraction errors on stderr",
+      "class": "check",
+      "ok": true,
+      "detail": "no plugin drain error on stderr"
+    },
+    {
+      "name": "case1/--json session id reported",
+      "class": "check",
+      "ok": true,
+      "detail": "session-3709b55f-450f-4b74-8d8c-387cce5e363b"
+    },
+    {
+      "name": "case1/main model request seen at the stub",
+      "class": "check",
+      "ok": true,
+      "detail": "total requests=3"
+    },
+    {
+      "name": "case1/every provider request carried the synthetic fixture key (no real credential possible)",
+      "class": "check",
+      "ok": true,
+      "detail": "keys=synthetic-fixture-key-case1-1791643264191-8b5aa5"
+    },
+    {
+      "name": "case1/stub endpoint is on this case's loopback port",
+      "class": "check",
+      "ok": true,
+      "detail": "/v1/messages"
+    },
+    {
+      "name": "case1/first request precedes any recall (store empty at request time)",
+      "class": "check",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "case1/first request is one direct user turn",
+      "class": "check",
+      "ok": true,
+      "detail": "msg n=1"
+    },
+    {
+      "name": "case1/extraction aux call happened on flush drain",
+      "class": "check",
+      "ok": true,
+      "detail": "n=1"
+    },
+    {
+      "name": "case1/extraction aux prompt carries the captured user slice",
+      "class": "check",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "case1/extraction aux route matches the configured model",
+      "class": "check",
+      "ok": true,
+      "detail": "deepseek-flash"
+    },
+    {
+      "name": "case1/aux call wire shape = one identity-free user message (UserMessage guard)",
+      "class": "check",
+      "ok": true,
+      "detail": "msgs=1 roles=user"
+    },
+    {
+      "name": "case1/plugin code really executed through the mounted native loader (plugin-emitted loaded banner)",
+      "class": "check",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "case1/session log records the task with kind=user provenance",
+      "class": "check",
+      "ok": true,
+      "detail": "{\"kind\":\"user\"}"
+    },
+    {
+      "name": "case1/no recall snapshot logged on this empty first run",
+      "class": "check",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "case1/successful extraction persists one row and the journal consumed coordinates acknowledge it (not crash-atomicity proof)",
+      "class": "check",
+      "ok": true,
+      "detail": "memories=1 sources=1 pending=0 jobs=done"
+    },
+    {
+      "name": "case1/extraction drain persists the provider-validated insert with fail-close derived provenance + same-tx journal support link",
+      "class": "check",
+      "ok": true,
+      "detail": "memories=1 provenance=derived source=llm-extract derived-links=1, sources pending=0"
+    },
+    {
+      "name": "case1/capture persisted the direct-human turn in the journal personal lane (eligible human only)",
+      "class": "check",
+      "ok": true,
+      "detail": "seq=8 chars=80"
+    },
+    {
+      "name": "case1/only eligible direct-human rows persisted (no assistant/injected personal-lane text; minimized text self-consistent)",
+      "class": "check",
+      "ok": true,
+      "detail": "rows=1 kinds=user"
+    },
+    {
+      "name": "case1/journal consumed coordinates exact after the provider call (per-source, not a legacy cursor)",
+      "class": "check",
+      "ok": true,
+      "detail": "sources=1 pending=0 jobs=done"
+    },
+    {
+      "name": "case1/derived memory carries explicit evidence coordinates resolvable to the journal source row",
+      "class": "check",
+      "ok": true,
+      "detail": "evidence=session-3709b55f-450f-4b74-8d8c-387cce5e363b#8"
+    },
+    {
+      "name": "case2/runA/egress guard log written",
+      "class": "check",
+      "ok": true,
+      "detail": "entries=14"
+    },
+    {
+      "name": "case2/runA/egress guard booted (guard.ready recorded)",
+      "class": "check",
+      "ok": true,
+      "detail": "layers=[\"dns\",\"net\",\"dgram\",\"http\",\"https\",\"fetch\"]"
+    },
+    {
+      "name": "case2/runA/egress guard selftest completed",
+      "class": "check",
+      "ok": true,
+      "detail": "selftest entries=11"
+    },
+    {
+      "name": "case2/runA/egress guard selftest all layers armed",
+      "class": "check",
+      "ok": true,
+      "detail": "5 layer probes denied as designed"
+    },
+    {
+      "name": "case2/runA/no non-loopback network attempt during the guarded run",
+      "class": "check",
+      "ok": true,
+      "detail": "zero blocked attempts recorded"
+    },
+    {
+      "name": "case2/runA/every planned egress interception layer patched (none silently skipped)",
+      "class": "check",
+      "ok": true,
+      "detail": "no patch.failed entries"
+    },
+    {
+      "name": "case2/runA/all outbound connects from the runtime child kept loopback",
+      "class": "check",
+      "ok": true,
+      "detail": "loopback connect records=2"
+    },
+    {
+      "name": "case2/runA/every outbound loopback connect targeted this run's stub port",
+      "class": "check",
+      "ok": true,
+      "detail": "all loopback connects → stub port"
+    },
+    {
+      "name": "case2/runA/child env only carries verified allowlist keys (no inherited credential/home/profile variables)",
+      "class": "check",
+      "ok": true,
+      "detail": "extras=none; present=DEEPSEEK_API_KEY,DEEPSEEK_BASE_URL,DSH_FIXTURE_EGRESS_LOG,DSH_HOME,DSH_PERMISSION_MODE,DSH_TELEMETRY_DISABLED,HOME,LANG,NODE_OPTIONS,PATH,TMPDIR (LANG/LC_ALL inherit only when set)"
+    },
+    {
+      "name": "case2/runA/the only credential variable is the synthetic per-run fixture key",
+      "class": "check",
+      "ok": true,
+      "detail": "synthetic-fixture-key-case2-1791643266809-7941af-A"
+    },
+    {
+      "name": "case2/runA/the provider route is this run's loopback stub (config, not network enforcement)",
+      "class": "check",
+      "ok": true,
+      "detail": "http://127.0.0.1:33705"
+    },
+    {
+      "name": "case2/runA/telemetry opt-out and permission mode are the verified rc.2 launcher values",
+      "class": "check",
+      "ok": true,
+      "detail": "telemetry=1 permission=workspace-write"
+    },
+    {
+      "name": "case2/run A exit code 0",
+      "class": "check",
+      "ok": true,
+      "detail": "exit=0 :: 2026-10-10T14:41:07.981Z (+729ms) [err] (node:30) ExperimentalWarning: SQLite is an experimental feature and might change at any time | 2026-10-10T14:41:07.981Z (+729ms) [err] (Use `node --trace-warnings ...` to show where the warning was created) | "
+    },
+    {
+      "name": "case2/run A session id",
+      "class": "check",
+      "ok": true,
+      "detail": "session-4dbfcd7a-554c-4bc7-8ef0-882cad2c9d36"
+    },
+    {
+      "name": "case2/run A first main request captured",
+      "class": "check",
+      "ok": true,
+      "detail": "n=2"
+    },
+    {
+      "name": "case2/recall block inside the first provider request of the run",
+      "class": "check",
+      "ok": true,
+      "detail": "msg idx 1/1"
+    },
+    {
+      "name": "case2/recalled seed text reached the provider boundary verbatim",
+      "class": "check",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "case2/recall message is a user message appended after the direct human turn",
+      "class": "check",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "case2/no recall block in mid-history before the current turn",
+      "class": "check",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "case2/task logged with kind=user direct-human provenance",
+      "class": "check",
+      "ok": true,
+      "detail": "{\"kind\":\"user\"}"
+    },
+    {
+      "name": "case2/run A logged exactly one attributed recall snapshot",
+      "class": "check",
+      "ok": true,
+      "detail": "count=1"
+    },
+    {
+      "name": "case2/recall snapshot attribution fields complete",
+      "class": "check",
+      "ok": true,
+      "detail": "form=snapshot sections=long-term-memory-recall"
+    },
+    {
+      "name": "case2/recall logged after the task it preceded",
+      "class": "check",
+      "ok": true,
+      "detail": "recall seq=10 task seq=8"
+    },
+    {
+      "name": "case2/seed access count bumped once by the injection",
+      "class": "check",
+      "ok": true,
+      "detail": "The user's synthetic runtime recall seed is ORCHID-BASIL-77@1"
+    },
+    {
+      "name": "case2/runB/egress guard log written",
+      "class": "check",
+      "ok": true,
+      "detail": "entries=13"
+    },
+    {
+      "name": "case2/runB/egress guard booted (guard.ready recorded)",
+      "class": "check",
+      "ok": true,
+      "detail": "layers=[\"dns\",\"net\",\"dgram\",\"http\",\"https\",\"fetch\"]"
+    },
+    {
+      "name": "case2/runB/egress guard selftest completed",
+      "class": "check",
+      "ok": true,
+      "detail": "selftest entries=11"
+    },
+    {
+      "name": "case2/runB/egress guard selftest all layers armed",
+      "class": "check",
+      "ok": true,
+      "detail": "5 layer probes denied as designed"
+    },
+    {
+      "name": "case2/runB/no non-loopback network attempt during the guarded run",
+      "class": "check",
+      "ok": true,
+      "detail": "zero blocked attempts recorded"
+    },
+    {
+      "name": "case2/runB/every planned egress interception layer patched (none silently skipped)",
+      "class": "check",
+      "ok": true,
+      "detail": "no patch.failed entries"
+    },
+    {
+      "name": "case2/runB/all outbound connects from the runtime child kept loopback",
+      "class": "check",
+      "ok": true,
+      "detail": "loopback connect records=1"
+    },
+    {
+      "name": "case2/runB/every outbound loopback connect targeted this run's stub port",
+      "class": "check",
+      "ok": true,
+      "detail": "all loopback connects → stub port"
+    },
+    {
+      "name": "case2/runB/child env only carries verified allowlist keys (no inherited credential/home/profile variables)",
+      "class": "check",
+      "ok": true,
+      "detail": "extras=none; present=DEEPSEEK_API_KEY,DEEPSEEK_BASE_URL,DSH_FIXTURE_EGRESS_LOG,DSH_HOME,DSH_PERMISSION_MODE,DSH_TELEMETRY_DISABLED,HOME,LANG,NODE_OPTIONS,PATH,TMPDIR (LANG/LC_ALL inherit only when set)"
+    },
+    {
+      "name": "case2/runB/the only credential variable is the synthetic per-run fixture key",
+      "class": "check",
+      "ok": true,
+      "detail": "synthetic-fixture-key-case2-1791643266809-7941af-B"
+    },
+    {
+      "name": "case2/runB/the provider route is this run's loopback stub (config, not network enforcement)",
+      "class": "check",
+      "ok": true,
+      "detail": "http://127.0.0.1:33705"
+    },
+    {
+      "name": "case2/runB/telemetry opt-out and permission mode are the verified rc.2 launcher values",
+      "class": "check",
+      "ok": true,
+      "detail": "telemetry=1 permission=workspace-write"
+    },
+    {
+      "name": "case2/run B (resume + fork) exit code 0",
+      "class": "check",
+      "ok": true,
+      "detail": "exit=0 :: 2026-10-10T14:41:09.224Z (+666ms) [err] (node:42) ExperimentalWarning: SQLite is an experimental feature and might change at any time | 2026-10-10T14:41:09.224Z (+666ms) [err] (Use `node --trace-warnings ...` to show where the warning was created) | "
+    },
+    {
+      "name": "case2/run B adopted the native session",
+      "class": "check",
+      "ok": true,
+      "detail": "session-4dbfcd7a-554c-4bc7-8ef0-882cad2c9d36"
+    },
+    {
+      "name": "case2/run B produced the stub final answer",
+      "class": "check",
+      "ok": true,
+      "detail": "RUN2-ACK-COLT"
+    },
+    {
+      "name": "case2/resumed run issued its first provider request",
+      "class": "check",
+      "ok": true,
+      "detail": "n=5"
+    },
+    {
+      "name": "case2/native resume restored run-A history into the request",
+      "class": "check",
+      "ok": true,
+      "detail": "runA task idx=0; runB task idx=2; total=3"
+    },
+    {
+      "name": "case2/run-A assistant reply persisted through resume",
+      "class": "check",
+      "ok": true,
+      "detail": "1 assistant messages in request"
+    },
+    {
+      "name": "case2/recall injected on the resumed turn too",
+      "class": "check",
+      "ok": true,
+      "detail": "idx=0"
+    },
+    {
+      "name": "case2/resumed turn carries the fresh recall block inside its own user message",
+      "class": "check",
+      "ok": true,
+      "detail": "run-B task message carries the recall block"
+    },
+    {
+      "name": "case2/restored run-A recall is not duplicated inside the new turn's message",
+      "class": "check",
+      "ok": true,
+      "detail": "recall blocks in run-B message=1"
+    },
+    {
+      "name": "case2/fork child request used its own session id",
+      "class": "check",
+      "ok": true,
+      "detail": "7271e93a-cef4-4e15-a915-583415a91202"
+    },
+    {
+      "name": "case2/fork child inherited the parent history (task A present)",
+      "class": "check",
+      "ok": true,
+      "detail": "child prompt appended last"
+    },
+    {
+      "name": "case2/fork child kept the current turn appended (task B still in history or own prompt last)",
+      "class": "check",
+      "ok": true,
+      "detail": "child msgs=3"
+    },
+    {
+      "name": "case2/store has exactly the one recalled memory after resume+fork (no duplicates planted)",
+      "class": "check",
+      "ok": true,
+      "detail": "The user's synthetic runtime recall seed is ORCHID-BASIL-77"
+    },
+    {
+      "name": "case2/delegated fork child persisted NO personal-lane journal evidence (parent text and own assistant output both excluded)",
+      "class": "check",
+      "ok": true,
+      "detail": "child journal rows=0 (child request positively observed above)"
+    },
+    {
+      "name": "case2/delegated fork child persisted ZERO journal sources by design (isDelegatedHeader gate)",
+      "class": "check",
+      "ok": true,
+      "detail": "no journal sources for the child"
+    },
+    {
+      "name": "case2/resume did not re-capture run-A evidence and both direct-human turns persist exactly once (journal lineage)",
+      "class": "check",
+      "ok": true,
+      "detail": "human rows=2, distinct seqs=2, taskA=true, taskB=true"
+    },
+    {
+      "name": "case2/plugin-injected recall snapshots never persisted into the journal personal lane (injected row and recall-text row counts are zero)",
+      "class": "check",
+      "ok": true,
+      "detail": "injected rows=0, recall-text rows=0"
+    },
+    {
+      "name": "case3-row/composition dump accepts the overlay",
+      "class": "check",
+      "ok": true,
+      "detail": "d\n  name: >-\n    file:///home/bahman/github/dsh-self-improved/fixtures/v02-runtime/plugin/lib/index.js\n  disabled: true\n"
+    },
+    {
+      "name": "case3-row/plugin row is present in the composed tree",
+      "class": "check",
+      "ok": true,
+      "detail": "line 384"
+    },
+    {
+      "name": "case3-row/plugin row carries disabled: true in the composed tree (disable dialect accepted)",
+      "class": "check",
+      "ok": true,
+      "detail": "- id: dsh-self-improved |   name: >- |     file:///home/bahman/github/dsh-self-improved/fixtures/v02-runtime/plugin/lib/index.js |   disabled: true | "
+    },
+    {
+      "name": "case3-row/fixture composition disables the session-telemetry-otel row directly (verified patch dialect; the telemetry env switch is layered on top)",
+      "class": "check",
+      "ok": true,
+      "detail": "- id: session-telemetry-otel |   name: '@deepseek-ai/dsh-session-telemetry-otel' |   config: |     mode: !!js process.env.DSH_TELEMETRY_MODE || 'FEEDBACK_ONLY' |     shutdownTimeoutMillis: 3000"
+    },
+    {
+      "name": "case3-row/egress guard log written",
+      "class": "check",
+      "ok": true,
+      "detail": "entries=14"
+    },
+    {
+      "name": "case3-row/egress guard booted (guard.ready recorded)",
+      "class": "check",
+      "ok": true,
+      "detail": "layers=[\"dns\",\"net\",\"dgram\",\"http\",\"https\",\"fetch\"]"
+    },
+    {
+      "name": "case3-row/egress guard selftest completed",
+      "class": "check",
+      "ok": true,
+      "detail": "selftest entries=11"
+    },
+    {
+      "name": "case3-row/egress guard selftest all layers armed",
+      "class": "check",
+      "ok": true,
+      "detail": "5 layer probes denied as designed"
+    },
+    {
+      "name": "case3-row/no non-loopback network attempt during the guarded run",
+      "class": "check",
+      "ok": true,
+      "detail": "zero blocked attempts recorded"
+    },
+    {
+      "name": "case3-row/every planned egress interception layer patched (none silently skipped)",
+      "class": "check",
+      "ok": true,
+      "detail": "no patch.failed entries"
+    },
+    {
+      "name": "case3-row/all outbound connects from the runtime child kept loopback",
+      "class": "check",
+      "ok": true,
+      "detail": "loopback connect records=2"
+    },
+    {
+      "name": "case3-row/every outbound loopback connect targeted this run's stub port",
+      "class": "check",
+      "ok": true,
+      "detail": "all loopback connects → stub port"
+    },
+    {
+      "name": "case3-row/child env only carries verified allowlist keys (no inherited credential/home/profile variables)",
+      "class": "check",
+      "ok": true,
+      "detail": "extras=none; present=DEEPSEEK_API_KEY,DEEPSEEK_BASE_URL,DSH_FIXTURE_EGRESS_LOG,DSH_HOME,DSH_PERMISSION_MODE,DSH_TELEMETRY_DISABLED,HOME,LANG,NODE_OPTIONS,PATH,TMPDIR (LANG/LC_ALL inherit only when set)"
+    },
+    {
+      "name": "case3-row/the only credential variable is the synthetic per-run fixture key",
+      "class": "check",
+      "ok": true,
+      "detail": "synthetic-fixture-key-case3-row-1791643269865-ebf46c"
+    },
+    {
+      "name": "case3-row/the provider route is this run's loopback stub (config, not network enforcement)",
+      "class": "check",
+      "ok": true,
+      "detail": "http://127.0.0.1:37947"
+    },
+    {
+      "name": "case3-row/telemetry opt-out and permission mode are the verified rc.2 launcher values",
+      "class": "check",
+      "ok": true,
+      "detail": "telemetry=1 permission=workspace-write"
+    },
+    {
+      "name": "case3-row/run exit code 0",
+      "class": "check",
+      "ok": true,
+      "detail": "exit=0 :: "
+    },
+    {
+      "name": "case3-row/main turn reached the provider once",
+      "class": "check",
+      "ok": true,
+      "detail": "total requests=2"
+    },
+    {
+      "name": "case3-row/no recall block reached the provider",
+      "class": "check",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "case3-row/no plugin-driven model work (no extractor aux call)",
+      "class": "check",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "case3-row/store content unchanged (only the fixture seed)",
+      "class": "check",
+      "ok": true,
+      "detail": "The user's synthetic runtime recall seed is ORCHID-BASIL-77"
+    },
+    {
+      "name": "case3-row/no recall access recorded (access_count stays 0)",
+      "class": "check",
+      "ok": true,
+      "detail": "The user's synthetic runtime recall seed is ORCHID-BASIL-77@0"
+    },
+    {
+      "name": "case3-row/plugin never mounted (no plugin log lines despite the disabled row being composed)",
+      "class": "check",
+      "ok": true,
+      "detail": "clean"
+    },
+    {
+      "name": "case3-row/no journal sinks or sources exist at all for the not-mounted plugin (plugin owns capture; no other writer may create them)",
+      "class": "check",
+      "ok": true,
+      "detail": "sessions=0 sources=0 jobs=0"
+    },
+    {
+      "name": "case3-config/composition dump accepts the overlay",
+      "class": "check",
+      "ok": true,
+      "detail": "rue\n      tools: true\n    extract:\n      provider: deepseek-official\n      model: deepseek-flash\n      flushDrain: true\n"
+    },
+    {
+      "name": "case3-config/plugin row is present in the composed tree",
+      "class": "check",
+      "ok": true,
+      "detail": "line 384"
+    },
+    {
+      "name": "case3-config/egress guard log written",
+      "class": "check",
+      "ok": true,
+      "detail": "entries=14"
+    },
+    {
+      "name": "case3-config/egress guard booted (guard.ready recorded)",
+      "class": "check",
+      "ok": true,
+      "detail": "layers=[\"dns\",\"net\",\"dgram\",\"http\",\"https\",\"fetch\"]"
+    },
+    {
+      "name": "case3-config/egress guard selftest completed",
+      "class": "check",
+      "ok": true,
+      "detail": "selftest entries=11"
+    },
+    {
+      "name": "case3-config/egress guard selftest all layers armed",
+      "class": "check",
+      "ok": true,
+      "detail": "5 layer probes denied as designed"
+    },
+    {
+      "name": "case3-config/no non-loopback network attempt during the guarded run",
+      "class": "check",
+      "ok": true,
+      "detail": "zero blocked attempts recorded"
+    },
+    {
+      "name": "case3-config/every planned egress interception layer patched (none silently skipped)",
+      "class": "check",
+      "ok": true,
+      "detail": "no patch.failed entries"
+    },
+    {
+      "name": "case3-config/all outbound connects from the runtime child kept loopback",
+      "class": "check",
+      "ok": true,
+      "detail": "loopback connect records=2"
+    },
+    {
+      "name": "case3-config/every outbound loopback connect targeted this run's stub port",
+      "class": "check",
+      "ok": true,
+      "detail": "all loopback connects → stub port"
+    },
+    {
+      "name": "case3-config/child env only carries verified allowlist keys (no inherited credential/home/profile variables)",
+      "class": "check",
+      "ok": true,
+      "detail": "extras=none; present=DEEPSEEK_API_KEY,DEEPSEEK_BASE_URL,DSH_FIXTURE_EGRESS_LOG,DSH_HOME,DSH_PERMISSION_MODE,DSH_TELEMETRY_DISABLED,HOME,LANG,NODE_OPTIONS,PATH,TMPDIR (LANG/LC_ALL inherit only when set)"
+    },
+    {
+      "name": "case3-config/the only credential variable is the synthetic per-run fixture key",
+      "class": "check",
+      "ok": true,
+      "detail": "synthetic-fixture-key-case3-config-1791643270767-ac36fc"
+    },
+    {
+      "name": "case3-config/the provider route is this run's loopback stub (config, not network enforcement)",
+      "class": "check",
+      "ok": true,
+      "detail": "http://127.0.0.1:36235"
+    },
+    {
+      "name": "case3-config/telemetry opt-out and permission mode are the verified rc.2 launcher values",
+      "class": "check",
+      "ok": true,
+      "detail": "telemetry=1 permission=workspace-write"
+    },
+    {
+      "name": "case3-config/run exit code 0",
+      "class": "check",
+      "ok": true,
+      "detail": "exit=0 :: 2026-10-10T14:41:11.632Z (+678ms) [err] (node:80) ExperimentalWarning: SQLite is an experimental feature and might change at any time | 2026-10-10T14:41:11.632Z (+678ms) [err] (Use `node --trace-warnings ...` to show where the warning was created) | "
+    },
+    {
+      "name": "case3-config/main turn reached the provider once",
+      "class": "check",
+      "ok": true,
+      "detail": "total requests=2"
+    },
+    {
+      "name": "case3-config/no recall block reached the provider",
+      "class": "check",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "case3-config/no plugin-driven model work (no extractor aux call)",
+      "class": "check",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "case3-config/store content unchanged (only the fixture seed)",
+      "class": "check",
+      "ok": true,
+      "detail": "The user's synthetic runtime recall seed is ORCHID-BASIL-77"
+    },
+    {
+      "name": "case3-config/no recall access recorded (access_count stays 0)",
+      "class": "check",
+      "ok": true,
+      "detail": "The user's synthetic runtime recall seed is ORCHID-BASIL-77@0"
+    },
+    {
+      "name": "case3-config/plugin mounted but inert (loaded banner present)",
+      "class": "check",
+      "ok": true,
+      "detail": "mounted"
+    },
+    {
+      "name": "case3-config/no journal sinks or sources exist at all for the not-mounted plugin (plugin owns capture; no other writer may create them)",
+      "class": "check",
+      "ok": true,
+      "detail": "sessions=0 sources=0 jobs=0"
+    },
+    {
+      "name": "case3-config/no pending extraction work marked while disabled (journal sources empty or all zero-ack)",
+      "class": "check",
+      "ok": true,
+      "detail": "sources=0"
+    },
+    {
+      "name": "case3-config/recall pre-step never ran while disabled",
+      "class": "check",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "case4/runA/egress guard log written",
+      "class": "check",
+      "ok": true,
+      "detail": "entries=14"
+    },
+    {
+      "name": "case4/runA/egress guard booted (guard.ready recorded)",
+      "class": "check",
+      "ok": true,
+      "detail": "layers=[\"dns\",\"net\",\"dgram\",\"http\",\"https\",\"fetch\"]"
+    },
+    {
+      "name": "case4/runA/egress guard selftest completed",
+      "class": "check",
+      "ok": true,
+      "detail": "selftest entries=11"
+    },
+    {
+      "name": "case4/runA/egress guard selftest all layers armed",
+      "class": "check",
+      "ok": true,
+      "detail": "5 layer probes denied as designed"
+    },
+    {
+      "name": "case4/runA/no non-loopback network attempt during the guarded run",
+      "class": "check",
+      "ok": true,
+      "detail": "zero blocked attempts recorded"
+    },
+    {
+      "name": "case4/runA/every planned egress interception layer patched (none silently skipped)",
+      "class": "check",
+      "ok": true,
+      "detail": "no patch.failed entries"
+    },
+    {
+      "name": "case4/runA/all outbound connects from the runtime child kept loopback",
+      "class": "check",
+      "ok": true,
+      "detail": "loopback connect records=2"
+    },
+    {
+      "name": "case4/runA/every outbound loopback connect targeted this run's stub port",
+      "class": "check",
+      "ok": true,
+      "detail": "all loopback connects → stub port"
+    },
+    {
+      "name": "case4/runA/child env only carries verified allowlist keys (no inherited credential/home/profile variables)",
+      "class": "check",
+      "ok": true,
+      "detail": "extras=none; present=DEEPSEEK_API_KEY,DEEPSEEK_BASE_URL,DSH_FIXTURE_EGRESS_LOG,DSH_HOME,DSH_PERMISSION_MODE,DSH_TELEMETRY_DISABLED,HOME,LANG,NODE_OPTIONS,PATH,TMPDIR (LANG/LC_ALL inherit only when set)"
+    },
+    {
+      "name": "case4/runA/the only credential variable is the synthetic per-run fixture key",
+      "class": "check",
+      "ok": true,
+      "detail": "synthetic-fixture-key-case4-1791643271815-2a13aa-A"
+    },
+    {
+      "name": "case4/runA/the provider route is this run's loopback stub (config, not network enforcement)",
+      "class": "check",
+      "ok": true,
+      "detail": "http://127.0.0.1:36879"
+    },
+    {
+      "name": "case4/runA/telemetry opt-out and permission mode are the verified rc.2 launcher values",
+      "class": "check",
+      "ok": true,
+      "detail": "telemetry=1 permission=workspace-write"
+    },
+    {
+      "name": "case4/run A exit code 0",
+      "class": "check",
+      "ok": true,
+      "detail": "exit=0 :: 2026-10-10T14:41:12.589Z (+770ms) [err] (node:92) ExperimentalWarning: SQLite is an experimental feature and might change at any time | 2026-10-10T14:41:12.589Z (+770ms) [err] (Use `node --trace-warnings ...` to show where the warning was created) | "
+    },
+    {
+      "name": "case4/run A session id",
+      "class": "check",
+      "ok": true,
+      "detail": "session-0d9a7c52-80af-4fbe-a34c-df93897007b5"
+    },
+    {
+      "name": "case4/run A issued only the main request + title (the in-process pump did not drain in this run, no aux call)",
+      "class": "check",
+      "ok": true,
+      "detail": "total=2"
+    },
+    {
+      "name": "case4/run A accepted a pending extraction job (capture enqueued an unconsumed range + the journal holds the queued job)",
+      "class": "check",
+      "ok": true,
+      "detail": "sources=1 pending=1 jobs=queued"
+    },
+    {
+      "name": "case4/run A captured the accepted range in the journal personal lane (the accepted work exists durably)",
+      "class": "check",
+      "ok": true,
+      "detail": "sources=1"
+    },
+    {
+      "name": "case4/run A store contains no memory rows yet (accepted job unconsumed)",
+      "class": "check",
+      "ok": true,
+      "detail": "memories=0"
+    },
+    {
+      "name": "case4/runB/egress guard log written",
+      "class": "check",
+      "ok": true,
+      "detail": "entries=13"
+    },
+    {
+      "name": "case4/runB/egress guard booted (guard.ready recorded)",
+      "class": "check",
+      "ok": true,
+      "detail": "layers=[\"dns\",\"net\",\"dgram\",\"http\",\"https\",\"fetch\"]"
+    },
+    {
+      "name": "case4/runB/egress guard selftest completed",
+      "class": "check",
+      "ok": true,
+      "detail": "selftest entries=11"
+    },
+    {
+      "name": "case4/runB/egress guard selftest all layers armed",
+      "class": "check",
+      "ok": true,
+      "detail": "5 layer probes denied as designed"
+    },
+    {
+      "name": "case4/runB/no non-loopback network attempt during the guarded run",
+      "class": "check",
+      "ok": true,
+      "detail": "zero blocked attempts recorded"
+    },
+    {
+      "name": "case4/runB/every planned egress interception layer patched (none silently skipped)",
+      "class": "check",
+      "ok": true,
+      "detail": "no patch.failed entries"
+    },
+    {
+      "name": "case4/runB/all outbound connects from the runtime child kept loopback",
+      "class": "check",
+      "ok": true,
+      "detail": "loopback connect records=1"
+    },
+    {
+      "name": "case4/runB/every outbound loopback connect targeted this run's stub port",
+      "class": "check",
+      "ok": true,
+      "detail": "all loopback connects → stub port"
+    },
+    {
+      "name": "case4/runB/child env only carries verified allowlist keys (no inherited credential/home/profile variables)",
+      "class": "check",
+      "ok": true,
+      "detail": "extras=none; present=DEEPSEEK_API_KEY,DEEPSEEK_BASE_URL,DSH_FIXTURE_EGRESS_LOG,DSH_HOME,DSH_PERMISSION_MODE,DSH_TELEMETRY_DISABLED,HOME,LANG,NODE_OPTIONS,PATH,TMPDIR (LANG/LC_ALL inherit only when set)"
+    },
+    {
+      "name": "case4/runB/the only credential variable is the synthetic per-run fixture key",
+      "class": "check",
+      "ok": true,
+      "detail": "synthetic-fixture-key-case4-1791643271815-2a13aa-B"
+    },
+    {
+      "name": "case4/runB/the provider route is this run's loopback stub (config, not network enforcement)",
+      "class": "check",
+      "ok": true,
+      "detail": "http://127.0.0.1:36879"
+    },
+    {
+      "name": "case4/runB/telemetry opt-out and permission mode are the verified rc.2 launcher values",
+      "class": "check",
+      "ok": true,
+      "detail": "telemetry=1 permission=workspace-write"
+    },
+    {
+      "name": "case4/run B (disabled row unmount) exit code 0",
+      "class": "check",
+      "ok": true,
+      "detail": "exit=0 :: "
+    },
+    {
+      "name": "case4/run B adopted the session without recapture work",
+      "class": "check",
+      "ok": true,
+      "detail": "session-0d9a7c52-80af-4fbe-a34c-df93897007b5"
+    },
+    {
+      "name": "case4/run B quiescence: no plugin-driven model work for the accepted job (no aux call)",
+      "class": "check",
+      "ok": true,
+      "detail": "requests this run=1"
+    },
+    {
+      "name": "case4/run B quiescence: no recall block reached the provider",
+      "class": "check",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "case4/run B quiescence: accepted extraction job journal artifacts byte-identical (job row, sources, chunks untouched)",
+      "class": "check",
+      "ok": true,
+      "detail": "jobs after run B=queued"
+    },
+    {
+      "name": "case4/run B quiescence: journal personal-lane rows untouched by the unmounted plugin",
+      "class": "check",
+      "ok": true,
+      "detail": "journal hash before=bf35fff8319c after=bf35fff8319c"
+    },
+    {
+      "name": "case4/run B quiescence: memory rows untouched",
+      "class": "check",
+      "ok": true,
+      "detail": "memories after run B=0"
+    },
+    {
+      "name": "case4/run B quiescence: no recall access recorded by the unmounted plugin (access_count unchanged)",
+      "class": "check",
+      "ok": true,
+      "detail": "access before=0 after=0"
+    },
+    {
+      "name": "case4/runC/egress guard log written",
+      "class": "check",
+      "ok": true,
+      "detail": "entries=13"
+    },
+    {
+      "name": "case4/runC/egress guard booted (guard.ready recorded)",
+      "class": "check",
+      "ok": true,
+      "detail": "layers=[\"dns\",\"net\",\"dgram\",\"http\",\"https\",\"fetch\"]"
+    },
+    {
+      "name": "case4/runC/egress guard selftest completed",
+      "class": "check",
+      "ok": true,
+      "detail": "selftest entries=11"
+    },
+    {
+      "name": "case4/runC/egress guard selftest all layers armed",
+      "class": "check",
+      "ok": true,
+      "detail": "5 layer probes denied as designed"
+    },
+    {
+      "name": "case4/runC/no non-loopback network attempt during the guarded run",
+      "class": "check",
+      "ok": true,
+      "detail": "zero blocked attempts recorded"
+    },
+    {
+      "name": "case4/runC/every planned egress interception layer patched (none silently skipped)",
+      "class": "check",
+      "ok": true,
+      "detail": "no patch.failed entries"
+    },
+    {
+      "name": "case4/runC/all outbound connects from the runtime child kept loopback",
+      "class": "check",
+      "ok": true,
+      "detail": "loopback connect records=1"
+    },
+    {
+      "name": "case4/runC/every outbound loopback connect targeted this run's stub port",
+      "class": "check",
+      "ok": true,
+      "detail": "all loopback connects → stub port"
+    },
+    {
+      "name": "case4/runC/child env only carries verified allowlist keys (no inherited credential/home/profile variables)",
+      "class": "check",
+      "ok": true,
+      "detail": "extras=none; present=DEEPSEEK_API_KEY,DEEPSEEK_BASE_URL,DSH_FIXTURE_EGRESS_LOG,DSH_HOME,DSH_PERMISSION_MODE,DSH_TELEMETRY_DISABLED,HOME,LANG,NODE_OPTIONS,PATH,TMPDIR (LANG/LC_ALL inherit only when set)"
+    },
+    {
+      "name": "case4/runC/the only credential variable is the synthetic per-run fixture key",
+      "class": "check",
+      "ok": true,
+      "detail": "synthetic-fixture-key-case4-1791643271815-2a13aa-C"
+    },
+    {
+      "name": "case4/runC/the provider route is this run's loopback stub (config, not network enforcement)",
+      "class": "check",
+      "ok": true,
+      "detail": "http://127.0.0.1:36879"
+    },
+    {
+      "name": "case4/runC/telemetry opt-out and permission mode are the verified rc.2 launcher values",
+      "class": "check",
+      "ok": true,
+      "detail": "telemetry=1 permission=workspace-write"
+    },
+    {
+      "name": "case4/run C (config-disabled inert mount) exit code 0",
+      "class": "check",
+      "ok": true,
+      "detail": "exit=0 :: 2026-10-10T14:41:14.458Z (+680ms) [err] (node:116) ExperimentalWarning: SQLite is an experimental feature and might change at any time | 2026-10-10T14:41:14.458Z (+680ms) [err] (Use `node --trace-warnings ...` to show where the warning was created) | "
+    },
+    {
+      "name": "case4/run C mounted but inert banner present",
+      "class": "check",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "case4/run C quiescence: no plugin-driven model work for the accepted job",
+      "class": "check",
+      "ok": true,
+      "detail": "requests this run=1"
+    },
+    {
+      "name": "case4/run C quiescence: no recall block reached the provider",
+      "class": "check",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "case4/run C quiescence: no capture pre-step while disabled",
+      "class": "check",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "case4/run C quiescence: accepted job journal artifacts still byte-identical after the inert mount",
+      "class": "check",
+      "ok": true,
+      "detail": "jobs after run C=queued"
+    },
+    {
+      "name": "case4/run C quiescence: journal personal-lane rows still untouched",
+      "class": "check",
+      "ok": true,
+      "detail": "journal hash after run C=bf35fff8319c"
+    },
+    {
+      "name": "case4/runD/egress guard log written",
+      "class": "check",
+      "ok": true,
+      "detail": "entries=14"
+    },
+    {
+      "name": "case4/runD/egress guard booted (guard.ready recorded)",
+      "class": "check",
+      "ok": true,
+      "detail": "layers=[\"dns\",\"net\",\"dgram\",\"http\",\"https\",\"fetch\"]"
+    },
+    {
+      "name": "case4/runD/egress guard selftest completed",
+      "class": "check",
+      "ok": true,
+      "detail": "selftest entries=11"
+    },
+    {
+      "name": "case4/runD/egress guard selftest all layers armed",
+      "class": "check",
+      "ok": true,
+      "detail": "5 layer probes denied as designed"
+    },
+    {
+      "name": "case4/runD/no non-loopback network attempt during the guarded run",
+      "class": "check",
+      "ok": true,
+      "detail": "zero blocked attempts recorded"
+    },
+    {
+      "name": "case4/runD/every planned egress interception layer patched (none silently skipped)",
+      "class": "check",
+      "ok": true,
+      "detail": "no patch.failed entries"
+    },
+    {
+      "name": "case4/runD/all outbound connects from the runtime child kept loopback",
+      "class": "check",
+      "ok": true,
+      "detail": "loopback connect records=2"
+    },
+    {
+      "name": "case4/runD/every outbound loopback connect targeted this run's stub port",
+      "class": "check",
+      "ok": true,
+      "detail": "all loopback connects → stub port"
+    },
+    {
+      "name": "case4/runD/child env only carries verified allowlist keys (no inherited credential/home/profile variables)",
+      "class": "check",
+      "ok": true,
+      "detail": "extras=none; present=DEEPSEEK_API_KEY,DEEPSEEK_BASE_URL,DSH_FIXTURE_EGRESS_LOG,DSH_HOME,DSH_PERMISSION_MODE,DSH_TELEMETRY_DISABLED,HOME,LANG,NODE_OPTIONS,PATH,TMPDIR (LANG/LC_ALL inherit only when set)"
+    },
+    {
+      "name": "case4/runD/the only credential variable is the synthetic per-run fixture key",
+      "class": "check",
+      "ok": true,
+      "detail": "synthetic-fixture-key-case4-1791643271815-2a13aa-D"
+    },
+    {
+      "name": "case4/runD/the provider route is this run's loopback stub (config, not network enforcement)",
+      "class": "check",
+      "ok": true,
+      "detail": "http://127.0.0.1:36879"
+    },
+    {
+      "name": "case4/runD/telemetry opt-out and permission mode are the verified rc.2 launcher values",
+      "class": "check",
+      "ok": true,
+      "detail": "telemetry=1 permission=workspace-write"
+    },
+    {
+      "name": "case4/run D (re-enabled) exit code 0",
+      "class": "check",
+      "ok": true,
+      "detail": "exit=0 :: 2026-10-10T14:41:15.217Z (+603ms) [err] (node:128) ExperimentalWarning: SQLite is an experimental feature and might change at any time | 2026-10-10T14:41:15.217Z (+603ms) [err] (Use `node --trace-warnings ...` to show where the warning was created) | "
+    },
+    {
+      "name": "case4/continuity: the accepted pending extraction job is drained by the first enabled flush after the disable window",
+      "class": "check",
+      "ok": true,
+      "detail": "aux call observed on re-enable"
+    },
+    {
+      "name": "case4/re-enable acknowledges every accepted range from before the disable window (same-tx journal job + consumed coordinates)",
+      "class": "check",
+      "ok": true,
+      "detail": "accepted jobs before=done chunks acked=1/1 accepted-range sources consumed=1/1 (session-wide pending=0)"
+    },
+    {
+      "name": "case4/explicit flush-drain consumes ranges accepted DURING the resumed run before headless exit (XPASS-proven, promoted strict)",
+      "class": "check",
+      "ok": true,
+      "detail": "after run D: sources=4 pending=0 jobs=done|done|done|done open=0"
+    },
+    {
+      "name": "case5/real capture gate: assistant, injected, and delegated turns are ineligible (events never reach the journal personal lane)",
+      "class": "check",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "case5/probe first pump of a fresh process claims the accepted queued job and reaches the extractor",
+      "class": "check",
+      "ok": true,
+      "detail": "claimed=1 calls=1 errors=0 err=none"
+    },
+    {
+      "name": "case5/probe first pump committed its chunk in the same transaction (job done + source consumed + derived support link)",
+      "class": "check",
+      "ok": true,
+      "detail": "memory31=row sources=[\"probe-session#0@c1\"] jobs=[\"probe-session:done\"]"
+    },
+    {
+      "name": "case5/probe derived row carries fail-close provenance + the explicit coordinate of the matched source (support link: snippet verbatim inside the retained text)",
+      "class": "check",
+      "ok": true,
+      "detail": "provenance=derived source=llm-extract evidence=probe-session#0 snippetMatch=true"
+    },
+    {
+      "name": "case5/second flush is deferred into exactly one owned timer, not silently dropped or immediately stormed",
+      "class": "check",
+      "ok": true,
+      "detail": "second pump calls=1 claimed=0 result={\"claimed\":0,\"chunksAcked\":0,\"memories\":0,\"nothingToLearn\":0,\"retryable\":0,\"sourceUnavailable\":0,\"released\":0,\"deferred\":1,\"gateCounters\":{\"rejectedTaskLocal\":0,\"rejectedLowValue\":0,\"duplicatesDropped\":0,\"conflicts\":0,\"demotedPasteSuspicious\":0},\"errors\":0}"
+    },
+    {
+      "name": "case5/probe the marked second range is durable accepted work while the throttle holds it (queued job + unconsumed source)",
+      "class": "check",
+      "ok": true,
+      "detail": "sources=2 pending=1 calls=1 openJobs=queued"
+    },
+    {
+      "name": "case5/owned kick drains the second accepted range without another external pump (XPASS-proven, deliberately promoted strict)",
+      "class": "check",
+      "ok": true,
+      "detail": "calls=2 sources pending=0 jobs=done|done err=none"
+    }
+  ]
+}

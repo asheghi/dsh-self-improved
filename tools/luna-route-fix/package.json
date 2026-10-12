@@ -1,0 +1,9 @@
+{
+  "name": "@local/dsh-luna-route-fix",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Add a dedicated Responses-protocol Luna route without changing other model routes.",
+  "exports": { ".": "./index.js" },
+  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } }
+}

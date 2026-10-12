@@ -19,6 +19,7 @@ import { DatabaseSync } from "node:sqlite";
 import { getLoadablePath } from "sqlite-vec";
 import { resolveDshHome } from "@deepseek-ai/dsh-home-paths";
 import { Jieba } from "@node-rs/jieba";
+import { parseStaticFixtureReviewReport } from "./episode-evaluation.js";
 
 const require = createRequire(import.meta.url);
 
@@ -151,11 +152,43 @@ export interface ConversationSliceRecord {
 
 const INJECTABLE_PROVENANCES: ReadonlySet<string> = new Set(["user", "persona"]);
 
+/** Valid vocabularies for the import seam's fail-closed shape validation (imported rows must be schema-legal, typos refuse before the first write). */
+const MEMORY_KINDS: ReadonlySet<string> = new Set(["fact", "preference", "event", "instruction", "persona"]);
+const MEMORY_STATUSES: ReadonlySet<string> = new Set(["active", "decayed", "forgotten", "corrected", "quarantined", "migrated"]);
+const MEMORY_PROVENANCES: ReadonlySet<string> = new Set(["user", "assistant", "derived", "system", "tool", "skill", "unknown", "persona", "coordinator"]);
+const MEMORY_SOURCES: ReadonlySet<string> = new Set(["llm-extract", "llm-extract-pasted", "user-direct", "browser-correct", "tool-correct", "baseline-pin", "episode-review", "legacy", "persona"]);
+const MEMORY_SCOPES: ReadonlySet<string> = new Set(["global", "project", "session"]);
+
+/**
+ * Thrown by {@link MemoryStore.importMemoryInTx} when the target already holds
+ * a row (or an orphan meta/seq entry) for a preserved id. The import lane
+ * REFUSES, never overwrites and never dedups: identical duplicates and
+ * conflicting content both collide (MIGRATION-PHASE-B-IMPORT-DESIGN §5/§7).
+ */
+export class MemoryImportCollisionError extends Error {
+  readonly memoryId: string;
+  constructor(memoryId: string, message: string) {
+    super(message);
+    this.name = "MemoryImportCollisionError";
+    this.memoryId = memoryId;
+  }
+}
+
 export class MemoryStore {
   readonly dir: string;
   private db: DatabaseSync;
   private vectors: DatabaseSync | null = null;
   private closed = false;
+
+  /**
+   * Phase B depth counter for shared-connection transactions. The journal runs
+   * its enqueue/claim/commit transactions on THIS store's SQLite connection, so
+   * candidate inserts, chunk acks and revision/generation bumps are one
+   * transaction with one writer. Nested {@link runInImmediateTransaction}
+   * calls (journal tx around a store helper that also uses the seam) reuse the
+   * open transaction instead of attempting a nested BEGIN (SQLite forbids it).
+   */
+  private txDepth = 0;
 
   constructor(dir: string) {
     this.dir = dir;
@@ -302,6 +335,23 @@ export class MemoryStore {
         project_id TEXT NOT NULL,
         updated_at INTEGER NOT NULL
       ) STRICT;
+      -- Phase B durable cross-writer state: monotonic memory revision plus the
+      -- durable policy/cancellation generation counters owned by the Phase B
+      -- journal (same SQLite file, same connection ⇒ every generation bump and
+      -- every commit-check serializes with memory work by construction).
+      CREATE TABLE IF NOT EXISTS store_state (
+        key        TEXT PRIMARY KEY,
+        value      TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
+      ) STRICT;
+      -- Phase B journal counters/state rows (policy_generation,
+      -- cancellation_generation, last-change reason). Marked by the 'journal:'
+      -- key prefix; the journal module owns these rows' meaning.
+      CREATE TABLE IF NOT EXISTS journal_state (
+        key        TEXT PRIMARY KEY,
+        value      TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
+      ) STRICT;
     `);
     // Additive migration: databases created before mem_watermark lack the column
     // (CREATE TABLE IF NOT EXISTS does not alter an existing table).
@@ -328,6 +378,17 @@ export class MemoryStore {
         PRIMARY KEY (session_id, kind, call_id, seq)
       ) STRICT;
       CREATE INDEX IF NOT EXISTS idx_episode_events_session ON episode_events(session_id, episode_id);
+      -- Durable allowlisted producer/fork facts so pending episodes retain their
+      -- capture classification across restart (legacy missing rows fail closed).
+      CREATE TABLE IF NOT EXISTS episode_session_provenance (
+        session_id TEXT PRIMARY KEY,
+        delegated INTEGER NOT NULL,
+        origin TEXT,
+        parent_session_id TEXT,
+        root_session_id TEXT,
+        inherited_event_count INTEGER,
+        updated_at INTEGER NOT NULL
+      ) STRICT;
       CREATE TABLE IF NOT EXISTS episodes (
         id           TEXT PRIMARY KEY,
         session_id   TEXT NOT NULL,
@@ -370,6 +431,33 @@ export class MemoryStore {
         UNIQUE (episode_id, call_id)
       ) STRICT;
       CREATE UNIQUE INDEX IF NOT EXISTS idx_episode_steps_call ON episode_steps(episode_id, call_id);
+      -- Inactive proposals are stored separately from the watched skill filesystem.
+      -- The support table lets episode purge invalidate drafts without parsing Markdown.
+      CREATE TABLE IF NOT EXISTS skill_drafts (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        fingerprint TEXT NOT NULL,
+        name TEXT NOT NULL,
+        markdown TEXT NOT NULL,
+        source_episode_ids TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'draft'
+          CHECK (status IN ('draft', 'evaluated', 'approved', 'rejected', 'invalidated', 'activated', 'rolled-back')),
+        evaluation_version TEXT,
+        evaluation_report TEXT,
+        active_path TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        UNIQUE (project_id, fingerprint, source_episode_ids)
+      ) STRICT;
+      CREATE INDEX IF NOT EXISTS idx_skill_drafts_status ON skill_drafts(status, updated_at);
+      CREATE INDEX IF NOT EXISTS idx_skill_drafts_project ON skill_drafts(project_id, status, updated_at);
+      CREATE TABLE IF NOT EXISTS skill_draft_support (
+        draft_id TEXT NOT NULL,
+        episode_id TEXT NOT NULL,
+        PRIMARY KEY (draft_id, episode_id),
+        FOREIGN KEY (draft_id) REFERENCES skill_drafts(id) ON DELETE CASCADE
+      ) STRICT;
+      CREATE INDEX IF NOT EXISTS idx_skill_draft_support_episode ON skill_draft_support(episode_id);
     `);
   }
 
@@ -536,6 +624,7 @@ export class MemoryStore {
    * Insert one atomic memory (L1). meta records provenance/scope/origin.
    * FAIL CLOSED: omitting provenance yields the untrusted 'unknown' tier (never
    * injected); every trusted insert must state provenance explicitly.
+   * The revision bump commits in the SAME transaction as the row-set.
    */
   insertMemory(input: {
     kind: MemoryKind;
@@ -543,6 +632,34 @@ export class MemoryStore {
     importance?: number;
     supersedes?: string;
   }, meta: MemoryMetaInput = {}): MemoryRecord {
+    return this.runInImmediateTransaction(() => this.insertMemoryImpl(input, meta));
+  }
+
+  /**
+   * Phase B shared-connection insert for journal chunk candidates: identical
+   * row-set/revision behavior as {@link insertMemory} but NEVER opens a
+   * transaction of its own — the caller (the Phase B journal commit) must hold
+   * an open {@link runInImmediateTransaction} so memory inserts and the
+   * consumed-range ack commit together (one connection, one COMMIT).
+   */
+  insertMemoryInTx(input: Parameters<MemoryStore["insertMemory"]>[0], meta: MemoryMetaInput = {}): MemoryRecord {
+    if (!this.isInsideTransaction()) {
+      throw new Error("insertMemoryInTx requires an open store transaction (runInImmediateTransaction)");
+    }
+    return this.insertMemoryImpl(input, meta);
+  }
+
+  /**
+   * Builds and persists one memory row-set (row + seq + FTS + meta + revision
+   * bump). Assumes an open transaction when called through the seam; always
+   * runs inside insertMemory's runInImmediateTransaction otherwise.
+   */
+  private insertMemoryImpl(input: {
+    kind: MemoryKind;
+    content: string;
+    importance?: number;
+    supersedes?: string;
+  }, meta: MemoryMetaInput): MemoryRecord {
     const now = Date.now();
     const record: MemoryRecord = {
       id: randomUUID(),
@@ -555,44 +672,190 @@ export class MemoryStore {
       status: "active",
       supersedes: input.supersedes,
     };
-    // Atomicity: main row + FTS row + meta row all commit together or not at all,
-    // so a crash can never leave an orphaned FTS/meta row behind.
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
-      this.db
-        .prepare(
-          `INSERT INTO memories (id, kind, content, importance, access_count, created_at, updated_at, status, supersedes)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .run(record.id, record.kind, record.content, record.importance, 0, now, now, "active", record.supersedes ?? null);
-      this.db
-        .prepare(`INSERT INTO memories_seq (memory_id, seq) VALUES (?, ?)`)
-        .run(record.id, this.nextMemSeq());
+    this.writeMemoryRowSet(record, {
+      // Fail closed: an omitted provenance MUST NOT default to the trusted tier.
+      // 'unknown' rows are never injected or recallable until a caller or user
+      // explicitly asserts their origin.
+      provenance: meta.provenance ?? "unknown",
+      source: meta.provenance ? (meta.source ?? "user-direct") : "legacy",
+      scope: meta.scope ?? "global",
+      projectId: meta.projectId ?? null,
+      sessionId: meta.sessionId ?? null,
+      confidence: meta.confidence ?? (meta.provenance ? 0.6 : 0.3),
+      expiresAt: meta.expiresAt ?? null,
+      evidence: meta.evidence ?? [],
+      readCount: 0,
+      lastReadAt: null,
+      legacy: false,
+    }, "insert");
+    return this.getMemory(record.id) ?? record;
+  }
+
+  /**
+   * Shared row-set writer (memories row + seq + FTS + meta + recall revision
+   * bump). Caller MUST hold an open transaction. This is the ONE choke point
+   * for every memory insert, so a crash can only ever leave a fully committed
+   * row-set or nothing: no FTS/meta/seq orphan, and the revision can never
+   * claim an uncommitted insert. FTS mirrors the setMemoryStatus/rebuildFts
+   * convention: only status='active' rows are indexed; non-active inserts are
+   * stored unindexed and stay invisible to search until an explicit user
+   * status transition reindexes them.
+   */
+  private writeMemoryRowSet(record: MemoryRecord, meta: MemoryMeta, revisionReason: string): void {
+    this.db
+      .prepare(
+        `INSERT INTO memories (id, kind, content, importance, access_count, created_at, updated_at, status, supersedes)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(record.id, record.kind, record.content, record.importance, record.accessCount, record.createdAt, record.updatedAt, record.status, record.supersedes ?? null);
+    this.db
+      .prepare(`INSERT INTO memories_seq (memory_id, seq) VALUES (?, ?)`)
+      .run(record.id, this.nextMemSeq());
+    if (record.status === "active") {
       this.db
         .prepare(`INSERT INTO memories_fts (search_text, kind, content_rowid) VALUES (?, ?, ?)`)
         .run(tokenize(record.content), record.kind, record.id);
-      this.upsertMeta(record.id, {
-        // Fail closed: an omitted provenance MUST NOT default to the trusted tier.
-        // 'unknown' rows are never injected or recallable until a caller or user
-        // explicitly asserts their origin.
-        provenance: meta.provenance ?? "unknown",
-        source: meta.provenance ? (meta.source ?? "user-direct") : "legacy",
-        scope: meta.scope ?? "global",
-        projectId: meta.projectId ?? null,
-        sessionId: meta.sessionId ?? null,
-        confidence: meta.confidence ?? (meta.provenance ? 0.6 : 0.3),
-        expiresAt: meta.expiresAt ?? null,
-        evidence: meta.evidence ?? [],
-        readCount: 0,
-        lastReadAt: null,
-        legacy: false,
-      });
-      this.db.exec("COMMIT");
-    } catch (error) {
-      try { this.db.exec("ROLLBACK"); } catch { /* already rolled back */ }
-      throw error;
     }
+    this.upsertMeta(record.id, meta);
+    this.txnBumpRevision(revisionReason);
+  }
+
+  /**
+   * Phase B lossless-import seam (MIGRATION-PHASE-B-IMPORT-DESIGN §11 blocked
+   * dependency): identical row-set/FTS/seq/revision behavior as
+   * {@link insertMemoryInTx} but the caller carries the PRESERVED identity —
+   * stable id + created/updated timestamps — so target rows keep their source
+   * identity instead of minting randomUUID/Date.now().
+   *
+   * Contracts (all enforced here, not by callers):
+   * - TX-ONLY: refuses to run outside an open {@link runInImmediateTransaction}
+   *   (or the store's equivalent open immediate transaction). A crashed or
+   *   throwing chunk rolls back row + seq + FTS + meta + revision + any
+   *   same-tx importer ledger row together; the seam never commits alone.
+   * - COLLISION = REJECT, never overwrite, never dedup: any pre-existing
+   *   memories/memories_meta/memories_seq entry for the id refuses with
+   *   {@link MemoryImportCollisionError} BEFORE the first write — identical
+   *   duplicates too (design §5: re-running a plan against the same target is
+   *   refused, not absorbed).
+   * - PRESERVED identity: id/createdAt/updatedAt/status/supersedes and all
+   *   carried meta fields are written verbatim (importance keeps the shared
+   *   1..10 clamp; the only minted value is the target memories_seq).
+   * - FAIL-CLOSED provenance, no trusted widening: an omitted provenance stays
+   *   'unknown'; this lane never defaults onto the trusted tier or stamps an
+   *   automatic trusted/legacy/human origin ('legacy' is the source label, not
+   *   a trust grant), and there is no approval/activation field this seam could
+   *   set — authority switches live only in the explicit user-facing
+   *   accept/status paths.
+   * - POLICY DEMOTION: imported persona-provenance material can never land as
+   *   active recall authority (persona prose stays inactive until a user
+   *   explicitly re-activates it): a requested status 'active' is demoted to
+   *   'quarantined' (row preserved, unindexed, not injectable). The returned
+   *   record carries the effective status so the caller's ledger can record
+   *   the demotion with its reason.
+   */
+  importMemoryInTx(input: {
+    /** Preserved stable id (carried verbatim; never minted) */
+    id: string;
+    kind: MemoryKind;
+    content: string;
+    /** Preserved source timestamps (carried verbatim; never minted) */
+    createdAt: number;
+    updatedAt: number;
+    importance?: number;
+    /** Preserved source status (verbatim; omitted = 'active', subject to the policy demotion below) */
+    status?: MemoryStatus;
+    supersedes?: string;
+  }, meta: MemoryMetaInput = {}): MemoryRecord {
+    if (!this.isInsideTransaction()) {
+      throw new Error("importMemoryInTx requires an open store transaction (runInImmediateTransaction)");
+    }
+    this.assertImportShape(input, meta);
+    // Collision gate: reject BEFORE the first write, identical or conflicting.
+    const existing = this.db.prepare("SELECT id FROM memories WHERE id = ?").get(input.id);
+    if (existing) {
+      throw new MemoryImportCollisionError(
+        input.id,
+        `import collision: memory id '${input.id}' already exists (identical duplicates refuse too — no dedup and no overwrite on the import lane)`,
+      );
+    }
+    const metaOrphan = this.db.prepare("SELECT memory_id FROM memories_meta WHERE memory_id = ?").get(input.id);
+    const seqOrphan = this.db.prepare("SELECT memory_id FROM memories_seq WHERE memory_id = ?").get(input.id);
+    if (metaOrphan || seqOrphan) {
+      throw new MemoryImportCollisionError(
+        input.id,
+        `import collision: orphaned ${metaOrphan ? "memories_meta" : "memories_seq"} entry for id '${input.id}' in the target (pre-existing unowned row, release empty-by-construction targets instead of merging)`,
+      );
+    }
+    const effectiveProvenance = meta.provenance ?? "unknown";
+    const requestedStatus = input.status ?? "active";
+    // Persona policy: imported persona-provenance rows are never active authority.
+    const effectiveStatus =
+      effectiveProvenance === "persona" && requestedStatus === "active" ? ("quarantined" as MemoryStatus) : requestedStatus;
+    const record: MemoryRecord = {
+      id: input.id,
+      kind: input.kind,
+      content: input.content,
+      importance: Math.max(1, Math.min(10, input.importance ?? 5)),
+      accessCount: 0,
+      createdAt: input.createdAt,
+      updatedAt: input.updatedAt,
+      status: effectiveStatus,
+      supersedes: input.supersedes,
+    };
+    this.writeMemoryRowSet(record, {
+      // No provenance widening: import carries asserted provenance verbatim and
+      // fails closed to 'unknown'; 'user-direct' is never an import default.
+      provenance: effectiveProvenance,
+      source: meta.source ?? "legacy",
+      scope: meta.scope ?? "global",
+      projectId: meta.projectId ?? null,
+      sessionId: meta.sessionId ?? null,
+      // Untrusted default confidence for the import lane: 0.3, never the
+      // asserted-provenance 0.6 shortcut.
+      confidence: meta.confidence ?? 0.3,
+      expiresAt: meta.expiresAt ?? null,
+      evidence: meta.evidence ?? [],
+      readCount: 0,
+      lastReadAt: null,
+      legacy: false,
+    }, "import");
     return this.getMemory(record.id) ?? record;
+  }
+
+  /** Import-seam shape validation: refuse illegal vocabularies before the first write. */
+  private assertImportShape(input: {
+    id: string;
+    kind: MemoryKind;
+    content: string;
+    createdAt: number;
+    updatedAt: number;
+    importance?: number;
+    status?: MemoryStatus;
+    supersedes?: string;
+  }, meta: MemoryMetaInput): void {
+    if (typeof input.id !== "string" || input.id.length === 0) {
+      throw new Error("importMemoryInTx: id must be a non-empty preserved string");
+    }
+    for (const field of ["createdAt", "updatedAt"] as const) {
+      const v = input[field];
+      if (typeof v !== "number" || !Number.isInteger(v) || v < 0) {
+        throw new Error(`importMemoryInTx: ${field} must be a preserved non-negative integer timestamp`);
+      }
+    }
+    if (typeof input.content !== "string") throw new Error("importMemoryInTx: content must be a string");
+    if (!MEMORY_KINDS.has(input.kind)) throw new Error(`importMemoryInTx: kind '${input.kind}' is not a valid MemoryKind`);
+    if (input.status !== undefined && !MEMORY_STATUSES.has(input.status)) {
+      throw new Error(`importMemoryInTx: status '${input.status}' is not a valid MemoryStatus`);
+    }
+    if (meta.provenance !== undefined && !MEMORY_PROVENANCES.has(meta.provenance)) {
+      throw new Error(`importMemoryInTx: provenance '${meta.provenance}' is not a valid MemoryProvenance`);
+    }
+    if (meta.source !== undefined && !MEMORY_SOURCES.has(meta.source)) {
+      throw new Error(`importMemoryInTx: source '${meta.source}' is not a valid MemorySource`);
+    }
+    if (meta.scope !== undefined && !MEMORY_SCOPES.has(meta.scope)) {
+      throw new Error(`importMemoryInTx: scope '${meta.scope}' is not a valid MemoryScope`);
+    }
   }
 
   /**
@@ -651,6 +914,7 @@ export class MemoryStore {
       return true;
     }
     this.db.exec("BEGIN IMMEDIATE");
+    this.explicitTxDepth++;
     try {
       const row = loadEpisode();
       if (
@@ -711,10 +975,16 @@ export class MemoryStore {
            WHERE id = ? AND status IN ('succeeded', 'failed') AND reviewed_at IS NULL`,
         )
         .run(input.status, input.summary ?? "", input.confidence ?? 0, input.rejectReason ?? null, now, now, input.episodeId);
+      if (input.memories.length > 0) {
+        // Review-driven derivations change recall eligibility: bump in the SAME tx.
+        this.txnBumpRevision("episode-review-commit");
+      }
       this.db.exec("COMMIT");
     } catch (error) {
       try { this.db.exec("ROLLBACK"); } catch { /* already rolled back */ }
       throw error;
+    } finally {
+      this.explicitTxDepth--;
     }
     return true;
   }
@@ -816,25 +1086,30 @@ export class MemoryStore {
       );
   }
 
-  /** Patch meta fields (accept-legacy, expiry, provenance demotion, …) */
+  /** Patch meta fields (accept-legacy, expiry, provenance demotion, explicit
+   *  correction metadata, …). Phase B: explicit user correction/review facts are
+   *  recall-affecting → revision bumps in the SAME transaction. */
   updateMeta(memoryId: string, patch: Partial<MemoryMetaInput> & { legacy?: boolean } = {}): boolean {
-    const cur = this.readMeta(memoryId);
-    if (!cur) return false;
-    const next: MemoryMeta = {
-      provenance: patch.provenance ?? cur.provenance,
-      source: patch.source ?? cur.source,
-      scope: patch.scope ?? cur.scope,
-      projectId: patch.projectId !== undefined ? patch.projectId ?? null : cur.projectId,
-      sessionId: patch.sessionId !== undefined ? patch.sessionId ?? null : cur.sessionId,
-      confidence: patch.confidence ?? cur.confidence,
-      expiresAt: patch.expiresAt !== undefined ? patch.expiresAt ?? null : cur.expiresAt,
-      evidence: patch.evidence ?? cur.evidence,
-      readCount: cur.readCount,
-      lastReadAt: cur.lastReadAt,
-      legacy: patch.legacy ?? cur.legacy,
-    };
-    this.upsertMeta(memoryId, next);
-    return true;
+    return this.runInImmediateTransaction(() => {
+      const cur = this.readMeta(memoryId);
+      if (!cur) return false;
+      const next: MemoryMeta = {
+        provenance: patch.provenance ?? cur.provenance,
+        source: patch.source ?? cur.source,
+        scope: patch.scope ?? cur.scope,
+        projectId: patch.projectId !== undefined ? patch.projectId ?? null : cur.projectId,
+        sessionId: patch.sessionId !== undefined ? patch.sessionId ?? null : cur.sessionId,
+        confidence: patch.confidence ?? cur.confidence,
+        expiresAt: patch.expiresAt !== undefined ? patch.expiresAt ?? null : cur.expiresAt,
+        evidence: patch.evidence ?? cur.evidence,
+        readCount: cur.readCount,
+        lastReadAt: cur.lastReadAt,
+        legacy: patch.legacy ?? cur.legacy,
+      };
+      this.upsertMeta(memoryId, next);
+      this.txnBumpRevision("status:corrected-meta");
+      return true;
+    });
   }
 
   private readMeta(memoryId: string): MemoryMeta | null {
@@ -1022,9 +1297,9 @@ export class MemoryStore {
   }
 
   /**
-   * Derived operational-memory contents learned from the given sessions'
-   * episodes (Phase 5 skill-synthesis support EVIDENCE ONLY: provenance
-   * 'derived', source 'episode-review'). Read-only, additive, bounded.
+   * Active, unexpired derived operational-memory contents with nonempty call and
+   * citations to still-reviewed episodes (skill-synthesis support EVIDENCE ONLY:
+   * provenance 'derived', source 'episode-review'). Read-only, additive, bounded.
    */
   operationalMemoryContentsBySession(sessionIds: string[], limitPerSession = 10, maxChars = 500): string[] {
     const contents: string[] = [];
@@ -1033,17 +1308,41 @@ export class MemoryStore {
       const placeholders = chunk.map(() => "?").join(",");
       const rows = this.db
         .prepare(
-          `SELECT m.content, m.id FROM memories m
+          `SELECT m.content, m.id, mm.evidence FROM memories m
            JOIN memories_meta mm ON mm.memory_id = m.id
-           WHERE mm.source = 'episode-review'
+           WHERE m.status = 'active'
+              AND mm.source = 'episode-review'
              AND mm.provenance = 'derived'
              AND mm.session_id IN (${placeholders})
+              AND (mm.expires_at IS NULL OR mm.expires_at > ?)
            ORDER BY m.created_at DESC `,
         )
-        .all(...chunk) as Array<Record<string, unknown>>;
+        .all(...chunk, Date.now()) as Array<Record<string, unknown>>;
+      const evidenceByMemoryId = new Map<string, Array<MemoryEvidence>>();
+      const referencedEpisodeIds = new Set<string>();
+      for (const row of rows) {
+        const id = String(row.id);
+        const evidence = parseEvidence(String(row.evidence ?? "[]")).filter((entry) =>
+          typeof entry.episodeId === "string" && entry.episodeId.trim() !== "" &&
+          typeof entry.callId === "string" && entry.callId.trim() !== "",
+        );
+        if (evidence.length === 0) continue;
+        evidenceByMemoryId.set(id, evidence);
+        for (const entry of evidence) referencedEpisodeIds.add(entry.episodeId!);
+      }
+      const liveReviewedEpisodeIds = new Set<string>();
+      for (const ids of chunkList([...referencedEpisodeIds], 400)) {
+        const ph = ids.map(() => "?").join(",");
+        const existingEpisodes = this.db.prepare(
+          `SELECT id FROM episodes WHERE status = 'reviewed' AND id IN (${ph})`,
+        ).all(...ids) as Array<{ id: string }>;
+        for (const episode of existingEpisodes) liveReviewedEpisodeIds.add(String(episode.id));
+      }
       for (const row of rows) {
         const id = String(row.id);
         if (seen.has(id)) continue;
+        const sourceEvidence = evidenceByMemoryId.get(id) ?? [];
+        if (!sourceEvidence.some((entry) => liveReviewedEpisodeIds.has(entry.episodeId!))) continue;
         seen.add(id);
         if (contents.length < limitPerSession * Math.max(1, sessionIds.length)) {
           contents.push(String(row.content ?? "").slice(0, maxChars));
@@ -1105,10 +1404,14 @@ export class MemoryStore {
     return record;
   }
 
-  /** Mark as forgotten (paired with decay from M4 on; M1 provides basic delete capability) */
+  /** Mark as forgotten (paired with decay from M4 on; M1 provides basic delete capability)
+   *  Phase B: the forget is recall-affecting → revision bumps in the SAME tx. */
   forgetMemory(id: string): boolean {
-    const res = this.db.prepare("UPDATE memories SET status = 'forgotten', updated_at = ? WHERE id = ?").run(Date.now(), id);
-    return res.changes > 0;
+    return this.runInImmediateTransaction(() => {
+      const res = this.db.prepare("UPDATE memories SET status = 'forgotten', updated_at = ? WHERE id = ?").run(Date.now(), id);
+      if (res.changes > 0) this.txnBumpRevision("forget");
+      return res.changes > 0;
+    });
   }
 
   /** Point a memory at its supersedes winner (migration dedup traceability); no-op when already set */
@@ -1150,11 +1453,15 @@ export class MemoryStore {
   }
 
   deleteMemory(id: string): boolean {
-    const res = this.db.prepare("DELETE FROM memories WHERE id = ?").run(id);
-    this.db.prepare("DELETE FROM memories_fts WHERE content_rowid = ?").run(id);
-    this.db.prepare("DELETE FROM memories_meta WHERE memory_id = ?").run(id);
-    this.db.prepare("DELETE FROM baseline WHERE memory_id = ?").run(id);
-    return res.changes > 0;
+    return this.runInImmediateTransaction(() => {
+      const res = this.db.prepare("DELETE FROM memories WHERE id = ?").run(id);
+      if (res.changes === 0) return false;
+      this.db.prepare("DELETE FROM memories_fts WHERE content_rowid = ?").run(id);
+      this.db.prepare("DELETE FROM memories_meta WHERE memory_id = ?").run(id);
+      this.db.prepare("DELETE FROM baseline WHERE memory_id = ?").run(id);
+      this.txnBumpRevision("delete");
+      return true;
+    });
   }
 
   /** Rebuild the FTS index from the memories table (only active rows are indexed; corrected/superseded rows are no longer recalled). Deterministic + lossless. */
@@ -1184,6 +1491,120 @@ export class MemoryStore {
     try { this.vectors?.close(); } catch { /* noop */ }
     this.db.close();
   }
+
+  // ---------- Phase B: monotonic revision + shared-connection transaction seam ----------
+
+  /**
+   * Run `fn` inside a BEGIN IMMEDIATE transaction on THIS store's SQLite
+   * connection. Nesting-safe: inside an open transaction the call simply runs
+   * `fn` (the outer COMMIT/ROLLBACK applies); at depth zero it owns the
+   * transaction (COMMIT on success, ROLLBACK + rethrow on any throw).
+   * This is the ONLY sanctioned transaction seam for Phase B journal work:
+   * one connection, one writer, no cross-connection transactions.
+   */
+  runInImmediateTransaction<T>(fn: () => T): T {
+    if (this.closed) throw new Error("MemoryStore is closed");
+    if (this.txDepth > 0) return fn();
+    this.db.exec("BEGIN IMMEDIATE");
+    this.txDepth = 1;
+    try {
+      const out = fn();
+      this.db.exec("COMMIT");
+      return out;
+    } catch (error) {
+      try { this.db.exec("ROLLBACK"); } catch { /* already rolled back */ }
+      throw error;
+    } finally {
+      this.txDepth = 0;
+    }
+  }
+
+  /** True when a transaction begun via runInImmediateTransaction is open right now. */
+  isInsideTransaction(): boolean {
+    return this.txDepth > 0 || this.explicitTxDepth > 0;
+  }
+
+  /** Depth of legacy explicit BEGIN IMMEDIATE blocks inside this store (used by
+   *  bumpy paths that predate the seam; they never nest inside one another). */
+  private explicitTxDepth = 0;
+
+  /**
+   * Monotonic SQLite-backed memory revision. Strictly increasing after every
+   * recall-affecting mutation: memory insert, explicit correction (meta update),
+   * forget, status transition, row deletion, journal source revocation, and
+   * external import writes. NOT bumped by popularity reads (recordAccess /
+   * read counts), FTS rebuilds, or structural repairs.
+   * Guaranteed monotonic across restarts: persisted in store_state and only
+   * ever incremented inside a committed transaction.
+   */
+  getMemoryRevision(): number {
+    return this.readStateNumber("memoryRevision");
+  }
+
+  /**
+   * Bump the revision in place. Must be called INSIDE the same transaction as
+   * the recall-affecting mutation it describes (tx-safe wrapper otherwise).
+   */
+  bumpMemoryRevision(reason: string): void {
+    this.runInImmediateTransaction(() => {
+      this.txnBumpRevision(reason);
+    });
+  }
+
+  /**
+   * Revision-bump reserved for external writers that cannot route through
+   * MemoryStore mutations (Phase B importer integration). Same single-tx
+   * contract: call it inside the importer's transaction or it opens its own.
+   */
+  bumpMemoryRevisionForExternalWriter(reason: string): void {
+    this.bumpMemoryRevision(`external:${reason.slice(0, 120)}`);
+  }
+
+  /** Raw narrowed handle of the store's SQLite connection for the Phase B journal.
+   *  The journal runs everything through {@link runInImmediateTransaction} so all
+   *  journal + memory writes stay on this single connection. Callers must never
+   *  issue standalone BEGIN/COMMIT on this handle. */
+  getJournalSqlite(): DatabaseSync {
+    return this.db;
+  }
+
+  private readStateNumber(key: string): number {
+    try {
+      const row = this.db
+        .prepare("SELECT value FROM store_state WHERE key = ?")
+        .get(key) as { value?: string } | undefined;
+      const n = Number(row?.value ?? "0");
+      return Number.isFinite(n) && n >= 0 && Number.isInteger(n) ? n : 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  /** Bump the revision counter. Caller MUST be inside runInImmediateTransaction
+   *  (this method commits no transaction of its own). */
+  private txnBumpRevision(reason: string): void {
+    if (!this.isInsideTransaction()) {
+      throw new Error("txnBumpRevision requires an open store transaction");
+    }
+    const now = Date.now();
+    this.db
+      .prepare(
+        `INSERT INTO store_state (key, value, updated_at) VALUES ('memoryRevision', '1', ?)
+         ON CONFLICT(key) DO UPDATE SET
+           value = CAST(CAST(store_state.value AS INTEGER) + 1 AS TEXT),
+           updated_at = excluded.updated_at`,
+      )
+      .run(now);
+    this.db
+      .prepare(
+        `INSERT INTO store_state (key, value, updated_at) VALUES ('memoryRevisionReason', ?, ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+      )
+      .run(reason.slice(0, 200), now);
+  }
+
+  // ---------- internal reuse-mutation registration for bump-aware helpers ----------
+  // (kept as a section marker only; bump-aware helpers live next to each mutation)
 
   /** Persist raw conversation slices (L0 JSONL, one record per line; input/backup for the extraction pipeline) */
   appendConversationSlice(sessionId: string, records: ConversationSliceRecord[]): void {
@@ -1310,23 +1731,27 @@ export class MemoryStore {
     return (rows2 as Array<Record<string, unknown>>).map((r) => this.toFullRecord(r));
   }
 
-  /** Set a memory's status (corrected / decayed / forgotten / active / quarantined / migrated) */
+  /** Set a memory's status (corrected / decayed / forgotten / active / quarantined / migrated)
+   *  Phase B: every status transition affects recall eligibility/FTS → revision bumps in the SAME tx. */
   setMemoryStatus(id: string, status: MemoryStatus): boolean {
-    const res = this.db.prepare("UPDATE memories SET status = ?, updated_at = ? WHERE id = ?").run(status, Date.now(), id);
-    if (res.changes === 0) return false;
-    // FTS mirrors visibility: only active rows stay indexed. Reactivating rebuilds
-    // the row; any other transition (corrected/decayed/forgotten/quarantined/migrated)
-    // must remove it so a superseded record can never be recalled again.
-    this.db.prepare("DELETE FROM memories_fts WHERE content_rowid = ?").run(id);
-    if (status === "active") {
-      const row = this.db.prepare("SELECT kind, content FROM memories WHERE id = ?").get(id) as
-        | { kind?: string; content?: string }
-        | undefined;
-      if (row?.content) {
-        this.db.prepare("INSERT INTO memories_fts (search_text, kind, content_rowid) VALUES (?, ?, ?)").run(tokenize(row.content), row.kind ?? "fact", id);
+    return this.runInImmediateTransaction(() => {
+      const res = this.db.prepare("UPDATE memories SET status = ?, updated_at = ? WHERE id = ?").run(status, Date.now(), id);
+      if (res.changes === 0) return false;
+      // FTS mirrors visibility: only active rows stay indexed. Reactivating rebuilds
+      // the row; any other transition (corrected/decayed/forgotten/quarantined/migrated)
+      // must remove it so a superseded record can never be recalled again.
+      this.db.prepare("DELETE FROM memories_fts WHERE content_rowid = ?").run(id);
+      if (status === "active") {
+        const row = this.db.prepare("SELECT kind, content FROM memories WHERE id = ?").get(id) as
+          | { kind?: string; content?: string }
+          | undefined;
+        if (row?.content) {
+          this.db.prepare("INSERT INTO memories_fts (search_text, kind, content_rowid) VALUES (?, ?, ?)").run(tokenize(row.content), row.kind ?? "fact", id);
+        }
       }
-    }
-    return true;
+      this.txnBumpRevision(`status:${status}`);
+      return true;
+    });
   }
 
   /** Current deterministic insertion watermark: the MAX(seq) of memories_seq at
@@ -1453,12 +1878,16 @@ export class MemoryStore {
     }));
   }
 
-  /** Delete forgotten memories past their retention window (cleanup) */
+  /** Delete forgotten memories past their retention window (cleanup)
+   *  Phase B: a retention deletion is a durable structural change → bump in the SAME tx. */
   deleteForgottenOlderThan(ts: number): number {
-    const res = this.db
-      .prepare("DELETE FROM memories WHERE status = 'forgotten' AND updated_at < ?")
-      .run(ts);
-    return Number(res.changes);
+    return this.runInImmediateTransaction(() => {
+      const res = this.db
+        .prepare("DELETE FROM memories WHERE status = 'forgotten' AND updated_at < ?")
+        .run(ts);
+      if (res.changes > 0) this.txnBumpRevision("retention-delete");
+      return Number(res.changes);
+    });
   }
 
   // ---------- Curated global baseline ----------
@@ -1631,34 +2060,77 @@ export class MemoryStore {
 
   // ---------- Episode learning (schema v2) ----------
 
-  /** Per-session delegated classification stated by capture (in-process; decided from the immutable header each flush) */
-  private sessionEpisodeDelegated = new Map<string, boolean>();
-
-  /** Whether the session was last classified as delegated by episode capture */
+  /**
+   * Whether the durable capture classification is delegated. Missing provenance
+   * means a legacy pending event set whose producer is unknown, so fail closed.
+   */
   episodeDelegated(sessionId: string): boolean {
-    return this.sessionEpisodeDelegated.get(sessionId) ?? false;
+    const row = this.db.prepare("SELECT delegated FROM episode_session_provenance WHERE session_id = ?").get(sessionId) as
+      | { delegated?: number }
+      | undefined;
+    return row ? Number(row.delegated) === 1 : true;
+  }
+
+  /** Durable, allowlisted session lineage captured alongside episode events. */
+  episodeSessionProvenance(sessionId: string): EpisodeSessionProvenanceRecord | null {
+    const row = this.db.prepare("SELECT * FROM episode_session_provenance WHERE session_id = ?").get(sessionId) as
+      | Record<string, unknown>
+      | undefined;
+    if (!row) return null;
+    return {
+      sessionId,
+      delegated: Number(row.delegated) === 1,
+      origin: row.origin == null ? null : String(row.origin),
+      parentSessionId: row.parent_session_id == null ? null : String(row.parent_session_id),
+      rootSessionId: row.root_session_id == null ? null : String(row.root_session_id),
+      inheritedEventCount: row.inherited_event_count == null ? null : Number(row.inherited_event_count),
+    };
   }
 
   /**
    * Append raw (already REDACTED-and-bounded) episode event rows for one session.
    * Idempotent: INSERT OR IGNORE keyed on (session_id, kind, call_id, seq).
-   * The project scope is recorded so delayed assembly keeps correct scoping.
+   * The allowlisted producer/fork facts are committed atomically with rows;
+   * project scope is also durable before delayed assembly.
    */
-  appendEpisodeEvents(sessionId: string, projectId: string, delegated: boolean, rows: EpisodeEventInput[]): void {
+  appendEpisodeEvents(sessionId: string, projectId: string, provenance: EpisodeSessionProvenanceInput, rows: EpisodeEventInput[]): void {
     if (rows.length === 0) return;
-    if (delegated || !this.sessionEpisodeDelegated.has(sessionId)) {
-      this.sessionEpisodeDelegated.set(sessionId, delegated);
-    }
+    const boundedId = (value: string | null | undefined): string | null =>
+      typeof value === "string" && value.length > 0 ? value.slice(0, 256) : null;
+    const origin = provenance.origin === "subagent" ? "subagent" : null;
+    const inheritedEventCount = typeof provenance.inheritedEventCount === "number" && Number.isFinite(provenance.inheritedEventCount)
+      ? Math.max(0, Math.floor(provenance.inheritedEventCount))
+      : null;
     this.setSessionProject(sessionId, projectId);
     this.db.exec("BEGIN IMMEDIATE");
     try {
+      const now = Date.now();
+      this.db.prepare(
+        `INSERT INTO episode_session_provenance
+           (session_id, delegated, origin, parent_session_id, root_session_id, inherited_event_count, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(session_id) DO UPDATE SET
+           delegated = MAX(episode_session_provenance.delegated, excluded.delegated),
+           origin = COALESCE(episode_session_provenance.origin, excluded.origin),
+           parent_session_id = COALESCE(episode_session_provenance.parent_session_id, excluded.parent_session_id),
+           root_session_id = COALESCE(episode_session_provenance.root_session_id, excluded.root_session_id),
+           inherited_event_count = COALESCE(episode_session_provenance.inherited_event_count, excluded.inherited_event_count),
+           updated_at = excluded.updated_at`,
+      ).run(
+        sessionId,
+        provenance.delegated ? 1 : 0,
+        origin,
+        boundedId(provenance.parentSessionId),
+        boundedId(provenance.rootSessionId),
+        inheritedEventCount,
+        now,
+      );
       const stmt = this.db
         .prepare(
           `INSERT OR IGNORE INTO episode_events
              (session_id, kind, call_id, turn, step, seq, at, payload, created_at, episode_id)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
         );
-      const now = Date.now();
       for (const r of rows) {
         stmt.run(sessionId, r.kind, r.callId, r.turn, r.step, r.seq, r.at, r.payload, now);
       }
@@ -1802,8 +2274,8 @@ export class MemoryStore {
   }
 
   /**
-   * Commit one closed turn atomically: episode upsert + step rows + event claims
-   * all commit together or not at all (acid replay safety).
+   * Commit one closed turn atomically: episode upsert + step rows + event claims,
+   * and any contradiction-driven draft invalidation commit together or not at all.
    */
   commitEpisode(
     input: EpisodeUpsertInput,
@@ -1848,6 +2320,15 @@ export class MemoryStore {
         );
       }
       this.claimEpisodeEvents(input.sessionId, claimCallIds, input.turn, id);
+      if (input.fingerprint && (input.status === "failed" || steps.some((step) => step.isError !== 0))) {
+        // A contradictory observation invalidates any still-live proposal or
+        // release derived from this exact project/fingerprint support group.
+        this.db.prepare(
+          `UPDATE skill_drafts SET status = 'invalidated', updated_at = ?
+           WHERE project_id = ? AND fingerprint = ?
+             AND status IN ('draft', 'evaluated', 'approved', 'activated')`,
+        ).run(Date.now(), input.projectId, input.fingerprint);
+      }
       this.db.exec("COMMIT");
       return { id, created };
     } catch (error) {
@@ -1990,19 +2471,163 @@ export class MemoryStore {
   }
 
   /**
+   * Persist an inactive draft only when every cited source is still positively
+   * reviewed, direct, successful, same-project/same-fingerprint evidence and the
+   * independent-session quorum still holds at the write boundary.
+   */
+  createSkillDraft(input: CreateSkillDraftInput): { created: boolean; draft: SkillDraftRecord } {
+    const projectId = input.projectId.trim();
+    const fingerprint = input.fingerprint.trim();
+    const name = input.name.trim();
+    const markdown = input.markdown.trim();
+    const sourceEpisodeIds = [...new Set(input.sourceEpisodeIds.filter((id) => typeof id === "string" && id.trim()).map((id) => id.trim()))].sort();
+    const minSupport = Number.isFinite(input.minIndependentSupport) ? Math.max(2, Math.floor(input.minIndependentSupport)) : 2;
+    const maxDrafts = Number.isFinite(input.maxDrafts) ? Math.max(0, Math.floor(input.maxDrafts!)) : 0;
+    if (!projectId || !fingerprint || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name)) throw new Error("invalid skill draft identity");
+    if (!markdown || markdown.length > 50_000) throw new Error("invalid skill draft markdown size");
+    if (sourceEpisodeIds.length < minSupport) throw new Error("skill draft lacks independent cited episodes");
+
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const placeholders = sourceEpisodeIds.map(() => "?").join(",");
+      const rows = this.db.prepare(
+        `SELECT e.id, e.session_id, e.project_id, e.fingerprint, e.status, e.reviewed_at, e.delegated,
+           EXISTS (SELECT 1 FROM episode_steps s WHERE s.episode_id = e.id AND s.is_error = 0) AS has_success,
+           EXISTS (SELECT 1 FROM episode_steps s WHERE s.episode_id = e.id AND s.is_error != 0) AS has_error
+         FROM episodes e
+         JOIN episode_session_provenance p ON p.session_id = e.session_id AND p.delegated = 0
+         WHERE e.id IN (${placeholders})`,
+      ).all(...sourceEpisodeIds) as Array<Record<string, unknown>>;
+      if (rows.length !== sourceEpisodeIds.length) throw new Error("skill draft cites missing episodes");
+      const sessions = new Set<string>();
+      for (const row of rows) {
+        if (
+          String(row.project_id) !== projectId || String(row.fingerprint ?? "") !== fingerprint ||
+          row.status !== "reviewed" || row.reviewed_at == null || Number(row.delegated) !== 0 ||
+          Number(row.has_success) !== 1 || Number(row.has_error) !== 0
+        ) throw new Error("skill draft source is not eligible reviewed evidence");
+        sessions.add(String(row.session_id));
+      }
+      if (sessions.size < minSupport) throw new Error("skill draft support lacks distinct sessions");
+
+      const id = randomUUID();
+      const now = Date.now();
+      const sourceJson = JSON.stringify(sourceEpisodeIds);
+      const inserted = this.db.prepare(
+        `INSERT OR IGNORE INTO skill_drafts
+           (id, project_id, fingerprint, name, markdown, source_episode_ids, status,
+            evaluation_version, evaluation_report, active_path, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, 'draft', NULL, NULL, NULL, ?, ?)`,
+      ).run(id, projectId, fingerprint, name, markdown, sourceJson, now, now);
+      let draftId: string = id;
+      if (Number(inserted.changes) > 0) {
+        if (maxDrafts > 0 && this.countSkillDrafts({ statuses: ["draft", "evaluated", "approved", "activated"] }) > maxDrafts) {
+          throw new Error(`skill draft cap reached (maxDrafts=${maxDrafts})`);
+        }
+        const supportInsert = this.db.prepare("INSERT INTO skill_draft_support (draft_id, episode_id) VALUES (?, ?)");
+        for (const episodeId of sourceEpisodeIds) supportInsert.run(id, episodeId);
+      } else {
+        const existing = this.db.prepare(
+          "SELECT id FROM skill_drafts WHERE project_id = ? AND fingerprint = ? AND source_episode_ids = ?",
+        ).get(projectId, fingerprint, sourceJson) as { id?: string } | undefined;
+        if (!existing?.id) throw new Error("skill draft dedupe row unavailable");
+        draftId = String(existing.id);
+      }
+      this.db.exec("COMMIT");
+      const draft = this.getSkillDraft(draftId);
+      if (!draft) throw new Error("skill draft was not readable after commit");
+      return { created: Number(inserted.changes) > 0, draft };
+    } catch (error) {
+      try { this.db.exec("ROLLBACK"); } catch { /* already rolled back */ }
+      throw error;
+    }
+  }
+
+  /** Static coverage metadata never advances the draft's behavioral evaluation or approval state. */
+  recordSkillDraftEvaluation(id: string, version: string, value: unknown): boolean {
+    const report = parseStaticFixtureReviewReport(value);
+    if (typeof id !== "string" || typeof version !== "string" || !report || report.draftId !== id || report.version !== version) return false;
+    return this.runInImmediateTransaction(() => {
+      const draft = this.getSkillDraft(id, report.projectId);
+      if (!draft || draft.status !== "draft" || draft.fingerprint !== report.fingerprint
+        || JSON.stringify([...draft.sourceEpisodeIds].sort()) !== JSON.stringify(report.sourceEpisodeIds)) return false;
+      // Recheck source eligibility under the same write transaction as the metadata update.
+      for (const sourceId of report.sourceEpisodeIds) {
+        const episode = this.getEpisode(sourceId);
+        if (!episode || episode.status !== "reviewed" || episode.reviewedAt == null || episode.delegated || episode.rejectReason !== null
+          || episode.projectId !== draft.projectId || episode.fingerprint !== draft.fingerprint) return false;
+        const steps = this.getEpisodeSteps(sourceId);
+        if (!steps.length || steps.some(step => step.isError || step.resultSeq == null)) return false;
+      }
+      const result = this.db.prepare(
+        `UPDATE skill_drafts SET evaluation_version = ?, evaluation_report = ?, updated_at = ?
+         WHERE id = ? AND status = 'draft' AND project_id = ? AND fingerprint = ? AND source_episode_ids = ?`,
+      ).run(version, JSON.stringify(report), Date.now(), id, draft.projectId, draft.fingerprint, JSON.stringify(draft.sourceEpisodeIds));
+      return Number(result.changes) === 1;
+    });
+  }
+
+  getSkillDraft(id: string, projectId?: string): SkillDraftRecord | undefined {
+    const row = (projectId
+      ? this.db.prepare("SELECT * FROM skill_drafts WHERE id = ? AND project_id = ?").get(id, projectId)
+      : this.db.prepare("SELECT * FROM skill_drafts WHERE id = ?").get(id)) as Record<string, unknown> | undefined;
+    return row ? toSkillDraftRecord(row) : undefined;
+  }
+
+  listSkillDrafts(options: { projectId?: string; status?: SkillDraftStatus; limit?: number } = {}): SkillDraftSummary[] {
+    const where: string[] = [];
+    const params: Array<string | number> = [];
+    if (options.projectId) { where.push("project_id = ?"); params.push(options.projectId); }
+    if (options.status) { where.push("status = ?"); params.push(options.status); }
+    const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+    const limit = Math.max(1, Math.min(50, Math.floor(options.limit ?? 10)));
+    const rows = this.db.prepare(
+      `SELECT id, project_id, name, status, source_episode_ids, created_at, updated_at
+       FROM skill_drafts ${whereSql} ORDER BY updated_at DESC LIMIT ?`,
+    ).all(...params, limit) as Array<Record<string, unknown>>;
+    return rows.map((row) => toSkillDraftSummary(row));
+  }
+
+  countSkillDrafts(options: { projectId?: string; statuses?: SkillDraftStatus[] } = {}): number {
+    const where: string[] = [];
+    const params: Array<string | number> = [];
+    if (options.projectId) { where.push("project_id = ?"); params.push(options.projectId); }
+    if (options.statuses?.length) {
+      where.push(`status IN (${options.statuses.map(() => "?").join(",")})`);
+      params.push(...options.statuses);
+    }
+    const row = this.db.prepare(`SELECT COUNT(*) AS n FROM skill_drafts ${where.length ? `WHERE ${where.join(" AND ")}` : ""}`).get(...params) as { n: number };
+    return Number(row.n);
+  }
+
+  /** Episode ids already represented by non-invalidated drafts, for generation dedupe. */
+  citedSkillDraftEpisodeIds(): Set<string> {
+    const rows = this.db.prepare(
+      `SELECT DISTINCT support.episode_id FROM skill_draft_support support
+       JOIN skill_drafts draft ON draft.id = support.draft_id
+       WHERE draft.status != 'invalidated'`,
+    ).all() as Array<{ episode_id: string }>;
+    return new Set(rows.map((row) => String(row.episode_id)));
+  }
+
+  /**
    * Purge episodes (+ steps, + their event rows) plus stale unclaimed event rows.
-   * Returns deleted counts. Never touches memories rows.
+   * Explicit user purges may also forget episode-review-derived memories and
+   * always invalidate supported drafts; retention purges leave derived memories
+   * alone unless revokeDerived is explicitly requested.
    * The age cutoff is INCLUSIVE (updated_at <= olderThanTs), so days=0 purges
    * everything up to and including now; a project filter alone purges the whole
    * project; with NO filters at all nothing is deleted (no unfiltered universe).
    */
-  purgeEpisodes(options: { projectId?: string; olderThanTs?: number } = {}): {
+  purgeEpisodes(options: { projectId?: string; olderThanTs?: number; revokeDerived?: boolean } = {}): {
     episodes: number;
     steps: number;
     events: number;
+    memories: number;
   } {
-    const counts = { episodes: 0, steps: 0, events: 0 };
+    const counts = { episodes: 0, steps: 0, events: 0, memories: 0 };
     this.db.exec("BEGIN IMMEDIATE");
+    this.explicitTxDepth++;
     try {
       const where: string[] = [];
       const params: Array<string | number> = [];
@@ -2015,8 +2640,37 @@ export class MemoryStore {
             .all(...params) as Array<{ id: string }>
         ).map((r) => String(r.id));
         if (ids.length > 0) {
+          if (options.revokeDerived === true) {
+            const purgedEpisodeIds = new Set(ids);
+            const derivedRows = this.db.prepare(
+              `SELECT m.id, mm.evidence FROM memories m
+               JOIN memories_meta mm ON mm.memory_id = m.id
+               WHERE m.status = 'active' AND mm.provenance = 'derived' AND mm.source = 'episode-review'`,
+            ).all() as Array<{ id: string; evidence?: string }>;
+            const derivedMemoryIds = derivedRows.filter((row) => {
+              const evidence = parseEvidence(String(row.evidence ?? "[]"));
+              // Only linked memories are cascaded; malformed evidence is excluded
+              // from both recall and skill-generation context by their own gates.
+              return evidence.some((entry) => typeof entry.episodeId === "string" && purgedEpisodeIds.has(entry.episodeId));
+            }).map((row) => String(row.id));
+            for (const chunk of chunkList(derivedMemoryIds, 400)) {
+              const ph = chunk.map(() => "?").join(",");
+              const forgotten = this.db.prepare(
+                `UPDATE memories SET status = 'forgotten', updated_at = ? WHERE status = 'active' AND id IN (${ph})`,
+              ).run(Date.now(), ...chunk);
+              this.db.prepare(`DELETE FROM memories_fts WHERE content_rowid IN (${ph})`).run(...chunk);
+              this.db.prepare(`DELETE FROM baseline WHERE memory_id IN (${ph})`).run(...chunk);
+              counts.memories += Number(forgotten.changes);
+            }
+            if (counts.memories > 0) this.txnBumpRevision("episode-purge-derived-memory");
+          }
           for (const chunk of chunkList(ids, 400)) {
             const ph = chunk.map(() => "?").join(",");
+            this.db.prepare(
+              `UPDATE skill_drafts SET status = 'invalidated', updated_at = ?
+               WHERE status IN ('draft', 'evaluated', 'approved', 'activated')
+                 AND id IN (SELECT draft_id FROM skill_draft_support WHERE episode_id IN (${ph}))`,
+            ).run(Date.now(), ...chunk);
             const resSteps = this.db.prepare(`DELETE FROM episode_steps WHERE episode_id IN (${ph})`).run(...chunk);
             const resEvents = this.db.prepare(`DELETE FROM episode_events WHERE episode_id IN (${ph})`).run(...chunk);
             const resEpisodes = this.db.prepare(`DELETE FROM episodes WHERE id IN (${ph})`).run(...chunk);
@@ -2043,6 +2697,8 @@ export class MemoryStore {
     } catch (error) {
       try { this.db.exec("ROLLBACK"); } catch { /* already rolled back */ }
       throw error;
+    } finally {
+      this.explicitTxDepth--;
     }
     return counts;
   }
@@ -2127,6 +2783,55 @@ export interface EpisodeStepInput {
 
 export type EpisodeStepRecord = EpisodeStepInput;
 
+/** Allowlisted immutable producer/fork facts captured before episode assembly. */
+export interface EpisodeSessionProvenanceInput {
+  delegated: boolean;
+  origin?: string | null;
+  parentSessionId?: string | null;
+  rootSessionId?: string | null;
+  inheritedEventCount?: number | null;
+}
+
+export interface EpisodeSessionProvenanceRecord extends EpisodeSessionProvenanceInput {
+  sessionId: string;
+  origin: string | null;
+  parentSessionId: string | null;
+  rootSessionId: string | null;
+  inheritedEventCount: number | null;
+}
+
+export type SkillDraftStatus = "draft" | "evaluated" | "approved" | "rejected" | "invalidated" | "activated" | "rolled-back";
+
+export interface CreateSkillDraftInput {
+  projectId: string;
+  fingerprint: string;
+  name: string;
+  markdown: string;
+  sourceEpisodeIds: string[];
+  minIndependentSupport: number;
+  /** Optional SQLite-atomic cap; 0/omitted means unlimited. */
+  maxDrafts?: number;
+}
+
+export interface SkillDraftSummary {
+  id: string;
+  projectId: string;
+  name: string;
+  status: SkillDraftStatus;
+  sourceEpisodeCount: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface SkillDraftRecord extends SkillDraftSummary {
+  fingerprint: string;
+  markdown: string;
+  sourceEpisodeIds: string[];
+  evaluationVersion: string | null;
+  evaluationReport: string | null;
+  activePath: string | null;
+}
+
 export interface EpisodeUpsertInput {
   sessionId: string;
   projectId: string;
@@ -2191,6 +2896,40 @@ function toEpisodeRecord(row: Record<string, unknown>): EpisodeRecord {
     fingerprint: row.fingerprint == null ? null : String(row.fingerprint),
     delegated: Number(row.delegated) === 1,
     rejectReason: row.reject_reason == null ? null : String(row.reject_reason),
+  };
+}
+
+function skillDraftSourceIds(value: unknown): string[] {
+  try {
+    const parsed = JSON.parse(String(value));
+    return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function toSkillDraftSummary(row: Record<string, unknown>): SkillDraftSummary {
+  return {
+    id: String(row.id),
+    projectId: String(row.project_id),
+    name: String(row.name),
+    status: row.status as SkillDraftStatus,
+    sourceEpisodeCount: skillDraftSourceIds(row.source_episode_ids).length,
+    createdAt: Number(row.created_at),
+    updatedAt: Number(row.updated_at),
+  };
+}
+
+function toSkillDraftRecord(row: Record<string, unknown>): SkillDraftRecord {
+  const sourceEpisodeIds = skillDraftSourceIds(row.source_episode_ids);
+  return {
+    ...toSkillDraftSummary(row),
+    fingerprint: String(row.fingerprint),
+    markdown: String(row.markdown),
+    sourceEpisodeIds,
+    evaluationVersion: row.evaluation_version == null ? null : String(row.evaluation_version),
+    evaluationReport: row.evaluation_report == null ? null : String(row.evaluation_report),
+    activePath: row.active_path == null ? null : String(row.active_path),
   };
 }
 

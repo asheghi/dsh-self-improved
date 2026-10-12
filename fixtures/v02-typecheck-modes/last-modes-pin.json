@@ -1,0 +1,10 @@
+{
+  "suiteId": "typecheck-modes-2026-10-12T12:26:23.884Z-2589168",
+  "timestamp": "2026-10-12T12:26:24.232Z",
+  "node": "v24.13.1",
+  "wrapper": "scripts/typecheck-v02.mjs",
+  "wrapperSha256": "38d16da0e6ffa369f73db337e04e2bd80e20a0c77155f653424ec5770622cbae",
+  "harness": "real copies staged under the suite's own unique temp root; no toolchain, no coordinator test site, no network, no installs",
+  "strictPass": 21,
+  "strictFail": 0
+}

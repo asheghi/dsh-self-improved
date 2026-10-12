@@ -25,6 +25,32 @@ store.insertMemory({ kind: "fact", content: "Project E:\\dshPro uses pnpm to man
 const help = handleMemoryCommand(store, "");
 check("help lists subcommands", help.kind === "success" && help.text.includes("/memory search"));
 
+// Read-only inactive draft inspection is consent-gated and bounded.
+{
+  const fixture = {
+    id: "draft-123", projectId: "/tmp/project", name: "dsi-check-build", status: "draft",
+    sourceEpisodeCount: 2, sourceEpisodeIds: ["ep-a", "ep-b"], fingerprint: "fp-1",
+    markdown: ["---", "name: dsi-check-build", "---", "x".repeat(5000)].join("\n"),
+    evaluationVersion: null, evaluationReport: null, activePath: null, createdAt: 1, updatedAt: 2,
+  };
+  const draftStore = {
+    listSkillDrafts: (opts) => opts.projectId === fixture.projectId
+      ? [{ id: fixture.id, projectId: fixture.projectId, name: fixture.name, status: fixture.status, sourceEpisodeCount: 2, createdAt: 1, updatedAt: 2 }]
+      : [],
+    getSkillDraft: (id, projectId) => id === fixture.id && projectId === fixture.projectId ? fixture : undefined,
+  };
+  check("skill draft list is withheld until episode consent is enabled",
+    handleMemoryCommand(draftStore, "skill-drafts", { episodeEnabled: () => false }).kind === "error");
+  check("skill draft list requires the current project scope",
+    handleMemoryCommand(draftStore, "skill-drafts", { episodeEnabled: () => true }).kind === "error");
+  const listDrafts = handleMemoryCommand(draftStore, "skill-drafts", { episodeEnabled: () => true, skillDraftProjectId: "/tmp/project" });
+  check("skill draft list returns bounded identifiers", listDrafts.kind === "success" && listDrafts.text.includes("draft-123") && !listDrafts.text.includes("/tmp/project"));
+  const detailDraft = handleMemoryCommand(draftStore, "skill-draft draft-123", { episodeEnabled: () => true, skillDraftProjectId: "/tmp/project" });
+  check("skill draft detail is bounded and explicitly marks truncation", detailDraft.kind === "success" && detailDraft.text.includes("inactive draft") && detailDraft.text.includes("truncated at 4000"));
+  const fullDraft = handleMemoryCommand(draftStore, "skill-draft draft-123 --full", { episodeEnabled: () => true, skillDraftProjectId: "/tmp/project" });
+  check("skill draft --full returns the bounded full fixture", fullDraft.text.includes("x".repeat(5000)) && !fullDraft.text.includes("truncated at"));
+}
+
 // search
 const s1 = handleMemoryCommand(store, "search PowerShell");
 check("search hit", s1.kind === "success" && s1.text.includes("PowerShell"), s1.text.slice(0, 40));
@@ -318,8 +344,8 @@ check("forged token rejected, valid token accepted", !tracker.verify("deadbeef")
       { kind: "result", callId, turn, step: 0, seq: seq + 1, at: 1001, payload: JSON.stringify({ toolCallId: callId, resultExcerpt: okResult ? "build ok" : "exit 1", resultTruncated: 0, isError: okResult ? 0 : 1, errorName: okResult ? null : "Error", errorCode: null, toolHint: null }) },
       { kind: "turn-end", callId: "", turn, step: null, seq: seq + 2, at: 1002, payload: JSON.stringify({ reason: { kind: "completed" } }) },
     ];
-    store.appendEpisodeEvents("chan-ep", "/tmp/proj-chan", false, mkRows("c-ep1", 1, 10, true));
-    store.appendEpisodeEvents("chan-ep", "/tmp/proj-chan", false, mkRows("c-ep2", 2, 20, false));
+    store.appendEpisodeEvents("chan-ep", "/tmp/proj-chan", { delegated: false }, mkRows("c-ep1", 1, 10, true));
+    store.appendEpisodeEvents("chan-ep", "/tmp/proj-chan", { delegated: false }, mkRows("c-ep2", 2, 20, false));
     assembleSessionEpisodes(store, "chan-ep");
 
     // Snapshot: disabled → counts present, recent withheld
@@ -432,7 +458,7 @@ check("forged token rejected, valid token accepted", !tracker.verify("deadbeef")
     { kind: "result", callId, turn, step: 0, seq: seq + 1, at: 1001, payload: JSON.stringify({ toolCallId: callId, resultExcerpt: okResult ? "build ok" : "exit 1", resultTruncated: 0, isError: okResult ? 0 : 1, errorName: okResult ? null : "Error", errorCode: null, toolHint: null }) },
     { kind: "turn-end", callId: "", turn, step: null, seq: seq + 2, at: 1002, payload: JSON.stringify({ reason: { kind: "completed" } }) },
   ];
-  store.appendEpisodeEvents("cmd-ep", "/tmp/proj-cmd", false, mkRows("c-cmd1", 1, 10, true));
+  store.appendEpisodeEvents("cmd-ep", "/tmp/proj-cmd", { delegated: false }, mkRows("c-cmd1", 1, 10, true));
   assembleSessionEpisodes(store, "cmd-ep");
 
   const off = handleMemoryCommand(store, "episodes", {});
@@ -453,7 +479,7 @@ check("forged token rejected, valid token accepted", !tracker.verify("deadbeef")
   const purge = handleMemoryCommand(store, "episode-purge all");
   check("/memory episode-purge all removes every episode", purge.kind === "success" && /Purged 1 episodes/.test(purge.text), purge.text);
   check("store empty after purge", store.episodeCounts().succeeded === 0 && store.getEpisodeSteps(epId).length === 0, JSON.stringify(store.episodeCounts()));
-  store.appendEpisodeEvents("cmd-ep2", "/tmp/proj-cmd", false, mkRows("c-cmd2", 1, 30, true));
+  store.appendEpisodeEvents("cmd-ep2", "/tmp/proj-cmd", { delegated: false }, mkRows("c-cmd2", 1, 30, true));
   assembleSessionEpisodes(store, "cmd-ep2");
   const purgeOld = handleMemoryCommand(store, "episode-purge 0");
   check("/memory episode-purge <days> purges by age", purgeOld.kind === "success" && /Purged 1 episodes/.test(purgeOld.text), purgeOld.text);

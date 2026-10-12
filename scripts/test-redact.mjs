@@ -81,7 +81,9 @@ check("json primitive string free-text redacted", !prim.includes("Som3LonQHeader
 // Free-text: Bearer header.
 check("bearer redacted", redactFreeText("Bearer abcdefgh12345XYZ next") === "[REDACTED] next", redactFreeText("Bearer abcdefgh12345XYZ next"));
 check("bearer case-insensitive", redactFreeText("BEARER abcdefgh123456") === "[REDACTED]");
-// Short values (under 6 chars) are untouched, per spec.
+// Unlabeled Bearer/Basic keep a length floor (ordinary English words must not
+// be over-matched); labeled `label[:=]value` forms now have NO floor (Phase B
+// recall fix: `token: ab`, `pwd=xy`, `password=x` must never persist).
 check("short bearer value untouched", redactFreeText("Bearer abc, y") === "Bearer abc, y", redactFreeText("Bearer abc, y"));
 check("password= redacted", redactFreeText("login password=hunter22222 done") === "login [REDACTED] done", redactFreeText("login password=hunter22222 done"));
 check("pwd= and passwd= redacted", redactFreeText("passwd=verylong1 pwd=verylong2") === "[REDACTED] [REDACTED]", redactFreeText("passwd=verylong1 pwd=verylong2"));
@@ -92,7 +94,8 @@ check("api key variants redacted", redactFreeText("api_key=aaaaaaaaaaaa1, api-ke
 check("password: colon form redacted", redactFreeText("password: hunter2xyz done") === "[REDACTED] done", redactFreeText("password: hunter2xyz done"));
 check("secret: xyz redacted", redactFreeText("secret: aabbccdd1") === "[REDACTED]");
 check("labelled bearer xyz redacted", redactFreeText("bearer aabbccdd11 tail") === "[REDACTED] tail", redactFreeText("bearer aabbccdd11 tail"));
-check("labeled short value untouched", redactFreeText("token: ab") === "token: ab", redactFreeText("token: ab"));
+// EXPECTATION CHANGED (MIGRATION-PHASE-B-RECALL): labeled short credentials are redacted regardless of length.
+check("labeled short value redacted", redactFreeText("token: ab") === "[REDACTED]", redactFreeText("token: ab"));
 check("secret= redacted", redactFreeText("secret=zzzzzzzzzzzz1") === "[REDACTED]");
 check("authorization: header redacted", redactFreeText("Authorization: SuperToken12345") === "[REDACTED]", redactFreeText("Authorization: SuperToken12345"));
 // Basic-auth short run MUST be redacted (labeled forms have a 4-char floor, no 6-char exemption).

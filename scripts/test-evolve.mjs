@@ -6,7 +6,7 @@ import { rmSync, existsSync, readFileSync, mkdirSync, writeFileSync, readdirSync
 import { join } from "node:path";
 import { MemoryStore } from "../lib/storage.js";
 import { Consolidator } from "../lib/consolidate.js";
-import { applyDecay, memoryScore, synthesizeSkills, synthesizeSkillsFromEpisodes, deleteSkill } from "../lib/evolve.js";
+import { applyDecay, memoryScore, synthesizeSkills, synthesizeSkillsFromEpisodes, createSkillDraftsFromEpisodes, deleteSkill } from "../lib/evolve.js";
 import { installCapture } from "../lib/capture.js";
 import { assembleSessionEpisodes } from "../lib/episodes.js";
 import { randomUUID } from "node:crypto";
@@ -130,6 +130,28 @@ check("synthesis without prefix still writes (1/1)", bare1 === 1 && existsSync(j
 const bare2 = await synthesizeSkills(store, skillFakeLlm, { enabled: true, minImportance: 7, skillsRoot: bareRoot, prefix: "", maxSkills: 1 }, bareRoot);
 check("empty prefix still enforces maxSkills", bare2 === 0, `bare2=${bare2}`);
 
+// A skill added while generation is awaiting must consume the remaining cap.
+{
+  const capRaceStore = new MemoryStore(join(dir, "skills-cap-race-store"));
+  for (let i = 0; i < 5; i++) {
+    capRaceStore.insertMemory({ kind: "fact", content: `Repeated package workflow evidence ${i}`, importance: 8 }, { provenance: "user" });
+  }
+  const root = join(dir, "skills-cap-race");
+  let calls = 0;
+  const duringLlm = async () => {
+    calls++;
+    mkdirSync(join(root, "external-skill"), { recursive: true });
+    writeFileSync(join(root, "external-skill", "SKILL.md"), "---\nname: external-skill\ndescription: unrelated external procedure\n---\n1. Maintain an unrelated system");
+    return "---\nname: package-workflow\ndescription: Update package dependencies safely\n---\n1. Check package versions\n2. Update dependencies\n3. Verify the lockfile";
+  };
+  const n = await synthesizeSkills(capRaceStore, duringLlm, {
+    enabled: true, minImportance: 7, skillsRoot: root, prefix: "", maxSkills: 1,
+  }, root);
+  check("memory skill cap rechecked immediately before persistence", n === 0 && calls === 1
+    && existsSync(join(root, "external-skill", "SKILL.md")) && !existsSync(join(root, "package-workflow", "SKILL.md")));
+  capRaceStore.close();
+}
+
 // Heading-only model output (no frontmatter) is rejected — no fallback skill naming
 const headingOnlyRoot = join(dir, "skills-heading");
 rmSync(headingOnlyRoot, { recursive: true, force: true });
@@ -222,13 +244,13 @@ capMem.close();
 
   let sessionSeq = 0;
   /** One successful episode in its own session; returns the episode id. */
-  const seedGoodEpisode = async (flush, tool = "bash", args = { cmd: "pnpm update" }, excerpt = "lockfile updated") => {
+  const seedGoodEpisode = async (flush, tool = "bash", args = { cmd: "pnpm update" }, excerpt = "lockfile updated", cwd = "/tmp/ep-skill-proj", headerExtras = {}) => {
     const turn = 1;
     sessionSeq += 1;
     const sessionId = `ep-skill-session-${sessionSeq}`;
     await flush({
       id: sessionId,
-      header: { cwd: "/tmp/ep-skill-proj" },
+      header: { cwd, ...headerExtras },
       events: [
         callEv(1, turn, 0, `c${sessionSeq}`, tool, args),
         resultEv(2, turn, 0, `c${sessionSeq}`, excerpt),
@@ -236,6 +258,19 @@ capMem.close();
       ],
     });
     return sessionId;
+  };
+  const seedTwoTurnEpisodes = async (store, flush, cwd) => {
+    sessionSeq++;
+    const sessionId = `ep-skill-two-turn-session-${sessionSeq}`;
+    await flush({ id: sessionId, header: { cwd }, events: [
+      callEv(1, 1, 0, `t${sessionSeq}-one`, "bash", { cmd: "pnpm update" }, 1000),
+      resultEv(2, 1, 0, `t${sessionSeq}-one`, "first lockfile update", 2000),
+      turnEndEv(3, 1, 3000),
+      callEv(4, 2, 0, `t${sessionSeq}-two`, "bash", { cmd: "pnpm update" }, 4000),
+      resultEv(5, 2, 0, `t${sessionSeq}-two`, "second lockfile update", 5000),
+      turnEndEv(6, 2, 6000),
+    ] });
+    return [store.getEpisodeBySessionTurn(sessionId, 1), store.getEpisodeBySessionTurn(sessionId, 2)];
   };
   const countReviewed = (store) => store.listEpisodes({ status: "succeeded", limit: 500 }).filter((e) => e.reviewedAt != null).length;
   const episodeIdOfSession = (store, sessionId) => {
@@ -431,6 +466,300 @@ capMem.close();
     check("5j: setup has unreviewed episodes", countReviewed(s) === 0);
     const n = await synth(s, root, emitSkill("bump-deps", ["Update the lockfile"]));
     check("5j: unreviewed episodes yield 0 skills", n === 0 && !existsSync(join(root, "bump-deps")));
+    s.close();
+  }
+
+  // --- 5l) rejected reviewed outcomes cannot support a positive skill
+  {
+    const s = new MemoryStore(join(dir, "ep-skill-rejected-only"));
+    const root = join(dir, "ep-skill-root-rejected-only");
+    const ids = await seedGroup(s, 2, false);
+    for (const id of ids) {
+      check("5l: rejection review commits", s.setEpisodeReview(id, {
+        summary: "not a reusable procedure", confidence: 0.9, status: "rejected", rejectReason: "not reusable",
+      }));
+    }
+    let calls = 0;
+    const llm = async (args) => { calls++; return emitSkill("bump-deps", ["Update the lockfile"])(args); };
+    const n = await synth(s, root, llm);
+    check("5l: rejected-only group is not sent to LLM or written", n === 0 && calls === 0 && !existsSync(skillDir(root, "bump-deps")));
+    s.close();
+  }
+
+  // --- 5m) mixed failures remain blocking after review status changes to rejected
+  {
+    const s = new MemoryStore(join(dir, "ep-skill-mixed-failure"));
+    const root = join(dir, "ep-skill-root-mixed-failure");
+    const flush = flushOf(s);
+    const seedTwoStep = async (secondFails) => {
+      sessionSeq++;
+      const sessionId = `ep-skill-two-step-${sessionSeq}`;
+      const firstId = `c${sessionSeq}-first`, secondId = `c${sessionSeq}-second`;
+      const secondResult = resultEv(4, 1, 1, secondId, secondFails ? "command failed" : "second update succeeded");
+      if (secondFails) secondResult.data.message.isError = true;
+      await flush({ id: sessionId, header: { cwd: "/tmp/ep-skill-proj" }, events: [
+        callEv(1, 1, 0, firstId, "bash", { cmd: "pnpm update" }),
+        resultEv(2, 1, 0, firstId, "first update succeeded"),
+        callEv(3, 1, 1, secondId, "bash", { cmd: "pnpm update" }),
+        secondResult,
+        turnEndEv(5, 1),
+      ] });
+      return s.getEpisodeBySessionTurn(sessionId, 1);
+    };
+    const successA = await seedTwoStep(false), successB = await seedTwoStep(false), mixed = await seedTwoStep(true);
+    check("5m: setup has two matching successful episodes and one mixed failure", successA?.status === "succeeded"
+      && successB?.status === "succeeded" && mixed?.status === "failed"
+      && successA?.fingerprint === successB?.fingerprint && successA?.fingerprint === mixed?.fingerprint
+      && s.getEpisodeSteps(mixed.id).map((step) => step.isError).join(",") === "0,1");
+    markReviewed(s, successA.id); markReviewed(s, successB.id);
+    check("5m: mixed failed observation can be reviewed for audit", s.setEpisodeReview(mixed.id, {
+      summary: "mixed execution with one failed step", confidence: 0.9, status: "rejected", rejectReason: "contains a failed step",
+    }));
+    let calls = 0;
+    const llm = async (args) => { calls++; return emitSkill("bump-deps", ["Update the lockfile", "Verify both steps"])(args); };
+    const n = await synth(s, root, llm);
+    check("5m: any failed step blocks the fingerprint after review", n === 0 && calls === 0 && !existsSync(skillDir(root, "bump-deps")));
+    s.close();
+  }
+
+  // --- 5n) generated skill citations must meet the independent support quorum
+  {
+    const runCitationCase = async (suffix, citationsFor) => {
+      const s = new MemoryStore(join(dir, `ep-skill-citations-${suffix}`));
+      const root = join(dir, `ep-skill-root-citations-${suffix}`);
+      const ids = await seedGroup(s, 2);
+      let calls = 0;
+      const llm = async (args) => {
+        calls++;
+        const idsInPrompt = [...args.user.matchAll(/Episode id: ([0-9a-f-]+)/g)].map((match) => match[1]);
+        return emitSkill("bump-deps", ["Update the lockfile"], { source_episode_ids: citationsFor(idsInPrompt) })(args);
+      };
+      const n = await synth(s, root, llm);
+      check(`5n: ${suffix} citations cannot be padded into a quorum`, n === 0 && calls === 1
+        && !existsSync(skillDir(root, "bump-deps")));
+      s.close();
+    };
+    await runCitationCase("one-valid", (ids) => [ids[0]]);
+    await runCitationCase("none-valid", () => ["00000000-0000-4000-8000-000000000000"]);
+    await runCitationCase("duplicate", (ids) => [ids[0], ids[0]]);
+  }
+
+  // --- 5o) maxSkills applies across groups in a single evolution round
+  {
+    const s = new MemoryStore(join(dir, "ep-skill-cap-per-group"));
+    const root = join(dir, "ep-skill-root-cap-per-group");
+    const flush = flushOf(s);
+    const seedReviewed = async (tool, args, excerpt) => {
+      const sessionId = await seedGoodEpisode(flush, tool, args, excerpt);
+      const episodeId = episodeIdOfSession(s, sessionId);
+      markReviewed(s, episodeId);
+    };
+    await seedReviewed("bash", { cmd: "pnpm update" }, "lockfile updated");
+    await seedReviewed("bash", { cmd: "pnpm update" }, "lockfile verified");
+    await seedReviewed("git", { cmd: "git status" }, "working tree clean");
+    await seedReviewed("git", { cmd: "git status" }, "changes reviewed");
+    let calls = 0;
+    const llm = async (args) => {
+      calls++;
+      const isGit = args.user.includes('"tool_name":"git"');
+      return emitSkill("unused", [isGit ? "Inspect the working tree" : "Update package dependencies"], {
+        name: isGit ? "git-status" : "package-update",
+      })(args);
+    };
+    const n = await synth(s, root, llm, { maxSkills: 1 });
+    const skillDirs = existsSync(root)
+      ? readdirSync(root).filter((name) => existsSync(skillDir(root, name)))
+      : [];
+    check("5o: cap stops later groups before another LLM call or write", n === 1 && calls === 1 && skillDirs.length === 1,
+      JSON.stringify({ n, calls, skillDirs }));
+    s.close();
+  }
+
+  // --- 5p) different projects cannot combine into one episode-skill quorum
+  {
+    const s = new MemoryStore(join(dir, "ep-skill-cross-project"));
+    const root = join(dir, "ep-skill-root-cross-project");
+    const flush = flushOf(s);
+    const seedReviewedInProject = async (cwd) => {
+      const sessionId = await seedGoodEpisode(flush, "bash", { cmd: "pnpm update" }, "lockfile updated", cwd);
+      const episodeId = episodeIdOfSession(s, sessionId);
+      markReviewed(s, episodeId);
+      return s.getEpisode(episodeId);
+    };
+    const projectA = await seedReviewedInProject("/tmp/ep-skill-project-a");
+    const projectB = await seedReviewedInProject("/tmp/ep-skill-project-b");
+    check("5p: setup has matching fingerprints from distinct projects", projectA?.fingerprint === projectB?.fingerprint
+      && projectA?.projectId !== projectB?.projectId);
+    let calls = 0;
+    const llm = async (args) => { calls++; return emitSkill("cross-project-flow", ["Update package dependencies"])(args); };
+    const n = await synth(s, root, llm);
+    check("5p: cross-project episodes cannot satisfy one support quorum", n === 0 && calls === 0
+      && !existsSync(skillDir(root, "cross-project-flow")));
+    const projectCPath = "/tmp/ep-skill-private-project-c";
+    await seedReviewedInProject(projectCPath);
+    await seedReviewedInProject(projectCPath);
+    let prompt = "";
+    const sameProjectWrite = await synth(s, root, async (args) => {
+      prompt = args.user;
+      return emitSkill("same-project-flow", ["Update package dependencies"])(args);
+    });
+    check("5p: same-project quorum works without exposing its path", sameProjectWrite === 1 && !prompt.includes(projectCPath));
+    s.close();
+  }
+
+  // --- 5q) fork-derived evidence cannot independently support a skill
+  {
+    const s = new MemoryStore(join(dir, "ep-skill-delegated"));
+    const root = join(dir, "ep-skill-root-delegated");
+    const flush = flushOf(s);
+    const cwd = "/tmp/ep-skill-delegated-project";
+    const parentSession = await seedGoodEpisode(flush, "bash", { cmd: "pnpm update" }, "lockfile updated", cwd);
+    const parentId = episodeIdOfSession(s, parentSession);
+    markReviewed(s, parentId);
+    const childSession = await seedGoodEpisode(flush, "bash", { cmd: "pnpm update" }, "lockfile updated in fork", cwd, {
+      isSeeded: true, parentSession,
+    });
+    const childId = episodeIdOfSession(s, childSession);
+    markReviewed(s, childId);
+    check("5q: parent and forked child share a fingerprint", s.getEpisode(parentId)?.fingerprint === s.getEpisode(childId)?.fingerprint
+      && s.getEpisode(parentId)?.delegated === false && s.getEpisode(childId)?.delegated === true);
+    let calls = 0;
+    const n = await synth(s, root, async (args) => { calls++; return emitSkill("delegated-flow", ["Update dependencies"])(args); });
+    check("5q: fork child is not an independent support source", n === 0 && calls === 0);
+    s.close();
+  }
+
+  // --- 5r) multiple turns in one session cannot satisfy independent-session quorum
+  {
+    const s = new MemoryStore(join(dir, "ep-skill-same-session"));
+    const root = join(dir, "ep-skill-root-same-session");
+    const episodes = await seedTwoTurnEpisodes(s, flushOf(s), "/tmp/ep-skill-same-session-project");
+    const [first, second] = episodes;
+    check("5r: setup has two successful turns in one session", first?.status === "succeeded" && second?.status === "succeeded"
+      && first?.fingerprint === second?.fingerprint && first?.sessionId === second?.sessionId);
+    markReviewed(s, first.id); markReviewed(s, second.id);
+    let calls = 0;
+    const n = await synth(s, root, async (args) => { calls++; return emitSkill("same-session-flow", ["Update dependencies"])(args); });
+    check("5r: repeated turns from one session cannot form a quorum", n === 0 && calls === 0);
+    s.close();
+  }
+
+  // --- 5s) cited episodes from one session do not satisfy independent citation quorum
+  {
+    const s = new MemoryStore(join(dir, "ep-skill-same-session-citations"));
+    const root = join(dir, "ep-skill-root-same-session-citations");
+    const flush = flushOf(s);
+    const cwd = "/tmp/ep-skill-same-session-citation-project";
+    const [first, second] = await seedTwoTurnEpisodes(s, flush, cwd);
+    const thirdSession = await seedGoodEpisode(flush, "bash", { cmd: "pnpm update" }, "another lockfile update", cwd);
+    const thirdId = episodeIdOfSession(s, thirdSession);
+    markReviewed(s, first.id); markReviewed(s, second.id); markReviewed(s, thirdId);
+    let calls = 0;
+    const llm = async (args) => {
+      calls++;
+      return emitSkill("same-session-citation-flow", ["Update dependencies"], {
+        source_episode_ids: [first.id, second.id],
+      })(args);
+    };
+    const n = await synth(s, root, llm);
+    check("5s: two cited turns from one session cannot fake independent support", n === 0 && calls === 1
+      && !existsSync(skillDir(root, "same-session-citation-flow")));
+    s.close();
+  }
+
+  // --- 5t) capture provenance survives restart before episode assembly
+  {
+    const dbPath = join(dir, "ep-skill-provenance-restart");
+    const sessionId = "ep-skill-provenance-child";
+    const projectId = "/tmp/ep-skill-provenance-project";
+    let s = new MemoryStore(dbPath);
+    const callId = "provenance-call-1";
+    s.appendEpisodeEvents(sessionId, projectId, {
+      delegated: true, origin: "subagent", parentSessionId: "parent-session-1",
+      rootSessionId: "root-session-1", inheritedEventCount: 3,
+    }, [
+      { kind: "call", callId, turn: 1, step: 0, seq: 1, at: 1000, payload: JSON.stringify({
+        toolName: "bash", argumentsRedacted: JSON.stringify({ cmd: "pnpm update" }), argsTruncated: 0, callId,
+      }) },
+      { kind: "result", callId, turn: 1, step: 0, seq: 2, at: 2000, payload: JSON.stringify({
+        toolCallId: callId, resultExcerpt: "lockfile updated", resultTruncated: 0, isError: 0,
+        errorName: null, errorCode: null, toolHint: null,
+      }) },
+      { kind: "turn-end", callId: "", turn: 1, step: null, seq: 3, at: 3000, payload: JSON.stringify({ reasonKind: "completed" }) },
+    ]);
+    s.close();
+    s = new MemoryStore(dbPath);
+    const provenance = s.episodeSessionProvenance(sessionId);
+    check("5t: delegated lineage is durable and unknown legacy state fails closed", s.episodeDelegated(sessionId)
+      && s.episodeDelegated("legacy-pending-without-provenance")
+      && provenance?.origin === "subagent" && provenance?.parentSessionId === "parent-session-1"
+      && provenance?.rootSessionId === "root-session-1" && provenance?.inheritedEventCount === 3);
+    assembleSessionEpisodes(s, sessionId);
+    const episode = s.getEpisodeBySessionTurn(sessionId, 1);
+    check("5t: restart assembly preserves delegated status", episode?.status === "succeeded" && episode?.delegated === true);
+    s.close();
+  }
+
+  // --- 5u) v0.2 draft generation persists proposals outside the active skills filesystem
+  {
+    const s = new MemoryStore(join(dir, "ep-skill-drafts"));
+    const activeRoot = join(dir, "ep-skill-draft-active-root");
+    const ids = await seedGroup(s, 2);
+    const n = await createSkillDraftsFromEpisodes(
+      s,
+      emitSkill("bump-deps", ["Check current dependency versions", "Update the lockfile", "Verify the build"]),
+      { prefix: "dsi-", maxDrafts: 20, minIndependentSupport: 2, now: Date.UTC(2026, 0, 15) },
+    );
+    const summaries = s.listSkillDrafts({ status: "draft", limit: 10 });
+    const draft = summaries[0] ? s.getSkillDraft(summaries[0].id) : undefined;
+    check("5u: compatible reviewed evidence creates one inactive SQLite draft", n === 1 && draft?.status === "draft"
+      && draft?.name === "dsi-bump-deps" && draft?.activePath === null && !existsSync(activeRoot));
+    check("5u: draft retains project and episode citations", draft?.projectId === "/tmp/ep-skill-proj"
+      && ids.every((id) => draft?.sourceEpisodeIds.includes(id)) && draft?.markdown.includes("name: dsi-bump-deps"));
+    check("5u: same source evidence does not create another draft", await createSkillDraftsFromEpisodes(
+      s,
+      emitSkill("bump-deps", ["Check current dependency versions", "Update the lockfile", "Verify the build"]),
+      { prefix: "dsi-", maxDrafts: 20, minIndependentSupport: 2 },
+    ) === 0 && s.countSkillDrafts({ statuses: ["draft"] }) === 1);
+    s.close();
+  }
+
+  // --- 5v) legacy assembled rows without durable producer provenance fail closed
+  {
+    const s = new MemoryStore(join(dir, "ep-skill-legacy-provenance"));
+    const ids = await seedGroup(s, 2);
+    const sessionIds = [...new Set(ids.map((id) => s.getEpisode(id).sessionId))];
+    for (const sessionId of sessionIds) s.db.prepare("DELETE FROM episode_session_provenance WHERE session_id = ?").run(sessionId);
+    let calls = 0;
+    const n = await createSkillDraftsFromEpisodes(s, async (args) => {
+      calls++;
+      return emitSkill("legacy-draft", ["Update dependencies"])(args);
+    }, { prefix: "", maxDrafts: 20, minIndependentSupport: 2 });
+    check("5v: reviewed legacy rows without durable provenance cannot create drafts", n === 0 && calls === 0);
+    s.close();
+  }
+
+  // --- 5w) consent revocation blocks a late result from a non-cooperative provider
+  {
+    const s = new MemoryStore(join(dir, "ep-skill-cancel"));
+    await seedGroup(s, 2);
+    const controller = new AbortController();
+    let started;
+    const startedCall = new Promise((resolve) => { started = resolve; });
+    let resolveCall;
+    const pending = createSkillDraftsFromEpisodes(s, async ({ user, signal }) => {
+      started({ user, signal });
+      return await new Promise((resolve) => { resolveCall = resolve; }); // ignores abort until explicitly resolved
+    }, { prefix: "", maxDrafts: 20, minIndependentSupport: 2, signal: controller.signal });
+    const call = await startedCall;
+    const sourceEpisodeIds = [...call.user.matchAll(/Episode id: ([a-f0-9-]{36})/g)].map((match) => match[1]);
+    controller.abort(new Error("draft consent revoked"));
+    resolveCall(JSON.stringify({ skill: {
+      name: "late-result", description: "late", whenToUse: "late", procedure: ["Never persist after opt-out"], sourceEpisodeIds,
+    } }));
+    const n = await pending;
+    check("5w: a provider result arriving after draft opt-out is never persisted",
+      call.signal.aborted && n === 0 && s.countSkillDrafts({ statuses: ["draft"] }) === 0);
     s.close();
   }
 

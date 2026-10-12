@@ -136,6 +136,9 @@ function check(ok, name, detail) {
   let disabledFlushRan = false;
   try {
     await handlers[0].fn(rc2Session);
+    // Instrument this disabled run with the source proxy, not just the
+    // separate enabled positive control.
+    await handlers[0].fn(throwingSession);
     disabledFlushRan = true;
   } catch (error) {
     disabledFlushRan = false;
@@ -225,12 +228,19 @@ function check(ok, name, detail) {
   check(offSlices.length === 0, "real-store control: a flush with the master OFF leaves ZERO slices", JSON.stringify(offSlices));
 
   realHandlers.length = 0;
+  // Phase B replacement lane (MIGRATION-PHASE-B-CAPTURE.md): the raw JSONL
+  // slice write is gone; a REAL journal over the same store is the plugin's
+  // owned persistence for direct-human evidence, so the enabled control
+  // observes capture exactly-once there.
+  const { MemoryJournalV02 } = await import("../lib/memory-journal-v02.js");
+  const realJournal = new MemoryJournalV02(realStore);
   installCapture(
     { on: (name, fn) => realHandlers.push({ name, fn }) },
     realStore,
     { enabled: () => true },
     undefined,
     { enabled: () => true, maxChars: () => 800 },
+    { append: (input) => realJournal.appendSession(input), closed: () => false },
   );
   const onSession = {
     id: "s-master-on",
@@ -241,11 +251,14 @@ function check(ok, name, detail) {
     ],
   };
   await realHandlers[0].fn(onSession);
+  await realHandlers[0].fn(onSession); // re-flush must be lifecycle-deduped
+  const onSources = getStoreJournalSources(realStore, "s-master-on");
   const onSlices = getStoreSlices(realStore, "s-master-on");
   check(
-    onSlices.length === 1 && onSlices[0].seq === 0 && onSlices[0].type === "user" && onSlices[0].sessionId === "s-master-on",
-    "real-store control: with the master ON the identical evidence is captured exactly once (incl. seq 0)",
-    JSON.stringify(onSlices.map((s) => ({ seq: s.seq, type: s.type }))),
+    onSources.length === 1 && onSources[0].seq === 0 && onSources[0].kind === "user"
+      && String(onSources[0].text).includes("on-session evidence") && onSlices.length === 0,
+    "real-store control: with the master ON the identical evidence is captured exactly once in the journal lane (incl. seq 0); the raw slice copy is gone",
+    JSON.stringify({ sources: onSources.map((s) => ({ seq: s.seq, kind: s.kind })), slices: onSlices.length }),
   );
   realStore.close();
   // Guarded cleanup: only the directory this process just created is removed.
@@ -253,6 +266,15 @@ function check(ok, name, detail) {
 }
 function getStoreSlices(store, sessionId) {
   return typeof store.readSlices === "function" ? store.readSlices(sessionId, -1, 1e9) : [];
+}
+function getStoreJournalSources(store, sessionId) {
+  try {
+    return store.getJournalSqlite()
+      .prepare("SELECT seq, kind, text FROM journal_sources WHERE session_id = ? ORDER BY seq")
+      .all(sessionId);
+  } catch {
+    return [];
+  }
 }
 
 /* ────────────────────────────────────────────────────────────────────────────

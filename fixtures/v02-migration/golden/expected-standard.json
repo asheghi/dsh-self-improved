@@ -1,0 +1,131 @@
+{
+  "fixture": "standard",
+  "expected": {
+    "supported": true,
+    "unsupportedReasonCount": 0,
+    "schema": {
+      "unknownTables": [],
+      "missingTables": [],
+      "extraColumns": []
+    },
+    "counts": {
+      "memories": {
+        "total": 24,
+        "missingMeta": 1,
+        "byStatus": { "active": 19, "corrected": 1, "forgotten": 1, "migrated": 1, "quarantined": 1, "decayed": 1 },
+        "byKind": { "fact": 16, "preference": 3, "instruction": 1, "persona": 2, "event": 2 },
+        "byProvenance": {
+          "user": 14,
+          "assistant": 1,
+          "derived": 1,
+          "unknown": 2,
+          "system": 1,
+          "tool": 1,
+          "coordinator": 1,
+          "skill": 1,
+          "persona": 1,
+          "(missing-meta)": 1
+        },
+        "bySource": { "llm-extract": 16, "legacy": 5, "llm-extract-pasted": 2, "(missing-meta)": 1 },
+        "byScope": { "global": 21, "project": 1, "session": 1, "(missing-meta)": 1 }
+      },
+      "conversations": {
+        "fileCount": 3,
+        "totalLines": 26,
+        "validLines": 24,
+        "malformedLines": 2,
+        "duplicateSessionSeqLines": 1,
+        "sessionsWithSeqZero": 2,
+        "fileSessionsWithoutCursor": 1,
+        "sessionsWithoutFile": 1
+      },
+      "episodes": {
+        "byStatus": { "succeeded": 1, "pending": 1, "failed": 1, "rejected": 1 },
+        "steps": 6,
+        "unpairedSteps": 2,
+        "reviewed": 2,
+        "delegated": 1
+      },
+      "persona": { "versions": 3, "maxVer": 3, "files": ["persona.md", "persona.md.bak1"] },
+      "skills": {
+        "generatedPrefixedDirs": 2,
+        "withSkillMd": 2,
+        "names": ["dsi-fixture-alpha", "dsi-fixture-beta"],
+        "nonPrefixedDirs": 1
+      },
+      "vectors": { "available": false },
+      "baseline": { "pins": 1 },
+      "cursors": { "sessions": 3, "processedAtZero": 1, "pendingSessions": 1 },
+      "projection": {
+        "memoryRows": 24,
+        "personalLaneEligible": 7,
+        "reviewRequired": 2,
+        "quarantinedProposed": 6,
+        "taskHandoffCandidates": 2,
+        "personaInactive": 2,
+        "extractionBacklogSessions": 1,
+        "extractionBacklogValidSlices": 11
+      }
+    },
+    "preservation": {
+      "proposedMemoryRows": 13,
+      "idsPreserved": 24,
+      "scopesPreserved": 13,
+      "timestampsPreserved": 13,
+      "supersessionChains": 2,
+      "brokenSupersedes": 1,
+      "evidenceEntries": 2,
+      "evidenceUnverifiable": 1,
+      "pastedDemotedOwnScopeOnly": 2,
+      "quarantinedByLane": {
+        "missing-meta": 1,
+        "quarantine-proposed": 6,
+        "preserved-forgotten": 1,
+        "preserved-migrated": 1,
+        "preserved-quarantined": 1,
+        "preserved-decayed": 1
+      }
+    },
+    "conflicts": {
+      "duplicateContentGroups": [
+        { "ids": ["dsi-fixture-01", "dsi-fixture-04"], "kind": "fact", "scope": "global", "projectId": "", "count": 2 }
+      ],
+      "conflictingPreferenceGroups": [
+        {
+          "scope": "global",
+          "projectId": "",
+          "optionIds": ["dsi-fixture-02", "dsi-fixture-03", "dsi-fixture-03-old"]
+        }
+      ],
+      "taskScopedCandidates": 1
+    },
+    "safety": {
+      "sourceUnchanged": true,
+      "sourceSchemaUnchanged": true,
+      "snapshotIsolated": true,
+      "noMutationOnSource": true,
+      "destinationTouched": false,
+      "rawContentInReport": false
+    },
+    "settings": {
+      "found": true,
+      "leaves": 18,
+      "mappedCount": 14,
+      "secretsCount": 1,
+      "unmappedCount": 1,
+      "migrationOnlyCount": 2,
+      "retiredCount": 0,
+      "consent": {
+        "captureOn": true,
+        "reviewOn": true,
+        "captureArguments": false,
+        "operationalRecallOn": false
+      }
+    },
+    "lanes": {
+      "persona": { "recorded": true, "versions": 3, "migrationActivation": "inactive" },
+      "skills": { "recorded": true, "generatedCount": 2, "migrationActivation": "inactive" },
+      "operational": { "proposal": { "notExpanded": true, "sameOrNarrower": true, "reconfirmAtCutover": true } }
+    }
+  }
+}

@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { createHmac, randomBytes } from "node:crypto";
 import { defaultSkillsDir, deleteSkill } from "./evolve.js";
 import type { EpisodeStatus, MemoryStore } from "./storage.js";
+import type { MemoryBusinessApi } from "./business.js";
 
 export interface CommandOutcome {
   kind: "success" | "error";
@@ -32,12 +33,25 @@ const MAX_EPISODE_INSPECT_STEPS = 24;
 export function handleMemoryCommand(
   store: MemoryStore,
   rawInput: string,
-  opts?: { evolve?: () => Promise<Record<string, unknown>>; skillsPrefix?: string | (() => string); skillsRoot?: string | (() => string); episodeEnabled?: () => boolean },
+  opts?: {
+    evolve?: () => Promise<Record<string, unknown>>;
+    skillsPrefix?: string | (() => string);
+    skillsRoot?: string | (() => string);
+    episodeEnabled?: () => boolean;
+    /** Project scope of the command's receiving session for private draft inspection. */
+    skillDraftProjectId?: string;
+    /** rc.2 typed business lane: when provided, browser/forget/correct run
+     *  through it (one operation, shared with the typed browser remote). */
+    business?: MemoryBusinessApi;
+  },
 ): CommandOutcome {
   const args = rawInput.trim().split(/\s+/).filter(Boolean);
   const json = args.includes("--json");
   const sub = (args[0] ?? "help").toLowerCase();
   if (json && sub === "browser") {
+    if (opts?.business) {
+      return ok(JSON.stringify(opts.business.snapshot({ peerId: null, source: "command" }, undefined)));
+    }
     // Prefix/root may be live getters: a hot-applied synthesis prefix must be
     // picked up without re-registering the command.
     const prefix = typeof opts?.skillsPrefix === "function" ? opts.skillsPrefix() : opts?.skillsPrefix;
@@ -68,6 +82,12 @@ export function handleMemoryCommand(
     case "forget": {
       const id = args[1];
       if (!id) return err("Usage: /memory forget <id>");
+      // rc.2: the shared business lane owns this operation (the browser's
+      // typed remote runs the identical function).
+      if (opts?.business) {
+        const result = opts.business.forget({ peerId: null, source: "command" }, id, { token: "" }, undefined);
+        return ok(result.affected !== null ? `Forgotten ${id}` : `Not found: ${id}`);
+      }
       return ok(store.forgetMemory(id) ? `Forgotten ${id}` : `Not found: ${id}`);
     }
     case "correct": {
@@ -76,6 +96,11 @@ export function handleMemoryCommand(
       if (!id || !content) return err("Usage: /memory correct <id> <new content>");
       const old = store.getMemory(id);
       if (!old) return err(`Not found: ${id}`);
+      if (opts?.business) {
+        // Command lane: human typed the line; the registry owns provenance.
+        const res = opts.business.correct({ peerId: null, source: "command" }, id, content, { token: "" }, undefined);
+        return ok(`Corrected, new id: ${res.affected}`);
+      }
       const rec = store.insertMemory(
         { kind: old.kind, content, importance: old.importance, supersedes: old.id },
         {
@@ -216,11 +241,59 @@ export function handleMemoryCommand(
       // filters means delete-nothing by design).
       const olderThanTs =
         scope === "all" ? Date.now() + 60_000 : Date.now() - Number(scope) * 86_400_000;
-      const res = store.purgeEpisodes({ projectId, olderThanTs });
+      if (opts?.business) {
+        // SHARED LANE (review F1 wiring): the command's purge runs the SAME
+        // authorized mutation the browser remote can run — including the
+        // durable journal cancellation-bump precondition (an in-flight extract
+        // commit can never recreate purged material) — rather than a private
+        // store write that would bypass the shared policy.
+        const resCounts = (opts.business.purgeEpisodes(
+          { peerId: null, source: "command" }, scope, { token: "" }, undefined,
+          typeof projectId === "string" ? projectId : undefined,
+        ) ?? {}) as { episodes?: number; steps?: number; events?: number; memories?: number };
+        return ok(
+          `Purged ${resCounts.episodes ?? 0} episodes (${resCounts.steps ?? 0} steps, ${resCounts.events ?? 0} events); forgot ${resCounts.memories ?? 0} derived memories` +
+            `${projectId ? ` in project ${projectId}` : ""}${scope === "all" ? " (all)" : ` older than ${scope}d`}`,
+        );
+      }
+      const res = store.purgeEpisodes({ projectId, olderThanTs, revokeDerived: true });
       return ok(
-        `Purged ${res.episodes} episodes (${res.steps} steps, ${res.events} events)` +
-          `${projectId ? ` in project ${projectId}` : ""}${olderThanTs !== undefined ? ` older than ${scope}d` : ""}`,
+        `Purged ${res.episodes} episodes (${res.steps} steps, ${res.events} events); forgot ${res.memories} derived memories` +
+          `${projectId ? ` in project ${projectId}` : ""}${scope === "all" ? " (all)" : ` older than ${scope}d`}`,
       );
+    }
+    case "skill-drafts": {
+      if (opts?.episodeEnabled?.() !== true) return err("Skill draft inspection requires episodeLearning.enabled");
+      const projectId = opts?.skillDraftProjectId;
+      if (!projectId) return err("Skill draft inspection requires an active project scope");
+      const drafts = store.listSkillDrafts({ projectId, status: "draft", limit: 10 });
+      return ok(drafts.length
+        ? drafts.map((draft) => `[${draft.status}] ${draft.id} · ${draft.name} · ${draft.sourceEpisodeCount} sources`).join("\n")
+        : "No inactive skill drafts.");
+    }
+    case "skill-draft": {
+      if (opts?.episodeEnabled?.() !== true) return err("Skill draft inspection requires episodeLearning.enabled");
+      const projectId = opts?.skillDraftProjectId;
+      if (!projectId) return err("Skill draft inspection requires an active project scope");
+      const id = args[1];
+      if (!id) return err("Usage: /memory skill-draft <draft-id> [--full]");
+      const draft = store.getSkillDraft(id, projectId);
+      if (!draft) return err(`Skill draft not found: ${id}`);
+      const full = args.includes("--full");
+      const maxChars = full ? 12_000 : 4_000;
+      const markdown = draft.markdown.slice(0, maxChars);
+      const truncated = draft.markdown.length > markdown.length;
+      return ok([
+        `[${draft.status}] ${draft.id} · ${draft.name}`,
+        `Project: ${draft.projectId}`,
+        `Fingerprint: ${draft.fingerprint}`,
+        `Sources (${draft.sourceEpisodeIds.length}): ${draft.sourceEpisodeIds.join(", ")}`,
+        `Evaluation: ${draft.evaluationVersion ?? "not run"}`,
+        `Active path: ${draft.activePath ?? "none (inactive draft)"}`,
+        "--- draft markdown ---",
+        markdown,
+        ...(truncated ? [`[truncated at ${maxChars} chars; draft remains stored]`] : []),
+      ].join("\n"));
     }
     default:
       return ok(
@@ -232,8 +305,9 @@ export function handleMemoryCommand(
           "/memory accept-legacy [id]\n" +
           "/memory forget <id>\n" +
           "/memory correct <id> <new content>\n" +
-          "/memory episodes [status] [limit] | episode <id> | episode-purge [days|all] [--project <id>]\n" +
+          "/memory episodes [status] [limit] | episode <id> | episode-purge [days|all] [--project <id>] (also forgets linked derived memories)\n" +
           "/memory episode-review [--dry]\n" +
+          "/memory skill-drafts | skill-draft <id> [--full]\n" +
           "/memory status",
       );
   }
@@ -310,6 +384,13 @@ export class SnapshotTokenTracker {
  * 3. The client echoes that challenge back; the host verifies the binding and
  *    consumes the pending challenge ATOMICALLY (cleared before executing):
  *    every challenge authorizes exactly one operation, replays fail.
+ *
+ * rc.2 addition (Phase A typed business remote, src/business.ts): the same
+ * ledger is reused for the Remote mutation handshake, and challenges there
+ * additionally bind an optional PEER id (the requesting gateway peer). A peer
+ * -bound challenge can neither be consumed from another connection nor
+ * relayed across connections; the legacy namespace channel keeps passing
+ * no peer and retains its snapshot-token observe gate.
  */
 export interface BrowserActionArgs {
   op: string;
@@ -345,26 +426,41 @@ export interface PendingChallenge {
   token: string;
   fp: string;
   args: BrowserActionArgs;
+  /** Requesting gateway peer id for Remote-handshake challenges (undefined for legacy namespace flows). */
+  peer?: string;
 }
 
 export class ActionChallengeLedger {
-  private pending: { fp: string; token: string; args: BrowserActionArgs; expiresAt: number } | null = null;
+  private pending: { fp: string; token: string; args: BrowserActionArgs; peer?: string; expiresAt: number } | null = null;
+
+  /** TTL of pending challenges (public: the typed business remote reports it to the client). */
+  readonly ttlMs: number = 120_000;
 
   constructor(
     private readonly secret: string,
-    private readonly ttlMs: number = 120_000,
+    ttlMs: number = 120_000,
     private readonly now: () => number = Date.now,
-  ) {}
+  ) {
+    this.ttlMs = ttlMs;
+  }
 
   /** Mint (replace) the pending challenge bound to these exact args.
    *  The token includes a fresh random nonce per preparation, so re-preparing
    *  the SAME action never reproduces an old challenge token: a consumed
-   *  confirmation captured earlier cannot authorize the newly staged attempt. */
-  prepare(args: BrowserActionArgs): { token: string; fp: string } {
+   *  confirmation captured earlier cannot authorize the newly staged attempt.
+   *  Supplying `peer` binds the challenge to that gateway peer for its whole
+   *  lifetime (only the requesting connection may consume it). */
+  prepare(args: BrowserActionArgs, peer?: string): { token: string; fp: string } {
     const fp = fingerprintActionArgs(this.secret, args);
     const nonce = randomBytes(16).toString("hex");
     const token = createHmac("sha256", this.secret).update(`challenge:${fp}:${nonce}`).digest("hex").slice(0, 32);
-    this.pending = { fp, token, args: { ...args }, expiresAt: this.now() + this.ttlMs };
+    this.pending = {
+      fp,
+      token,
+      args: { ...args },
+      ...(peer === undefined ? {} : { peer }),
+      expiresAt: this.now() + this.ttlMs,
+    };
     return { token, fp };
   }
 
@@ -378,12 +474,14 @@ export class ActionChallengeLedger {
     return this.pending;
   }
 
-  /** Atomic consume: exactly one shot, only for the args the challenge was minted for. */
-  consume(args: BrowserActionArgs, token: string): boolean {
+  /** Atomic consume: exactly one shot, only for the args and — when bound —
+   *  only for the peer the challenge was minted for (a relayed token fails). */
+  consume(args: BrowserActionArgs, token: string, peer?: string): boolean {
     const p = this.pending;
     this.pending = null; // consume first: the credential is gone whatever the verdict
     if (!p) return false;
     if (this.now() > p.expiresAt) return false;
+    if (p.peer !== undefined && peer !== p.peer) return false;
     if (!token || token !== p.token) return false;
     if (fingerprintActionArgs(this.secret, args) !== p.fp) return false;
     return true;
@@ -521,6 +619,8 @@ export function installMemoryCommands(
     skillsPrefix?: string | (() => string);
     skillsRoot?: string | (() => string);
     episodeEnabled?: () => boolean;
+    /** rc.2 typed business lane handed to the command handlers. */
+    business?: MemoryBusinessApi;
     /** Phase 6: async episode-review runner (dry = validateOnly); gating lives in the delegate */
     episodeReview?: (dry: boolean) => Promise<unknown>;
   },
@@ -534,15 +634,23 @@ export function installMemoryCommands(
     // Key: the command system only takes over parameterized input (e.g. /memory status) after input is declared;
     // otherwise parameterized input is treated as "the command does not accept arguments" and falls back to a plain message sent to the LLM.
     input: { hint: "search <term> | list | status | baseline | pin <id> [slot] | unpin <slot> | accept-legacy [id] | forget <id> | correct <id> <content> | episodes | episode <id> | episode-purge [days|all] | episode-review [--dry] | evolve | browser" },
-    handler: async (invocation: { rawInput?: string }) => {
-      // Fallback: even if unregistration has a timing window, refuse to execute while the plugin is disabled
-      if (opts?.isEnabled && !opts.isEnabled()) {
-        return { kind: "error" as const, text: "Plugin is disabled (dsh-self-improved enabled=false); the /memory command is unavailable" };
+    handler: async (invocation: { rawInput?: string; agent?: { id: string } }) => {
+      const rawInput = invocation.rawInput ?? "";
+      const firstSub = rawInput.trim().split(/\s+/)[0]?.toLowerCase() ?? "";
+      // Master switch OFF = remember/learning PAUSED, not data hidden
+      // (MIGRATION-V0.2.md "Off keeps saved data"; coordinator round 51):
+      // reads, corrections, forgetting, and retention stay authorized without
+      // enabling new capture/model work. Only the work-driving subcommands —
+      // `/memory evolve` and `/memory episode-review` (both kick LLM
+      // pipelines) — refuse while the plugin is disabled. The timing window of
+      // hot unregistration applies to everything else naturally.
+      if (opts?.isEnabled && !opts.isEnabled() && (firstSub === "evolve" || firstSub === "episode-review")) {
+        return { kind: "error" as const, text: "/memory " + firstSub + " is unavailable while the plugin is disabled (dsh-self-improved enabled=false); reads/corrections remain available" };
       }
-      const sub = (invocation.rawInput ?? "").trim().split(/\s+/)[0]?.toLowerCase() ?? "";
+      const sub = firstSub;
       if (sub === "episode-review") {
         if (!opts?.episodeReview) return { kind: "error" as const, text: "Episode review is not installed (episodeLearning disabled or scheduled runs only)" };
-        const dry = (invocation.rawInput ?? "").includes("--dry");
+        const dry = rawInput.includes("--dry");
         try {
           const summary = (await opts.episodeReview(dry)) as Record<string, unknown>;
           const parts = Object.entries(summary)
@@ -553,7 +661,8 @@ export function installMemoryCommands(
           return { kind: "error" as const, text: `Episode review failed: ${String(e instanceof Error ? e.message : e)}` };
         }
       }
-      return handleMemoryCommand(store, invocation.rawInput ?? "", opts);
+      const skillDraftProjectId = invocation.agent?.id ? store.getSessionProject(invocation.agent.id) : undefined;
+      return handleMemoryCommand(store, rawInput, { ...opts, skillDraftProjectId });
     },
   });
 }
@@ -584,10 +693,12 @@ export interface BrowserChannelOptions {
   skillsRoot?: () => string;
   /** Phase 6: recent-episode rows are served only while episode learning is enabled */
   episodeEnabled?: () => boolean;
-  /** Phase 6: dry-review runner (publishes the summary itself via episodeStatus). Returning null = unavailable. */
-  episodeDryReview?: (() => Promise<unknown> | null) | null;
+  /** Phase 6: dry-review runner (publishes the summary itself via episodeStatus). Returning null = unavailable.
+   *  Receives the caller cancellation signal (undefined on this legacy channel: it has no carrier cancellation;
+   *  the typed business Remote is the rc.2 lane that forwards a real signal). */
+  episodeDryReview?: ((signal: AbortSignal | undefined) => Promise<unknown> | null) | null;
   /** Destructive-op delegate so tests can slice purge away from the real store */
-  purgeEpisodes?: (scope: string) => unknown;
+  purgeEpisodes?: (scope: string, options?: { revokeDerived?: boolean }) => unknown;
   log?: (...args: unknown[]) => void;
   /** 0 = no refresh timer (integration tests drive refresh() manually) */
   refreshIntervalMs?: number;
@@ -858,6 +969,7 @@ export function installBrowserChannel(opts: BrowserChannelOptions): BrowserChann
           if (removed) log("browser action: deleteSkill", args.name);
         } else if (args.op === "purgeEpisodes" && typeof args.id === "string") {
           // id carries the purge scope: "all" | "<days>" — fingerprint-bound like any other op.
+          // Explicit browser purges also forget linked episode-review memories and invalidate drafts.
           // "all" maps to a FUTURE cutoff: purgeEpisodes treats "no filters" as
           // delete-nothing (it has no unfiltered-universe semantics), so an
           // explicit future olderThanTs is the only safe way to purge everything.
@@ -866,18 +978,21 @@ export function installBrowserChannel(opts: BrowserChannelOptions): BrowserChann
             log("browser action ignored: invalid purgeEpisodes scope", scope.slice(0, 20));
           } else {
             const res = opts.purgeEpisodes
-              ? opts.purgeEpisodes(scope)
+              ? opts.purgeEpisodes(scope, { revokeDerived: true })
               : opts.store.purgeEpisodes(
                   scope === "all"
-                    ? { olderThanTs: Date.now() + 60_000 }
-                    : { olderThanTs: Date.now() - Number(scope) * 86_400_000 },
+                    ? { olderThanTs: Date.now() + 60_000, revokeDerived: true }
+                    : { olderThanTs: Date.now() - Number(scope) * 86_400_000, revokeDerived: true },
                 );
             log("browser action: purgeEpisodes", scope, JSON.stringify(res));
           }
         } else if (args.op === "dryReview") {
           // Dry-run review persists nothing (validateOnly commit); the resolved
           // summary is published through episodeStatus. Absent delegate = disabled.
-          const dry = opts.episodeDryReview?.();
+          // No carrier cancellation exists on this legacy channel (rc.2 uses the
+          // typed business Remote): the runner still receives undefined here and
+          // stays bound to consent/shutdown + per-call timeout lane-side.
+          const dry = opts.episodeDryReview?.(undefined);
           if (!dry) log("browser action ignored: episode review unavailable (disabled)");
           else
             void Promise.resolve(dry)

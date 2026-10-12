@@ -7,6 +7,18 @@ import type { Context } from "@deepseek-ai/cordis";
 import type { MemoryStore } from "./storage.js";
 import { projectKeyFromCwd } from "./capture.js";
 
+/**
+ * The SHARED business lane for model tool calls (src/business.ts). Destructive
+ * tool operations run through the SAME one-ownership policy boundary the
+ * browser remote and /memory command use — "shared" must not become a claim
+ * while a tool path executes store mutations under its own private authorization.
+ * A model-authored tool call cannot mint a challenge: it goes in through the
+ * command caller lane (`peerId: null, source: "command"`), which the business
+ * service accepts as the in-process host lane that carries its own
+ * `command/run` provenance + tool-permission authorization.
+ */
+export type SharedForgetLane = ((id: string) => { op: string; affected: string | null } | null) | null;
+
 export interface OperationalToolDefaults {
   /** Confidence floor for the operational lane (live getter keeps hot-apply working) */
   confidenceFloor: number | (() => number);
@@ -30,6 +42,8 @@ export function registerMemoryTools(
   store: MemoryStore,
   defaultLimit: number,
   operationalDefaults?: OperationalToolDefaults,
+  /** Resolved per call; null/absent keeps the legacy direct-store fallback. */
+  sharedForget?: () => SharedForgetLane,
 ): () => void {
   const opFloor = (): number => resolveLive(operationalDefaults?.confidenceFloor, 0.8);
   const opMax = (): number => Math.max(1, resolveLive(operationalDefaults?.maxResults, defaultLimit));
@@ -238,7 +252,9 @@ export function registerMemoryTools(
 
   disposers.push(ctx.tools.register(defineTool({
     name: "memory_forget",
-    description: "Forget a memory (marks it forgotten; it no longer participates in search or injection).",
+    description:
+      "Forget a memory (marks it forgotten; it no longer participates in search or injection). " +
+      "Runs through the shared memory-business policy lane",
     parameters: {
       memory_id: { type: "string", description: "The id of the memory to forget", required: true },
     },
@@ -251,6 +267,25 @@ export function registerMemoryTools(
       render: (_args, value) => [{ type: "text", text: value.ok ? "Memory forgotten" : "Memory not found" }],
     },
     async execute(args) {
+      // SHARED LANE: the tool never owns a private forget policy. When the
+      // installed business lane exists, the identical single-owner operation
+      // the browser remote and /memory forget use executes the forget (the
+      // command caller is the in-process lane with its own provenance record)
+      // — including the bounded per-source journal lineage tombstone and the
+      // supporting generation machinery (review F1 wiring).
+      const laneCall = sharedForget ? sharedForget() : null;
+      if (laneCall) {
+        const result = laneCall(String(args.memory_id));
+        return { ok: result !== null && result.affected !== null };
+      }
+      // Honesty boundary (MIGRATION-PHASE-B-POLICY.md): the fall-back path has
+      // NO shared policy lane available, so the forget runs with M1 store
+      // semantics only — the journal lineage tombstone stays unapplied. That
+      // residual gap is announced, never claimed as covered.
+      console.warn(
+        "[dsh-self-improved] memory_forget fallback: shared business policy lane unavailable;",
+        "the M1 store forget runs without the journal lineage tombstone (per-source forget API gap report)",
+      );
       return { ok: store.forgetMemory(String(args.memory_id)) };
     },
   })));

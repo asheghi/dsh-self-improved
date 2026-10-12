@@ -1,0 +1,15 @@
+const repo = new URL(".", import.meta.url).pathname;
+const built = (m) => import(`${repo}../lib/${m}.js`);
+const { MemoryStore } = await built("storage");
+const { RecallService } = await built("recall");
+const { mkdtempSync, rmSync } = await import("node:fs");
+const { join } = await import("node:path");
+const { tmpdir } = await import("node:os");
+const dir = join(mkdtempSync(join(tmpdir(), "dsi-review-")), "store");
+const store = new MemoryStore(dir);
+const rec = store.insertMemory({ kind: "fact", content: "the secret project name is quokka", importance: 8 }, { provenance: "user" });
+console.log("inserted:", { id: rec.id?.slice(0,8), status: store.getMemory(rec.id).status, importance: store.getMemory(rec.id).importance });
+const svc = new RecallService(store, { strategy: "keyword", maxResults: 5, scoreThreshold: 0, timeoutMs: 5000, relevanceMargin: 1, minImportance: 0 }, null);
+const hits = await svc.search("what is the secret project name", { maxResults: 5, projectId: "px", excludeSessionId: "ax" });
+console.log("search hits:", hits.map(h => ({ id: h.id?.slice(0,8), kind: h.kind, score: h.score, content: String(h.content).slice(0, 40) })));
+rmSync(dir, { recursive: true, force: true });

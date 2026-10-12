@@ -1,14 +1,15 @@
 /**
  * Self-evolution module (M4):
  * 1) Forgetting decay: importance × recency × access scoring; memories below the threshold are marked decayed; expired forgotten memories are purged;
- * 2) Skill synthesis: distills high-value memories (instructions/events) into reusable SOP skills, written to the dsh-skill filesystem repository
- *    ($DSH_HOME/skills/<name>/SKILL.md, YAML frontmatter; the dsh-skill-filesystem watcher auto-loads them).
+ * 2) Legacy skill synthesis helpers can write active SOP files; the v0.2 runtime
+ *    uses a separate reviewed-episode path that stores inactive proposals in SQLite.
  */
 import { mkdirSync, writeFileSync, existsSync, rmSync, readdirSync, readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { resolveDshHome } from "@deepseek-ai/dsh-home-paths";
 import type { MemoryStore } from "./storage.js";
 import { tokenize as tokenizeImported } from "./storage.js";
+import { combineAbortSignals } from "./shutdown-v02.js";
 
 export interface DecaySettings {
   enabled: boolean;
@@ -251,14 +252,15 @@ export async function synthesizeSkills(
   }
   const candidateMemories = [...groups.values()].sort((a, b) => b.length - a.length)[0] ?? [];
   if (candidateMemories.length < 5) return 0;
-  // Skill cap: skip when the synthesized dsi-* skills have reached the limit
+  // Skill cap: check before generation and again immediately before persistence,
+  // because the awaited model call may allow another synthesis/write to fill it.
+  // The synchronous recheck+write is a same-process guard, not a cross-process lock.
   const prefix = (settings.prefix ?? "").trim();
   const root = skillsRoot.trim() || defaultSkillsDir();
-  if (settings.maxSkills > 0) {
-    if (countSynthesizedSkills(prefix, root) >= settings.maxSkills) {
-      console.warn(`[dsh-self-improved] skill synthesis skipped: reached maxSkills=${settings.maxSkills}`);
-      return 0;
-    }
+  const capReached = (): boolean => settings.maxSkills > 0 && countSynthesizedSkills(prefix, root) >= settings.maxSkills;
+  if (capReached()) {
+    console.warn(`[dsh-self-improved] skill synthesis skipped: reached maxSkills=${settings.maxSkills}`);
+    return 0;
   }
   const memories = candidateMemories;
   mkdirSync(root, { recursive: true });
@@ -277,6 +279,10 @@ export async function synthesizeSkills(
     return 0;
   }
   // Dedupe / prefix / suffix / write — shared persistence helper.
+  if (capReached()) {
+    console.warn(`[dsh-self-improved] skill synthesis stopped at maxSkills=${settings.maxSkills}`);
+    return 0;
+  }
   return persistSkillMarkdown(store.dir, root, text, prefix);
 }
 
@@ -450,34 +456,35 @@ const sessionLabelFor = (sessionId: string): string => {
 };
 
 export interface EpisodeSkillSynthesisOptions {
-  /** Skill filesystem repository; EMPTY = no-op (safely skipped) */
+  /** Skill filesystem repository for the legacy active writer; EMPTY = no-op */
   skillsRoot: string;
   /** Name prefix for synthesized skills (ownership marker); empty = no prefix */
   prefix: string;
-  /** Cap on total synthesized skills (0 = unlimited) */
+  /** Cap on total synthesized skills/drafts (0 = unlimited) */
   maxSkills: number;
-  /** Minimum size of a fingerprint group for automatic synthesis (≥ 2: one episode never yields a skill) */
+  /** Minimum independent reviewed sessions for a fingerprint group (≥ 2) */
   minEpisodes: number;
+  /** Draft mode persists inactive markdown in SQLite rather than writing a skill file. */
+  destination?: "active" | "draft";
   /** Timestamp override (tests) */
   now?: number;
+  /** Optional consent/shutdown signal; cancellation is checked before persistence. */
+  signal?: AbortSignal;
+}
+
+export interface EpisodeSkillDraftOptions {
+  prefix: string;
+  maxDrafts: number;
+  minIndependentSupport: number;
+  now?: number;
+  /** Optional consent/shutdown signal for canceling the LLM and draft commit. */
+  signal?: AbortSignal;
 }
 
 /**
- * Phase 5: synthesize ONE skill per repeated-successful-episode group (same
- * fingerprint). OPT-IN — the caller (index.ts fullReview) gates this behind
- * evolve.skillSynthesis.enabled && episodeLearning.enabled. Gates per group:
- *
- * - GATE 1 (later-failing): ANY same-fingerprint failed episode blocks the group;
- * - GATE 2 (one-episode): group size < minEpisodes → never a skill;
- * - GATE 3 (dedupe): every supporting episode already cited in existing skill
- *   frontmatter → skip; partial overlap synthesizes with the newer ids;
- * - GATE 4 (contradiction): redacted step evidence + derived operational
- *   memories go into the prompt and the system prompt orders the model to
- *   return {"skill":null} on conflict (skill null → skip, not an error);
- * - procedure lines failing the redactFreeText credential gate are dropped
- *   (a skill with no surviving steps is rejected);
- * - persistence reuses the SAME machinery as memory synthesis (name validation,
- *   content dedupe, -2 variants, prefix ownership, cap, frontmatter parsing).
+ * Legacy compatibility helper: writes accepted episode skills directly into the
+ * supplied active skill root. The plugin runtime no longer calls this writer.
+ * Use createSkillDraftsFromEpisodes for inactive, reviewable proposals.
  */
 export async function synthesizeSkillsFromEpisodes(
   store: MemoryStore,
@@ -485,10 +492,31 @@ export async function synthesizeSkillsFromEpisodes(
   opts: EpisodeSkillSynthesisOptions,
 ): Promise<number> {
   try {
-    return await synthFromEpisodesInner(store, call, opts);
+    return await synthFromEpisodesInner(store, call, { ...opts, destination: "active" });
   } catch (error) {
-    // Never throws: internal error → warn + 0 (learned nothing, nothing lost).
-    console.warn("[dsh-self-improved] episode skill synthesis error:", String(error));
+    console.warn("[dsh-self-improved] legacy active episode-skill writer error:", String(error));
+    return 0;
+  }
+}
+
+/** Generate project-scoped skill proposals in SQLite; this never writes to skillsRoot. */
+export async function createSkillDraftsFromEpisodes(
+  store: MemoryStore,
+  call: EvolveCallLlm,
+  opts: EpisodeSkillDraftOptions,
+): Promise<number> {
+  try {
+    return await synthFromEpisodesInner(store, call, {
+      skillsRoot: "",
+      prefix: opts.prefix,
+      maxSkills: opts.maxDrafts,
+      minEpisodes: opts.minIndependentSupport,
+      destination: "draft",
+      now: opts.now,
+      signal: opts.signal,
+    });
+  } catch (error) {
+    console.warn("[dsh-self-improved] episode skill draft error:", String(error));
     return 0;
   }
 }
@@ -498,49 +526,77 @@ async function synthFromEpisodesInner(
   call: EvolveCallLlm,
   opts: EpisodeSkillSynthesisOptions,
 ): Promise<number> {
+  const destination = opts.destination ?? "active";
   const root = opts.skillsRoot.trim();
-  if (!root) return 0; // no-op when no skills repository is configured
+  if (destination === "active" && !root) return 0; // no-op when no active repository is configured
   const minEpisodes = Math.max(2, Math.floor(opts.minEpisodes ?? 2));
   const prefix = (opts.prefix ?? "").trim();
 
-  // Cap check up front (same message/behaviour as memory-based synthesis).
-  if (opts.maxSkills > 0 && countSynthesizedSkills(prefix, root) >= opts.maxSkills) {
+  // Refuse immediately when full, then recheck across groups and immediately
+  // before each write. Draft caps are store-backed; active caps remain same-process.
+  const capReached = (): boolean => opts.maxSkills > 0 && (
+    destination === "draft"
+      ? store.countSkillDrafts({ statuses: ["draft", "evaluated", "approved", "activated"] }) >= opts.maxSkills
+      : countSynthesizedSkills(prefix, root) >= opts.maxSkills
+  );
+  if (capReached()) {
     console.warn(`[dsh-self-improved] skill synthesis skipped: reached maxSkills=${opts.maxSkills}`);
     return 0;
   }
 
-  // Candidate grouping: REVIEWED successful episodes by fingerprint.
-  // Post-review rows are status 'reviewed' (reviewed_at NOT NULL); unreviewed
-  // 'succeeded' rows are never candidates. A same-fingerprint episode that is
-  // status 'failed' OR carries ONLY errored steps (whole demonstrated failure,
-  // including already-reviewed/rejected rows) blocks the group (GATE 1).
+  // Candidate grouping: only positively reviewed successes by project + fingerprint.
+  // `reviewedAt` alone is not approval: rejected review rows are audit-only.
+  // Outcome review can replace the original episode status, so retained step
+  // errors must independently block that project's fingerprint, including mixed trajectories.
+  const projectFingerprintKey = (projectId: string, fingerprint: string): string => JSON.stringify([projectId, fingerprint]);
   const all = [...store.listEpisodes({ status: "succeeded", limit: 500 }), ...store.listEpisodes({ status: "reviewed", limit: 500 }), ...store.listEpisodes({ status: "failed", limit: 500 }), ...store.listEpisodes({ status: "rejected", limit: 500 })];
   const stepCache = new Map<string, number>(); // episode id -> successful-step count
   const blockedFingerprints = new Set<string>();
   for (const ep of all) {
     if (!ep.fingerprint || stepCache.has(ep.id)) continue;
-    const okSteps = store.getEpisodeSteps(ep.id).filter((s) => s.isError === 0).length;
+    const steps = store.getEpisodeSteps(ep.id);
+    const okSteps = steps.filter((s) => s.isError === 0).length;
     stepCache.set(ep.id, okSteps);
-    if (ep.status === "failed" || okSteps === 0) blockedFingerprints.add(ep.fingerprint);
+    if (ep.status === "failed" || steps.some((step) => step.isError !== 0) || okSteps === 0) {
+      blockedFingerprints.add(projectFingerprintKey(ep.projectId, ep.fingerprint));
+    }
   }
 
+  const directProvenanceBySession = new Map<string, boolean>();
+  const hasDirectProvenance = (sessionId: string): boolean => {
+    const cached = directProvenanceBySession.get(sessionId);
+    if (cached !== undefined) return cached;
+    const provenance = store.episodeSessionProvenance(sessionId);
+    const safe = provenance !== null && provenance.delegated === false;
+    directProvenanceBySession.set(sessionId, safe);
+    return safe;
+  };
   const groups = new Map<string, Array<EpisodeRecordLike>>();
   for (const ep of all) {
-    if (ep.reviewedAt == null) continue; // unreviewed episodes are never candidates
+    if (ep.status !== "reviewed" || ep.reviewedAt == null || ep.delegated || !hasDirectProvenance(ep.sessionId)) continue; // legacy-missing/rejected/unreviewed/delegated evidence is audit-only
     if (!ep.fingerprint) continue;
     if ((stepCache.get(ep.id) ?? 0) === 0) continue; // no successful steps → cannot support a skill
-    const group = groups.get(ep.fingerprint) ?? [];
-    group.push({ id: ep.id, sessionId: ep.sessionId, turn: ep.turn, reviewedAt: ep.reviewedAt, summary: ep.summary, fingerprint: ep.fingerprint });
-    groups.set(ep.fingerprint, group);
+    const groupKey = projectFingerprintKey(ep.projectId, ep.fingerprint);
+    const group = groups.get(groupKey) ?? [];
+    group.push({ id: ep.id, sessionId: ep.sessionId, projectId: ep.projectId, turn: ep.turn, reviewedAt: ep.reviewedAt, summary: ep.summary, fingerprint: ep.fingerprint });
+    groups.set(groupKey, group);
   }
 
-  const cited = citedEpisodeIds(root);
+  const cited = destination === "draft" ? store.citedSkillDraftEpisodeIds() : citedEpisodeIds(root);
   let written = 0;
-  for (const [fingerprint, group] of groups) {
-    // GATE 1: any same-fingerprint failed episode (reviewed or not) blocks the group.
-    if (blockedFingerprints.has(fingerprint)) continue;
-    // GATE 2: one episode may produce memories but never a skill.
-    if (group.length < minEpisodes) continue;
+  for (const [groupKey, group] of groups) {
+    if (opts.signal?.aborted) break;
+    if (capReached()) {
+      console.warn(`[dsh-self-improved] skill synthesis stopped at maxSkills=${opts.maxSkills}`);
+      break;
+    }
+    const fingerprint = group[0]?.fingerprint;
+    if (!fingerprint) continue;
+    // GATE 1: any same-project, same-fingerprint failure blocks the group.
+    if (blockedFingerprints.has(groupKey)) continue;
+    // GATE 2: one episode may produce memories but never a skill; repeated turns
+    // in one session do not supply independent support.
+    if (group.length < minEpisodes || new Set(group.map((ep) => ep.sessionId)).size < minEpisodes) continue;
     // GATE 3: dedupe — skip only when the group adds NO new episode ids.
     if (!group.some((ep) => !cited.has(ep.id))) continue;
 
@@ -578,8 +634,15 @@ async function synthFromEpisodesInner(
       'Distill ONE generalized skill from these episodes, or output {"skill":null,"reason":"..."} when the procedures conflict.',
     ].join("\n");
 
-    const signal = AbortSignal.timeout(180_000);
-    const raw = (await call({ system: EPISODE_SKILL_SYSTEM_PROMPT, user, signal })).trim();
+    const signal = combineAbortSignals(AbortSignal.timeout(180_000), opts.signal);
+    let raw: string;
+    try {
+      raw = (await call({ system: EPISODE_SKILL_SYSTEM_PROMPT, user, signal })).trim();
+    } catch (error) {
+      if (signal.aborted) return written; // consent/shutdown/timeout cancellation is not a review failure
+      throw error;
+    }
+    if (signal.aborted) return written; // a non-cooperative provider must not return work after cancellation
     const parsed = parseEpisodeSkillOutput(raw);
     if (!parsed) {
       console.warn("[dsh-self-improved] episode skill synthesis rejected malformed model output:", raw.slice(0, 120));
@@ -593,20 +656,31 @@ async function synthFromEpisodesInner(
       console.warn("[dsh-self-improved] episode skill synthesis skipped: no procedure lines survived redaction");
       continue;
     }
-    const baseName = parsed.skill.name;
-    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(baseName)) {
-      console.warn(`[dsh-self-improved] episode skill synthesis skipped: invalid skill name "${baseName}"`);
+    const generatedName = parsed.skill.name;
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(generatedName)) {
+      console.warn(`[dsh-self-improved] episode skill synthesis skipped: invalid skill name "${generatedName}"`);
       continue;
     }
+    const draftName = destination === "draft" && prefix && !generatedName.startsWith(prefix)
+      ? `${prefix}${generatedName}`
+      : generatedName;
+    const outputName = destination === "draft" ? draftName : generatedName;
 
-    // Frontmatter contract: source_episodes = LLM-cited ids ∩ supporting group
-    // (fallback: the whole supporting group — every written skill cites real ids).
-    const requested = parsed.skill.sourceEpisodeIds.filter((id) => usable.some((ep) => ep.id === id));
-    const source = requested.length > 0 ? [...new Set(requested)] : usable.map((ep) => ep.id);
+    // A generated skill must retain an independently reviewable support quorum.
+    // Intersect with usable evidence, de-duplicate, and refuse missing/forged/
+    // partial citations instead of manufacturing support from the whole group.
+    const source = [...new Set(parsed.skill.sourceEpisodeIds.filter((id) => usable.some((ep) => ep.id === id)))].sort();
+    const sessionByEpisodeId = new Map<string, string>();
+    for (const ep of usable) sessionByEpisodeId.set(ep.id, ep.sessionId);
+    const sourceSessionCount = new Set(source.map((id) => sessionByEpisodeId.get(id)).filter((id): id is string => typeof id === "string")).size;
+    if (source.length < minEpisodes || sourceSessionCount < minEpisodes) {
+      console.warn(`[dsh-self-improved] episode skill synthesis skipped: cited ${source.length} valid episodes from ${sourceSessionCount} sessions; requires ${minEpisodes}`);
+      continue;
+    }
     const generatedAt = new Date(opts.now ?? Date.now()).toISOString();
     const text = [
       "---",
-      `name: ${baseName}`,
+      `name: ${outputName}`,
       `description: ${parsed.skill.description.replace(/\s+/g, " ")}`,
       `whenToUse: ${parsed.skill.whenToUse.replace(/\s+/g, " ")}`,
       `source_episodes: ${JSON.stringify(source)}`,
@@ -615,9 +689,34 @@ async function synthFromEpisodesInner(
       procedure.map((step, i) => `${i + 1}. ${step}`).join("\n"),
     ].join("\n");
 
-    written += persistSkillMarkdown(store.dir, root, text, prefix);
-    // Keep the local citation view fresh for subsequent groups in this pass.
-    for (const id of source) cited.add(id);
+    if (opts.signal?.aborted) return written;
+    if (capReached()) {
+      console.warn(`[dsh-self-improved] skill synthesis stopped at maxSkills=${opts.maxSkills}`);
+      break;
+    }
+    if (destination === "draft") {
+      try {
+        const saved = store.createSkillDraft({
+          projectId: group[0].projectId,
+          fingerprint,
+          name: outputName,
+          markdown: text,
+          sourceEpisodeIds: source,
+          minIndependentSupport: minEpisodes,
+          maxDrafts: opts.maxSkills,
+        });
+        if (saved.created) {
+          written++;
+          for (const id of source) cited.add(id);
+        }
+      } catch (error) {
+        console.warn("[dsh-self-improved] skill draft rejected at storage boundary:", String(error));
+      }
+    } else {
+      written += persistSkillMarkdown(store.dir, root, text, prefix);
+      // Keep the local citation view fresh for subsequent groups in this pass.
+      for (const id of source) cited.add(id);
+    }
   }
   return written;
 }
@@ -625,6 +724,7 @@ async function synthFromEpisodesInner(
 type EpisodeRecordLike = {
   id: string;
   sessionId: string;
+  projectId: string;
   turn: number;
   reviewedAt: number | null;
   summary: string | null;

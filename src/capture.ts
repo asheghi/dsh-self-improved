@@ -9,7 +9,22 @@ import type { Session } from "@deepseek-ai/dsh-session";
 import type { MemoryStore, ConversationSliceRecord, EpisodeEventInput } from "./storage.js";
 import { redactAndBoundArguments, redactAndBoundResult, boundText, redactFreeText } from "./redact.js";
 import { assembleSessionEpisodes } from "./episodes.js";
-import { readOwnSessionEvents } from "./compat-v02.js";
+import { isInjectedContextUserSource, readOwnSessionEvents } from "./compat-v02.js";
+import type {
+  JournalAppendInput,
+  JournalAppendReport,
+  JournalClaim,
+  JournalChunkCommitReport,
+  JournalChunkEvidence,
+  JournalJobView,
+  JournalProducerHeader,
+  JournalRevocationReport,
+  JournalSourceEventInput,
+  JournalStatusView,
+  JournalVerdict,
+} from "./memory-journal-v02.js";
+import type { MemoryJournalV02 } from "./memory-journal-v02.js";
+import { createHash } from "node:crypto";
 
 export interface CaptureController {
   /** Whether currently enabled (master switch && capture module switch) */
@@ -27,11 +42,161 @@ export interface EpisodeCaptureController {
   maxChars(): number;
 }
 
+// ── Phase B capture → journal lane (MIGRATION-PHASE-B-STORAGE.md §4.4) ──────
+
+/** Minimization budget passed to the journal for enqueued direct-human text.
+ *  Deliberately a GENEROUS ceiling, not the redaction/extraction budget: the
+ *  journal divides retained text into lossless chunks (planSourceChunks /
+ *  journalTextSegments), so long direct-human input consumes every chunk and
+ *  the middle is never silently dropped. Only input above this ceiling is
+ *  honestly head-truncated (report contract §source coverage). */
+export const JOURNAL_SOURCE_MAX_CHARS = 200_000;
+
+/**
+ * Narrow producer/worker seam (documented, implemented by the runtime index
+ * over ONE MemoryJournalV02 instance). The extractor wiring lane claims via
+ * `claimWork`, reads exact persisted minimized evidence with
+ * `readChunkEvidence`, reports one typed verdict per chunk through
+ * `commitChunkResult`, and never fabricates acks. This module owns the
+ * CONTRACT only; extraction is not implemented here (Phase B next lane).
+ */
+export interface JournalExtractorSeam {
+  claimWork(filter?: { kind?: "extract"; projectId?: string; perChunkLeaseMs?: number }, leaseMs?: number): JournalClaim | null;
+  readChunkEvidence(claim: JournalClaim): JournalChunkEvidence;
+  commitChunkResult(claim: JournalClaim, chunkIdx: number, verdict: JournalVerdict): JournalChunkCommitReport;
+  releaseClaim(claim: JournalClaim, reason: string): void;
+  revokeSessions(
+    input: { sessionIds?: readonly string[]; projectIds?: readonly string[]; reason: string; invalidateMemories?: boolean },
+  ): JournalRevocationReport;
+  bumpPolicyGeneration(reason: string): number;
+  listJobs(filter?: { sessionId?: string; kind?: "extract"; state?: string; limit?: number }): JournalJobView[];
+  status(): JournalStatusView;
+}
+
+/**
+ * Single-site builder for the extractor seam over the runtime's ONE durable
+ * journal instance. Every field is a direct delegation to the documented
+ * journal API (§4.2 table in MIGRATION-PHASE-B-STORAGE.md); no behavior is
+ * added and no extraction logic lives here.
+ */
+export function createJournalExtractSeam(journal: MemoryJournalV02): JournalExtractorSeam {
+  return {
+    claimWork: (filter, leaseMs) => journal.claimWork(filter, leaseMs),
+    readChunkEvidence: (claim) => journal.readChunkEvidence(claim),
+    commitChunkResult: (claim, chunkIdx, verdict) => journal.commitChunkResult(claim, chunkIdx, verdict),
+    releaseClaim: (claim, reason) => journal.releaseClaim(claim, reason),
+    revokeSessions: (input) => journal.revokeSessions(input),
+    bumpPolicyGeneration: (reason) => journal.bumpPolicyGeneration(reason),
+    listJobs: (filter) => journal.listJobs(filter),
+    status: () => journal.status(),
+  };
+}
+
+/**
+ * Producer lane's durable persistence seam: the ONE runtime journal instance.
+ * `append` runs the atomic enqueue transaction the journal owns
+ * (minimize-before-persist included); `closed()` is the ingress signal —
+ * once the runtime dropIngress boundary has closed the capture lane, no
+ * further enqueue may run (bounded drain then closes the store).
+ */
+export interface JournalCaptureSink {
+  append(input: JournalAppendInput): JournalAppendReport;
+  closed(): boolean;
+}
+
+/**
+ * Stable OPAQUE project identity for the journal lane: a sha-256 digest of
+ * the NORMALIZED project key (full normalized cwd, never a basename or
+ * clipped path). The journal groups jobs/evidence by this id; the
+ * path-derived legacy key (`projectKeyFromCwd`) stays exactly where legacy
+ * consumers already read it (session_projects scope mapping). No path text
+ * is retained in the journal's project column and no clipped path is used
+ * as an identity anywhere.
+ */
+export function opaqueProjectIdFromKey(key: string): string {
+  const normalized = String(key).trim() || "default";
+  const digest = createHash("sha256").update(normalized, "utf8").digest("hex");
+  return `pj-${digest.slice(0, 32)}`;
+}
+
+/**
+ * STRUCTURAL ALLOWLIST producer header (journal §JournalProducerHeader):
+ * only categorical session facts — delegation state, fork lineage sizes and
+ * parent/root ids, and the subagent-service origin sentinel — are copied.
+ * Arbitrary `session.header` payloads and opaque producer `extra` are NEVER
+ * constructed from capture (extra is left empty; credential-shaped values
+ * cannot even reach the journal's header minimizer from this lane).
+ */
+export function journalProducerHeader(
+  header: { inheritedEventCount?: unknown; header?: { origin?: unknown; parentSession?: unknown; rootSession?: unknown } },
+  delegated: boolean,
+): JournalProducerHeader {
+  const h = header.header && typeof header.header === "object" ? header.header : {};
+  const producer: JournalProducerHeader & { origin?: "subagent"; parentSessionId?: string; rootSessionId?: string } = {
+    delegated,
+  };
+  const inherited = Number(header.inheritedEventCount);
+  if (Number.isFinite(inherited)) producer.inheritedEventCount = Math.max(0, Math.floor(inherited));
+  if (typeof h.parentSession === "string" && h.parentSession.length > 0) {
+    producer.parentSessionId = h.parentSession.slice(0, 256);
+  }
+  if (typeof h.rootSession === "string" && h.rootSession.length > 0) {
+    producer.rootSessionId = h.rootSession.slice(0, 256);
+  }
+  // Allowlisted categorical origin ONLY: the SubAgent service's stamped
+  // sentinel. Any other header.origin value is never copied.
+  if (h.origin === "subagent") producer.origin = "subagent";
+  return producer;
+}
+
+/**
+ * Convert ONE own session event into a journal source event, or null.
+ *
+ * Eligibility is a DIRECT-HUMAN gate (privacy-before-persist in the producer
+ * lane): only `source.kind === 'user'` messages that are not plugin/agent/
+ * recall/`snapshot` injected-context sources and that live in a
+ * NON-delegated session are enqueued. Ordinary assistant/tool producers,
+ * coordinator briefs/relays, scheduled/injected/unknown/private/excluded
+ * producers therefore persist NO personal-lane text through this lane
+ * (the raw JSONL slice copies they used to feed are REMOVED; the canonical
+ * native session history is untouched and remains the full record).
+ */
+export function toJournalSourceEvent(
+  event: SessionEventLike,
+  captureCtx: SessionCaptureContext = { delegated: false },
+): JournalSourceEventInput | null {
+  if (captureCtx.delegated) return null;
+  if (event.type !== "user/message") return null;
+  const data = event.data as Record<string, unknown> | undefined;
+  const source = data?.source;
+  if (!source || typeof source !== "object" || (source as { kind?: unknown }).kind !== "user") return null;
+  if (isInjectedContextUserSource(source)) return null; // snapshot/recall/plugin injections are never personal-lane text
+  const text = textOfContent(data?.content);
+  if (!text) return null;
+  return {
+    seq: event.seq,
+    ts: typeof event.time === "number" ? event.time : Date.now(),
+    kind: "user",
+    text, // RAW in; the journal minimizes before persistence (single choke point)
+    sourceKind: sourceKindOf(data).slice(0, 128),
+    injected: false,
+  };
+}
+
 /**
  * Install the capture listener.
  * @param onCaptured Called after persisting and marking the queue; if it returns a Promise and is awaited, it blocks flush (used for headless finalization)
  * @param episodeCtl Optional episode controller; when provided (and enabled), tool/call, tool/result and turn/end events are
  *   redacted-and-bounded then persisted into episode_events before episode assembly runs.
+ * @param journalSink Optional Phase B producer lane seam over the ONE runtime
+ *   journal instance (MIGRATION-PHASE-B-CAPTURE.md): when provided and open,
+ *   the flush atomically enqueues ONLY direct-human minimized evidence
+ *   (raw text in; the journal minimizes before persistence inside its
+ *   transaction). Ordinary assistant/tool/coordinator/injected/unknown
+ *   producers and delegated forks persist no personal-lane text here.
+ * @returns a disposer that unregisters the `session/flush` listener (Effect-
+ *   owned lifecycle support, Phase A): the plugin's shutdown boundary
+ *   explicitly takes the ingress down before draining/closing the store.
  */
 export function installCapture(
   ctx: Context,
@@ -39,13 +204,16 @@ export function installCapture(
   controller: CaptureController,
   onCaptured?: (sessions: string[]) => void | Promise<unknown>,
   episodeCtl?: EpisodeCaptureController,
-): void {
-  // Max seq written per session (in-process cursor; authoritative dedup is guaranteed by the DSH event seq)
-  const lastWritten = new Map<string, number>();
-  // Episode-event cursor per session (same pattern as lastWritten), seeded from the durable store floor
+  journalSink?: JournalCaptureSink,
+): () => void {
+  // Journal-lane enqueue cursor per session: advances only after a committed
+  // append; the journal's immutable (session_id, seq, event_hash) dedup makes
+  // any re-flush idempotent, so the durable authority is the journal, not this map.
+  const journalSeq = new Map<string, number>();
+  // Episode-event cursor per session (same pattern as journalSeq), seeded from the durable store floor
   const episodeSeq = new Map<string, number>();
 
-  ctx.on("session/flush", async (session: Session) => {
+  const uninstall = ctx.on("session/flush", async (session: Session) => {
     if (!controller.enabled()) return;
     // Delegated-session classification is decided once per session from its
     // immutable header and applied to every slice captured below.
@@ -58,20 +226,50 @@ export function installCapture(
     const sessionFloor = Number.isFinite(Number(session.inheritedEventCount))
       ? Number(session.inheritedEventCount) - 1
       : -1;
-    const floor = Math.max(lastWritten.get(session.id) ?? -1, sessionFloor);
-    const records: ConversationSliceRecord[] = [];
-    const events = readOwnSessionEvents(session, floor);
-    for (const event of events) {
-      const slice = toSlice(session.id, event, captureCtx);
-      if (slice) records.push(slice);
-    }
-    if (records.length > 0) {
-      store.appendConversationSlice(session.id, records);
-      const maxSeq = records[records.length - 1].seq;
-      store.markPending(session.id, maxSeq);
-      const cwd = typeof session.header?.cwd === "string" ? session.header.cwd : "";
-      store.setSessionProject(session.id, projectKeyFromCwd(cwd));
-      lastWritten.set(session.id, maxSeq);
+    // Canonical project scope mapping (legacy lane consumers read this key);
+    // the journal lane derives its own OPAQUE identity from the same stable key.
+    const cwd = typeof session.header?.cwd === "string" ? session.header.cwd : "";
+    store.setSessionProject(session.id, projectKeyFromCwd(cwd));
+
+    // ── Phase B journal lane: atomic enqueue of ONLY direct-human minimized
+    // evidence. This replaces the plugin-owned raw JSONL transcript copies
+    // (the old appendConversationSlice + markPending lane): assistant, tool,
+    // coordinator, scheduled, injected, unknown, private and excluded
+    // producers no longer persist personal-lane text through capture; the
+    // canonical native session history is untouched and remains the record.
+    if (journalSink !== undefined && !journalSink.closed()) {
+      const journalFloor = Math.max(journalSeq.get(session.id) ?? -1, sessionFloor);
+      const enqueued: JournalSourceEventInput[] = [];
+      for (const event of readOwnSessionEvents(session, journalFloor)) {
+        const source = toJournalSourceEvent(event, captureCtx);
+        if (source) enqueued.push(source);
+      }
+      if (enqueued.length > 0) {
+        const maxSeq = enqueued[enqueued.length - 1].seq;
+        try {
+          // RAW text in; the journal minimizes BEFORE persistence inside its
+          // single append transaction (privacy-before-owned-write contract,
+          // MIGRATION-PHASE-B-STORAGE.md §4.2).
+          journalSink.append({
+            sessionId: session.id,
+            projectId: opaqueProjectIdFromKey(projectKeyFromCwd(cwd)),
+            producer: journalProducerHeader(session, delegated),
+            events: enqueued,
+            sourceMaxChars: JOURNAL_SOURCE_MAX_CHARS,
+            oversizePolicy: "segment",
+          });
+          // Cursor advances ONLY after a successful append: a crash/throw
+          // before commit leaves the floor untouched, and the journal's
+          // immutable lineage dedup makes the retry idempotent and seq0-safe.
+          journalSeq.set(session.id, maxSeq);
+        } catch (error) {
+          // No commit ⇒ cursor not advanced; never fabricate a flush ack.
+          console.warn("[dsh-self-improved] journal enqueue failed:", String(error));
+        }
+      }
+      // Per-session map growth guard (same pattern as episodeSeq below);
+      // cleared floors re-advance via the journal's immutable event dedup.
+      if (journalSeq.size > 4096) journalSeq.clear();
     }
     // Episode capture (schema v2): redact BEFORE any persistence call
     if (episodeCtl?.enabled()) {
@@ -92,7 +290,7 @@ export function installCapture(
       if (rows.length > 0) {
         try {
           const cwd = typeof session.header?.cwd === "string" ? session.header.cwd : "";
-          store.appendEpisodeEvents(session.id, projectKeyFromCwd(cwd), delegated, rows);
+          store.appendEpisodeEvents(session.id, projectKeyFromCwd(cwd), journalProducerHeader(session, delegated), rows);
           episodeSeq.set(session.id, maxRowSeq);
         } catch (error) {
           console.warn("[dsh-self-improved] episode event append failed:", String(error));
@@ -117,6 +315,10 @@ export function installCapture(
       if (result instanceof Promise) await result;
     }
   });
+  // Ingress-down disposer: cordis itself would unregister this listener with
+  // the fiber; handing it out FIRST lets the plugin's shutdown boundary take
+  // the ingress down before its bounded drain and store close.
+  return uninstall;
 }
 
 /** Stable project scope key. Keep the normalized absolute cwd to avoid basename collisions. */

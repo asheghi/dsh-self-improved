@@ -1,0 +1,335 @@
+{
+  "startedAt": "2026-10-12T12:14:40.333Z",
+  "runtime": "/home/bahman/github/dsh-v0.2",
+  "selected": [
+    "increments",
+    "memory",
+    "import",
+    "packaging",
+    "durability",
+    "continuity"
+  ],
+  "scope": "isolated-regression-only",
+  "results": [
+    {
+      "name": "build",
+      "argv": [
+        "scripts/typecheck-v02.mjs",
+        "--emit-lib"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 1924
+    },
+    {
+      "name": "increments/test-v02-continuity-runtime-v03",
+      "argv": [
+        "scripts/test-v02-continuity-runtime-v03.mjs"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 354
+    },
+    {
+      "name": "increments/test-v02-continuity-sessions-v03",
+      "argv": [
+        "scripts/test-v02-continuity-sessions-v03.mjs"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 89
+    },
+    {
+      "name": "increments/test-v02-continuity-provider-worker-v03",
+      "argv": [
+        "scripts/test-v02-continuity-provider-worker-v03.mjs"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 5500
+    },
+    {
+      "name": "increments/test-episode-evaluation",
+      "argv": [
+        "scripts/test-episode-evaluation.mjs"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 139
+    },
+    {
+      "name": "memory/test-phase-a",
+      "argv": [
+        "scripts/test-phase-a.mjs"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 80
+    },
+    {
+      "name": "memory/test-storage",
+      "argv": [
+        "scripts/test-storage.mjs"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 381
+    },
+    {
+      "name": "memory/test-redact",
+      "argv": [
+        "scripts/test-redact.mjs"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 27
+    },
+    {
+      "name": "memory/test-episodes",
+      "argv": [
+        "scripts/test-episodes.mjs"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 272
+    },
+    {
+      "name": "memory/test-episode-review",
+      "argv": [
+        "scripts/test-episode-review.mjs"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 341
+    },
+    {
+      "name": "memory/test-episode-rollout",
+      "argv": [
+        "scripts/test-episode-rollout.mjs"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 29
+    },
+    {
+      "name": "memory/test-extract",
+      "argv": [
+        "scripts/test-extract.mjs"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 331
+    },
+    {
+      "name": "memory/test-recall",
+      "argv": [
+        "scripts/test-recall.mjs"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 953
+    },
+    {
+      "name": "memory/test-evolve",
+      "argv": [
+        "scripts/test-evolve.mjs"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 306
+    },
+    {
+      "name": "memory/test-commands",
+      "argv": [
+        "scripts/test-commands.mjs"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 247
+    },
+    {
+      "name": "memory/test-hermes",
+      "argv": [
+        "scripts/test-hermes.mjs"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 524
+    },
+    {
+      "name": "memory/test-audit-skills",
+      "argv": [
+        "scripts/test-audit-skills.mjs"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 104
+    },
+    {
+      "name": "memory/test-settings-ui",
+      "argv": [
+        "scripts/test-settings-ui.mjs"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 30
+    },
+    {
+      "name": "memory/test-user-edit-preservation",
+      "argv": [
+        "scripts/test-user-edit-preservation.mjs"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 25
+    },
+    {
+      "name": "import/test-v02-import-lane",
+      "argv": [
+        "scripts/test-v02-import-lane.mjs"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 47508
+    },
+    {
+      "name": "import/test-v02-import-audit",
+      "argv": [
+        "scripts/test-v02-import-audit.mjs"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 44738
+    },
+    {
+      "name": "import/test-v02-import-gates",
+      "argv": [
+        "scripts/test-v02-import-gates.mjs"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 35604
+    },
+    {
+      "name": "import/test-v02-import-seam",
+      "argv": [
+        "scripts/test-v02-import-seam.mjs"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 1006
+    },
+    {
+      "name": "import/test-migration-v02",
+      "argv": [
+        "scripts/test-migration-v02.mjs"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 10243
+    },
+    {
+      "name": "import/test-v02-policy-lane",
+      "argv": [
+        "scripts/test-v02-policy-lane.mjs"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 398000
+    },
+    {
+      "name": "import/test-v02-fact-policy",
+      "argv": [
+        "scripts/test-v02-fact-policy.mjs"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 142
+    },
+    {
+      "name": "import/test-v02-minimization",
+      "argv": [
+        "scripts/test-v02-minimization.mjs"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 53
+    },
+    {
+      "name": "import/test-v02-revocation",
+      "argv": [
+        "scripts/test-v02-revocation.mjs"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 48
+    },
+    {
+      "name": "packaging/test-v02-package",
+      "argv": [
+        "scripts/test-v02-package.mjs"
+      ],
+      "passed": false,
+      "exitCode": 1,
+      "signal": null,
+      "error": null,
+      "durationMs": 10747
+    }
+  ]
+}

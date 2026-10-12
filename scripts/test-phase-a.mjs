@@ -210,6 +210,10 @@ function check(ok, name, detail) {
   };
   installRecallInjection(fakeCtx, recallStub, {
     enabled: () => true, maxHits: 5, maxChars: 4000, sessionIdOf: () => "s1", projectKeyOf: () => "p1",
+    // Phase B: a durable revision source is wired so the fenced replay path is
+    // exercised; without it the adapter fails closed to a fresh search and the
+    // cache-serve discipline could regress silently.
+    memoryRevision: () => 4,
     operational: { enabled: () => opsEnabled, maxResults: 2, maxChars: 600, confidenceFloor: 0.8 },
   });
   const handler = handlers["agent/pre-step"];

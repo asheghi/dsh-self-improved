@@ -1,0 +1,6 @@
+{
+  "phase": "failed",
+  "name": "Error",
+  "code": null,
+  "message": "HMR transactions cannot be nested"
+}

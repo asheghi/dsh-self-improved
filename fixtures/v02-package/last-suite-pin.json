@@ -1,0 +1,12 @@
+{
+  "suiteId": "package-2026-10-12T12:26:12.798Z-2576868",
+  "timestamp": "2026-10-12T12:26:23.858Z",
+  "node": "v24.13.1",
+  "peerMode": "coordinator-test-site-default",
+  "peerRoot": "/home/bahman/github/dsh-v0.2/node_modules/@deepseek-ai",
+  "harness": "offline symlink links to the exactly rc.2 peer tree; npm pack ran with real scripts; NO registry install, NO dependency patch, NO profile changes",
+  "srcStateAtRun": "dirty: src/business.ts, src/capture.ts, src/commands.ts, src/continuity-ancestry-v02.ts, src/continuity-archive-v02.ts, src/continuity-boundary-v03.ts, src/continuity-capture-v03.ts, src/continuity-checkpoint-v02.ts, src/continuity-envelope-v03.ts, src/continuity-handoff-v02.ts, src/continuity-lineage-policy-v03.ts, src/continuity-live-human-event-v03.ts, src/continuity-offline-migrator-v03.ts, src/continuity-owner-v02.ts, src/continuity-owner-v03.ts, src/continuity-policy-v03.ts, src/continuity-preview-v02.ts, src/continuity-preview-v03.ts, src/continuity-projection-v02.ts, src/continuity-projection-v03.ts, src/continuity-prompt-receipt-v03.ts, src/continuity-registry-v02.ts, src/continuity-runtime-v02.ts, src/continuity-runtime-v03.ts, src/continuity-schema-contract-v03.ts, src/continuity-schema-v03.ts, src/continuity-sessions-v03.ts, src/continuity-source-v02.ts, src/continuity-source-v03.ts, src/continuity-store-v02.ts, src/continuity-summary-ledger-owner.ts, src/continuity-v03-row-preflight.ts, src/continuity-work-v02.ts, src/continuity-work-v03.ts, src/continuity-worker-v02.ts, src/continuity-worker-v03.ts, src/episode-evaluation.ts, src/evolve.ts, src/extract-journal-v02.ts, src/import-v02.ts, src/index.ts, src/inject.ts, src/memory-journal-v02.ts, src/migration-v02.ts, src/redact.ts, src/runtime-config.ts, src/shutdown-v02.ts, src/storage.ts, src/tools.ts",
+  "srcStateNote": "the strict build behind C5/C6 compiled the src state above (build attribution is that state, not one named lane)",
+  "strictPass": 59,
+  "strictFail": 0
+}

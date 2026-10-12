@@ -201,10 +201,10 @@ const turnEndEvent = (seq, turn, time = 3000, reason) => ({
     { kind: "result", callId: "c-dup", turn: 2, step: 0, seq: 11, at: 1001, payload: JSON.stringify({ toolCallId: "c-dup", resultExcerpt: "r", resultTruncated: 0, isError: 0, errorName: null, errorCode: null, toolHint: null }) },
     { kind: "turn-end", callId: null, turn: 2, step: null, seq: 12, at: 1002, payload: JSON.stringify({ reason: "none" }) },
   ];
-  store.appendEpisodeEvents("s4", "/tmp/proj-a", false, rows);
+  store.appendEpisodeEvents("s4", "/tmp/proj-a", { delegated: false }, rows);
   assembleSessionEpisodes(store, "s4");
   const before = { eps: store.listEpisodes({ projectId: "/tmp/proj-a" }).length, steps: store.getEpisodeSteps(store.listEpisodes({ projectId: "/tmp/proj-a" })[0].id).length };
-  store.appendEpisodeEvents("s4", "/tmp/proj-a", false, rows);
+  store.appendEpisodeEvents("s4", "/tmp/proj-a", { delegated: false }, rows);
   assembleSessionEpisodes(store, "s4");
   const afterEps = store.listEpisodes({ projectId: "/tmp/proj-a" });
   check("direct replay idempotent", before.eps === afterEps.length && store.getEpisodeSteps(afterEps[0].id).length === before.steps, `before=${JSON.stringify(before)} after=${afterEps.length}`);
@@ -553,7 +553,7 @@ check("fingerprint order-sensitive", fingerprintOf(["grep", "bash"]) !== fingerp
 }
 {
   const store = newStore("dup-result");
-  store.appendEpisodeEvents("s-dr", "/tmp/proj-dup", false, [
+  store.appendEpisodeEvents("s-dr", "/tmp/proj-dup", { delegated: false }, [
     { kind: "call", callId: "c-dr", turn: 1, step: 0, seq: 1, at: 1000, payload: JSON.stringify({ toolName: "bash", argumentsRedacted: "{}", argsTruncated: 0, callId: "c-dr" }) },
     { kind: "result", callId: "c-dr", turn: 1, step: 0, seq: 2, at: 1001, payload: JSON.stringify({ toolCallId: "c-dr", resultExcerpt: "r1", resultTruncated: 0, isError: 0, errorName: null, errorCode: null, toolHint: null }) },
     { kind: "result", callId: "c-dr", turn: 1, step: 1, seq: 3, at: 1002, payload: JSON.stringify({ toolCallId: "c-dr", resultExcerpt: "r2", resultTruncated: 0, isError: 0, errorName: null, errorCode: null, toolHint: null }) },
@@ -565,7 +565,7 @@ check("fingerprint order-sensitive", fingerprintOf(["grep", "bash"]) !== fingerp
 }
 {
   const store = newStore("malformed-result");
-  store.appendEpisodeEvents("s-mr", "/tmp/proj-mr", false, [
+  store.appendEpisodeEvents("s-mr", "/tmp/proj-mr", { delegated: false }, [
     { kind: "call", callId: "c-mr", turn: 1, step: 0, seq: 1, at: 1000, payload: JSON.stringify({ toolName: "bash", argumentsRedacted: "{}", argsTruncated: 0, callId: "c-mr" }) },
     { kind: "result", callId: "c-mr", turn: 1, step: 0, seq: 2, at: 1001, payload: "{oops not json" },
     { kind: "turn-end", callId: "", turn: 1, step: null, seq: 3, at: 1002, payload: JSON.stringify({ reasonKind: "completed" }) },
@@ -593,7 +593,7 @@ check("fingerprint order-sensitive", fingerprintOf(["grep", "bash"]) !== fingerp
   const ep1 = store.listEpisodes({ projectId: "/tmp/proj-lv" })[0];
   check("pre-state succeeded", ep1.status === "succeeded");
   await new Promise((r) => setTimeout(r, 5));
-  store.appendEpisodeEvents("s-lv", "/tmp/proj-lv", false, [
+  store.appendEpisodeEvents("s-lv", "/tmp/proj-lv", { delegated: false }, [
     { kind: "call", callId: "c-lv2", turn: 1, step: 1, seq: 90, at: 4000, payload: JSON.stringify({ toolName: "bash", argumentsRedacted: "{}", argsTruncated: 0, callId: "c-lv2" }) },
   ]);
   assembleSessionEpisodes(store, "s-lv");
@@ -615,7 +615,7 @@ check("fingerprint order-sensitive", fingerprintOf(["grep", "bash"]) !== fingerp
   });
   const reviewedEp = store2.listEpisodes({ projectId: "/tmp/proj-lv" })[0];
   store2.setEpisodeReview(reviewedEp.id, { summary: "keep", confidence: 0.9, status: "reviewed" });
-  store2.appendEpisodeEvents("s-lv2", "/tmp/proj-lv", false, [
+  store2.appendEpisodeEvents("s-lv2", "/tmp/proj-lv", { delegated: false }, [
     { kind: "call", callId: "c-lv2b", turn: 1, step: 2, seq: 91, at: 4001, payload: JSON.stringify({ toolName: "bash", argumentsRedacted: "{}", argsTruncated: 0, callId: "c-lv2b" }) },
   ]);
   assembleSessionEpisodes(store2, "s-lv2");
@@ -628,7 +628,7 @@ check("fingerprint order-sensitive", fingerprintOf(["grep", "bash"]) !== fingerp
 // ---------------------------------------------------------------------
 {
   const store = newStore("pending-recovery");
-  store.appendEpisodeEvents("s-pr", "/tmp/proj-pr", false, [
+  store.appendEpisodeEvents("s-pr", "/tmp/proj-pr", { delegated: false }, [
     { kind: "call", callId: "c-pr1", turn: 1, step: 0, seq: 1, at: 1000, payload: JSON.stringify({ toolName: "bash", argumentsRedacted: "{}", argsTruncated: 0, callId: "c-pr1" }) },
     { kind: "result", callId: "c-pr1", turn: 1, step: 0, seq: 2, at: 1001, payload: JSON.stringify({ toolCallId: "c-pr1", resultExcerpt: "ok", resultTruncated: 0, isError: 0, errorName: null, errorCode: null, toolHint: null }) },
     { kind: "turn-end", callId: "", turn: 1, step: null, seq: 3, at: 1002, payload: JSON.stringify({ reasonKind: "completed" }) },
@@ -655,7 +655,7 @@ check("fingerprint order-sensitive", fingerprintOf(["grep", "bash"]) !== fingerp
     { kind: "result", callId: "c-t2", turn: 2, step: 0, seq: 2002, at: 5001, payload: JSON.stringify({ toolCallId: "c-t2", resultExcerpt: "ok", resultTruncated: 0, isError: 0, errorName: null, errorCode: null, toolHint: null }) },
     { kind: "turn-end", callId: "", turn: 2, step: null, seq: 2003, at: 5002, payload: JSON.stringify({ reasonKind: "completed" }) },
   );
-  store.appendEpisodeEvents("s-st2", "/tmp/proj-st2", false, bigOpenRows);
+  store.appendEpisodeEvents("s-st2", "/tmp/proj-st2", { delegated: false }, bigOpenRows);
   assembleSessionEpisodes(store, "s-st2");
   const ep1 = store.getEpisodeBySessionTurn("s-st2", 1);
   const ep2 = store.getEpisodeBySessionTurn("s-st2", 2);

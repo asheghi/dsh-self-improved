@@ -1,17 +1,33 @@
 /**
- * dsh-self-improved — browser half.
+ * dsh-self-improved — browser half (rc.2).
  *
- * An "Evolving Memory" section inside the Web UI settings page: edits the
- * `dsh-self-improved` settings namespace (master switch, module switches,
- * storage, extraction LLM, recall/embedding, consolidate, evolve) through the
- * settings scope transport plus nested `settings.mutate` ops. Changes are
- * hot-applied server-side (settings/updated watch) — no restart needed.
+ * Structure (module seam; single-bundle build, typed boundaries by section):
  *
- * Style aligned with the DSH settings UI (14px base, 34px controls, 12px
- * radius, theme tokens); a "?" help toggle provides a detailed plugin guide.
+ *   [css]        theme-token styles (opaque classes are plugin prefixes only)
+ *   [locale]     zh/en dictionaries through the rc.2 locale service API
+ *   [settings-form]   the ONE module owning this entry's settings-form state:
+ *                     binds the shared entry-addressed ConfigForms model as a
+ *                     CONSUMER (subscribe/unsubscribe — never dispose — the
+ *                     provider owns the form), tracks dirty paths + the edit
+ *                     baseline revision, classifies fields, and issues
+ *                     dirty-path-only mutations with that baseline revision.
+ *   [business-remote] the typed business remote contributions (shared with
+ *                     commands/tools on the host): descriptor table + access.
+ *   [views]      section components: Config form / Memory browser / tabs.
  *
- * Hand-written ModuleLoader bundle — no build step required.
- * Pattern reference: dsh-tdai-memory client.js (MIT).
+ * rc.2 notes embodied here (MIGRATION-V0.2.md Phase A):
+ * - No legacy private settings scope binding. The form derives from
+ *   `ctx.configForms` + the shared describe mirror; stale remote writes fail
+ *   VISIBLY (`mutate` answers false) and surface an explicit conflict/rebase
+ *   banner that keeps the user's dirty values.
+ * - Secret slots (recall.embedding.apiKey) render presence-only from the
+ *   mirrored `secrets` sidecar; values never cross back into drafts and a
+ *   blank input keeps the stored key.
+ * - `storageRoot` is init-only: editing it flags a restart (nonvolatile),
+ *   which the server enforces; the form marks the field accordingly.
+ * - The Memory tab reads rows through `ctx.remote.selfImproved.*` (typed
+ *   business remote) with a peer-bound, one-shot-confirm mutating handshake —
+ *   no operation rides volatile Config values; dry-review is cancellable.
  */
 window.__ModuleLoader__.load({
   id: "dsh-self-improved",
@@ -22,13 +38,13 @@ window.__ModuleLoader__.load({
     var react = require("react");
     var h = react.createElement;
 
-    // ── CSS (DSH theme tokens + system sizes) ─────────────────────────────
+    // ─═ [css] ══════════════════════════════════════════════════════════════
     var CSS =
       ".__dsi_root{max-width:720px;display:flex;flex-direction:column;gap:10px}" +
       ".__dsi_header{display:flex;align-items:center;gap:8px;margin-bottom:2px}" +
       ".__dsi_intro{font-size:13px;line-height:20px;color:var(--dsw-alias-label-secondary);margin:0}" +
       ".__dsi_helpBtn{flex:none;width:24px;height:24px;border-radius:50%;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);color:var(--dsw-alias-label-primary);font-size:13px;line-height:1;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;padding:0}" +
-      ".__dsi_helpBtn:hover{border-color:var(--dsw-alias-state-business-primary);color:var(--dsw-alias-state-business-primary)}" +
+      ".__dsi_helpBtn:hover,.__dsi_helpBtn:focus-visible{border-color:var(--dsw-alias-state-business-primary);color:var(--dsw-alias-state-business-primary)}" +
       ".__dsi_help{background:var(--dsw-alias-bg-layer-2);border:1px solid var(--dsw-alias-border-l2);border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:8px}" +
       ".__dsi_help h4{margin:0;font-size:14px;line-height:22px;color:var(--dsw-alias-label-primary)}" +
       ".__dsi_help p{margin:0;font-size:13px;line-height:21px;color:var(--dsw-alias-label-secondary);white-space:pre-wrap}" +
@@ -36,19 +52,23 @@ window.__ModuleLoader__.load({
       ".__dsi_field{display:flex;flex-direction:column;gap:4px}" +
       ".__dsi_label{font-size:13px;line-height:20px;font-weight:500;color:var(--dsw-alias-label-primary);display:flex;align-items:center;gap:6px}" +
       ".__dsi_override{font-size:11px;color:var(--dsw-alias-state-business-primary);border:1px solid var(--dsw-alias-border-l2);border-radius:4px;padding:0 4px}" +
+      ".__dsi_dirty{font-size:11px;color:var(--dsw-alias-state-warning-primary,var(--dsw-alias-state-business-primary));border:1px dashed var(--dsw-alias-border-l2);border-radius:4px;padding:0 4px}" +
+      ".__dsi_restart{font-size:11px;color:var(--dsw-alias-state-error-primary);border:1px solid var(--dsw-alias-border-l2);border-radius:4px;padding:0 4px}" +
       ".__dsi_hint{font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary)}" +
       ".__dsi_input{box-sizing:border-box;width:100%;height:34px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);color:var(--dsw-alias-label-primary);border-radius:12px;padding:6px 12px;font-family:inherit;font-size:14px;line-height:22px}" +
-      ".__dsi_input:focus{outline:none;border-color:var(--dsw-alias-state-business-primary)}" +
+      ".__dsi_input:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:1px;border-color:var(--dsw-alias-state-business-primary)}" +
       ".__dsi_row{display:flex;align-items:center;gap:8px}" +
       ".__dsi_check{accent-color:var(--dsw-alias-state-business-primary);width:16px;height:16px}" +
       ".__dsi_actions{display:flex;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap}" +
       ".__dsi_btn{height:34px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);color:var(--dsw-alias-label-primary);border-radius:12px;padding:6px 14px;font:inherit;font-size:14px;line-height:22px;cursor:pointer}" +
-      ".__dsi_btn:hover:not(:disabled){border-color:var(--dsw-alias-state-business-primary)}" +
+      ".__dsi_btn:hover:not(:disabled),.__dsi_btn:focus-visible{border-color:var(--dsw-alias-state-business-primary);outline:none}" +
       ".__dsi_btn:disabled{opacity:.5;cursor:default}" +
       ".__dsi_btnPrimary{border-color:var(--dsw-alias-state-business-primary);background:var(--dsw-alias-state-business-primary);color:var(--dsw-alias-label-on-accent)}" +
+      ".__dsi_btnDanger{border-color:var(--dsw-alias-state-error-primary);color:var(--dsw-alias-state-error-primary)}" +
       ".__dsi_status{font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary)}" +
       ".__dsi_ok{font-size:12px;line-height:18px;color:var(--dsw-alias-state-success-primary)}" +
       ".__dsi_error{font-size:12px;line-height:18px;color:var(--dsw-alias-state-error-primary)}" +
+      ".__dsi_conflict{background:var(--dsw-alias-bg-layer-2);border:1px solid var(--dsw-alias-state-error-primary);border-radius:12px;padding:10px 12px;display:flex;flex-direction:column;gap:8px}" +
       ".__dsi_unavailable{font-size:13px;line-height:20px;color:var(--dsw-alias-label-tertiary)}" +
       ".__dsi_browserRow{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;border:1px solid var(--dsw-alias-border-l2);border-radius:12px;padding:8px 10px;background:var(--dsw-alias-bg-layer-2)}" +
       ".__dsi_browserMain{display:flex;flex-direction:column;gap:2px;min-width:0}" +
@@ -59,26 +79,29 @@ window.__ModuleLoader__.load({
       ".__dsi_tabs{display:flex;flex-direction:column;gap:10px}" +
       ".__dsi_tabBar{display:flex;gap:4px;border-bottom:1px solid var(--dsw-alias-border-l2);padding-bottom:8px}" +
       ".__dsi_tab{height:32px;border:1px solid transparent;background:transparent;color:var(--dsw-alias-label-secondary);border-radius:8px;padding:0 14px;font:inherit;font-size:14px;line-height:32px;cursor:pointer}" +
-      ".__dsi_tab:hover{color:var(--dsw-alias-label-primary)}" +
+      ".__dsi_tab:hover,.__dsi_tab:focus-visible{color:var(--dsw-alias-label-primary);outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:2px}" +
       ".__dsi_tabActive{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-3);border-color:var(--dsw-alias-border-l2)}" +
-      // Slide switch
+      // Slide switch — native input visually hidden BUT the control keeps a
+      // visible keyboard focus treatment on the track (accessibility gate).
       ".__dsi_switch{position:relative;display:inline-block;width:36px;height:20px;flex:none}" +
       ".__dsi_switch input{opacity:0;width:0;height:0;position:absolute}" +
+      ".__dsi_switch input:focus-visible + .__dsi_switchTrack{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:2px}" +
+      ".__dsi_switch input:hover + .__dsi_switchTrack{cursor:pointer}" +
       ".__dsi_switchTrack{position:absolute;inset:0;background:var(--dsw-alias-bg-layer-3);border:1px solid var(--dsw-alias-border-l2);border-radius:10px;transition:background .15s,border-color .15s}" +
       ".__dsi_switch input:checked + .__dsi_switchTrack{background:var(--dsw-alias-state-business-primary);border-color:var(--dsw-alias-state-business-primary)}" +
       ".__dsi_switchThumb{position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:var(--dsw-alias-label-tertiary);transition:transform .15s,background .15s}" +
       ".__dsi_switch input:checked ~ .__dsi_switchThumb{transform:translateX(16px);background:var(--dsw-alias-label-on-accent)}" +
-      // Collapsible panel
+      // Collapsible panel (button semantics: keyboard toggles)
       ".__dsi_collapse{display:flex;flex-direction:column;gap:8px}" +
-      ".__dsi_collapseHeader{display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;border:1px solid var(--dsw-alias-border-l2);border-radius:12px;padding:8px 12px;background:var(--dsw-alias-bg-layer-2)}" +
-      ".__dsi_collapseHeader:hover{border-color:var(--dsw-alias-state-business-primary)}" +
+      ".__dsi_collapseHeader{display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;border:1px solid var(--dsw-alias-border-l2);border-radius:12px;padding:8px 12px;background:var(--dsw-alias-bg-layer-2);font:inherit;text-align:left;width:100%}" +
+      ".__dsi_collapseHeader:hover,.__dsi_collapseHeader:focus-visible{border-color:var(--dsw-alias-state-business-primary);outline:none}" +
       ".__dsi_collapseTitle{flex:1;font-size:14px;font-weight:600;line-height:22px;color:var(--dsw-alias-label-primary)}" +
       ".__dsi_collapseCount{font-size:12px;color:var(--dsw-alias-label-tertiary)}" +
       ".__dsi_collapseChevron{font-size:12px;color:var(--dsw-alias-label-tertiary);transition:transform .15s}" +
       ".__dsi_collapseOpen .__dsi_collapseChevron{transform:rotate(90deg)}" +
       ".__dsi_collapseBody{padding:2px 4px;display:flex;flex-direction:column;gap:8px}" +
       ".__dsi_persona{white-space:pre-wrap;font-size:13px;line-height:21px;color:var(--dsw-alias-label-secondary);max-height:260px;overflow:auto;border:1px solid var(--dsw-alias-border-l2);border-radius:12px;padding:10px 12px;background:var(--dsw-alias-bg-layer-2)}" +
-      // Detail modal
+      // Detail modal (semantic dialog + Escape is wired in JS)
       ".__dsi_modalBackdrop{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:1000;padding:24px}" +
       ".__dsi_modal{background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l2);border-radius:16px;max-width:640px;width:100%;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 8px 40px rgba(0,0,0,.25)}" +
       ".__dsi_modalHeader{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 18px;border-bottom:1px solid var(--dsw-alias-border-l2)}" +
@@ -96,17 +119,25 @@ window.__ModuleLoader__.load({
       document.head.appendChild(tag);
     }
 
-    // ── locale ────────────────────────────────────────────────────────────
+    // ─═ [locale] ═══════════════════════════════════════════════════════════
     var NS = "selfImproved";
-    var inject = ["slots", "locale", "settingsScope", "connection"];
+    var NAMESPACE = "dsh-self-improved";
+    /** Business remote namespace (both the host service and these descriptors). */
+    var REMOTE_NS = "selfImproved";
     var zh = {
-      nav: "Evolving Memory",
-      tabConfig: "Config",
+      nav: "进化记忆",
+      tabOverview: "Overview",
+       tabSessions: "Sessions",
+       tabConfig: "Settings",
       tabMemories: "Memory",
       intro: "Long-term memory & self-evolution: captures conversations, extracts memories, injects recall before turns, and consolidates/forgets/evolves over time.",
       helpTitle: "About this plugin",
       help: [
         "dsh-self-improved adds cross-session long-term memory and self-evolution to DSH. Data is stored locally by default ($DSH_HOME/memory); LLM-backed features send their required prompt content to the configured provider.",
+        "",
+        "[Changes apply live]",
+        "Editable settings here are volatile: saving applies to the running plugin without a restart. Filesystem roots are initialization-only (the memory storage directory, and the synthesized-skills root): a change to either takes effect after the plugin restarts; the running fiber keeps the startup value.",
+        "An embedding API key is stored as a secret: it never comes back to this form; leave the field blank to keep the current key.",
         "",
         "[Pipeline]",
         "L0 capture: each session's conversation is saved locally for the extraction pipeline.",
@@ -114,39 +145,26 @@ window.__ModuleLoader__.load({
         "L2 scenes / L3 persona: memories are grouped into scene blocks; a versioned user persona is synthesized incrementally.",
         "Auto recall injection: before each turn, relevant memories are retrieved by the current question and injected to the model as a memory block.",
         "Self-evolution: memories decay by importance × recency × access; users can correct memories; successful patterns can become reusable skills in dsh-skill.",
-        "Schedule: every 15 min only extraction + free maintenance (decay/cleanup) runs — no LLM cost; a full review (drain extraction + scenes/persona + skills + governance) runs daily at a fixed time (default 22:00, configurable) and ~60s after startup; trigger manually via /memory evolve.",
         "",
-        "[Module switches]",
-        "• Capture (L0): records conversations (off = no new memory material)",
-        "• Extract (L1): distillation (off = recall still uses old memories)",
-        "• Consolidate (L2/L3): scenes/persona (off = persona not updated)",
-        "• Evolve: decay & skill synthesis (off = memory only grows)",
-        "• Recall injection: pre-turn injection (off = tools still allow manual search)",
-        "• Tools: memory_search / memory_correct / memory_forget model-visible tools",
-        "",
-        "[Conservative policy (hermes defaults)]",
+        "[Conservative policy]",
         "• Extraction provenanceFilter=strict + requireEvidence=true: only human-confirmed memories with evidence enter the store",
-        "• Recall is gated by relevance margin (0.5), importance floor, and a 4-memories-per-turn injection cap",
-        "• Scene grouping (L2) is off by default — recall uses the curated baseline + contextual search",
-        "• Skill synthesis is off by default; enable it under Self-evolution if wanted",
+        "• Recall is gated by relevance margin, importance floor, and a per-turn injection cap",
+        "• Skill synthesis is opt-in; learned skills stay reviewable before use",
         "",
         "[Usage]",
         "• Type \"/\" in the chat input to open the command menu: /memory status, /memory list, /memory search <q>, /memory forget <id>, /memory correct <id> <text>",
         "• The model auto-uses memory tools (memory_search etc.) — no manual action needed",
-        "• Changes here apply immediately after saving — no restart",
-        "",
-        "[Models & privacy]",
-        "• Extraction/persona/skills use DSH's default model; you can set a dedicated one under Extraction",
-        "• Secrets (API keys / passwords) are filtered out of memories",
-        "• Local storage by default; LLM-backed extraction, episode review, and synthesis send required prompt/evidence to their configured provider; vector recall needs an embedding endpoint, otherwise keyword-only",
         "",
         "[Notes]",
-        "• Extraction needs a working, stable model; long sessions are drained in batches (one LLM call per batch, 30s throttle)",
-        "• Persona and skills appear once memories accumulate",
-        "• Disabling the master switch stops all background timers (extraction/maintenance/nightly review); stored memories are kept and everything resumes when re-enabled",
+        "• Disabling the master switch stops background work; stored memories are kept and everything resumes when re-enabled — the Memory tab stays accessible for inspection while paused",
         "• Uninstalling the plugin does not delete local memory data"
       ].join("\n"),
       groupMaster: "Master",
+      fContinuityEnabled: "Continuity checkpoint capture (local structural metadata only)",
+      fContinuitySummary: "Send minimized excerpts for partial handoffs (separate opt-in)",
+      fContinuitySummaryHint: "Default off. Sends bounded own user-text excerpts to the Extraction model/provider, or host default. Best-effort redaction can miss sensitive or copied prose. Requires checkpoint capture and Capture. Handoffs are partial and unverified; tasks and approvals never resume automatically. Off stops processing but keeps saved handoffs for inspection.",
+      fContinuitySessions: "Excluded native session IDs (JSON string array)",
+      fContinuityProjects: "Excluded opaque project IDs (JSON string array)",
       groupModules: "Modules",
       groupStorage: "Storage",
       groupExtract: "Extraction (L1)",
@@ -156,13 +174,23 @@ window.__ModuleLoader__.load({
       groupHousekeeping: "Growth governance",
       groupReview: "Nightly review (daily full evolution)",
       save: "Save",
-      reset: "Reset to defaults",
-      saved: "Saved — applied immediately",
+      resetScoped: "Restore inherited defaults",
+      resetConfirm: "Restore this group to the inherited (composition) defaults? Only this group's overrides are cleared.",
+      saved: "Saved — applied without restart",
       saving: "Saving…",
       error: "Save failed",
-      conflict: "Config changed elsewhere (revision conflict): refreshed to latest, your edits are kept — please save again",
-      unavailable: "Settings namespace unavailable (dsh-self-improved not registered server-side?)",
+      conflict: "These settings changed elsewhere since you started editing. Your edits are kept below; review them and save again to rebase.",
+      conflictKeep: "Keep my edits (rebase)",
+      conflictDiscard: "Discard my edits",
+      conflictDiscardConfirm: "Discard your unsaved edits? This restores the host section in the form.",
+      dirtyBadge: "unsaved",
+      dirtySummary: "{n} field(s) with unsaved edits",
+      restartNote: "restart required",
+      unavailable: "Settings for this plugin are not available from this host (dsh-self-improved not mounted?)",
       overridden: "overridden",
+      secretSet: "key stored",
+      secretUnset: "no key",
+      secretHint: "Leave blank to keep the stored key. The key never re-appears here.",
       loading: "Loading…",
       fEnabled: "Enable plugin (master switch)",
       fDebug: "Debug logs",
@@ -172,7 +200,7 @@ window.__ModuleLoader__.load({
       fEvolve: "Self-evolve (decay/skills)",
       fRecall: "Auto recall injection",
       fTools: "Memory tools (memory_search etc.)",
-      fStorageRoot: "Memory dir (blank = $DSH_HOME/memory; restart required when changed)",
+      fStorageRoot: "Memory dir (blank = $DSH_HOME/memory)",
       fSearchLimit: "Default tool result limit",
       fProvider: "Extraction provider (blank = default model)",
       fModel: "Extraction model (blank = default model)",
@@ -181,14 +209,15 @@ window.__ModuleLoader__.load({
       fMaxTokens: "Max output tokens",
       fTimeoutMs: "Extraction timeout (ms)",
       fDedup: "Dedup (token overlap)",
+      fMinImportance: "Drop memories under importance",
       fFallback: "Fallback to summary on bad JSON",
       fFlushDrain: "Drain extraction before headless exit",
       fProvenance: "Extraction provenance filter",
-      fProvenanceHint: "strict (recommended) = only memories confirmed as human-authored/curated enter the long-term store; assistant-generated or unverified content stays out. off disables the filter (not recommended).",
+      fProvenanceHint: "strict (recommended) = only memories confirmed as human-authored/curated enter the long-term store. off disables the filter (not recommended).",
       fRequireEvidence: "Require extraction evidence",
       fRequireEvidenceHint: "When on, memories the extraction model produced without quoting evidence from the conversation are rejected — the conservative default.",
       fStrategy: "Recall strategy",
-      fStrategyHint: "keyword = pure keyword (default, no embedding calls); hybrid = keyword + vector fusion (requires an Embedding endpoint below; auto-falls back to keyword if unset).",
+      fStrategyHint: "keyword = pure keyword (default, no embedding calls); hybrid = keyword + vector fusion (requires an embedding endpoint below; auto-falls back to keyword if unset).",
       fMaxResults: "Max recall results",
       fScoreThreshold: "Score threshold (0 = off)",
       fRelevanceMargin: "Relevance margin (0–1)",
@@ -212,7 +241,7 @@ window.__ModuleLoader__.load({
       fDecayAge: "Min age (days)",
       fDecayThreshold: "Decay score threshold",
       fDecayRetention: "Forgotten retention (days, 0=keep)",
-      fDecayMaxActive: "Max active memories (0=unlimited; overflow auto-decays lowest)",
+      fDecayMaxActive: "Max active memories (0=unlimited)",
       fSkill: "Skill synthesis (→ dsh-skill)",
       fSkillMin: "Skill min importance",
       fSkillRoot: "Skills root (blank = $DSH_HOME/skills)",
@@ -225,42 +254,7 @@ window.__ModuleLoader__.load({
       fRecallInjectChars: "Max injected block chars",
       fReviewEnabled: "Enable nightly review (one full evolution per day)",
       fReviewTime: "Review time (HH:MM, 24h)",
-      secretHint: "Leave blank to keep the current key.",
-      browserNav: "Memory",
-      browserNoSession: "The memory browser needs a session context: open/enter a session first (you can also type \"/\" in chat to open the command menu).",
-      browserHint: "Loading… (data from /memory browser --json)",
-      browserSearch: "Filter",
-      browserRefresh: "Refresh",
-      browserSummary: "{n} active memories · {p} pending · {s} scenes · persona v{v} · {k} skills · {e} episodes",
-      browserEmpty: "(no active memories)",
-      browserPersona: "Persona",
-      browserPersonaEmpty: "(no persona yet — self-evolution synthesizes it as memories accumulate)",
-      browserMemories: "Memories",
-      browserScenes: "Scenes",
-      browserScenesEmpty: "(no scenes yet)",
-      browserSkills: "Learned skills",
-      browserSkillsEmpty: "(no skills yet — keep accumulating memories, self-evolution will distill SOPs)",
-      browserSynth: "synthesized",
-      browserSkillDelete: "Delete",
-      browserSkillDeleteConfirm: "Delete this synthesized skill? (system skills are protected)",
-      browserSkillDeleted: "Deleted",
-      browserDetail: "Detail",
-      browserDetailClose: "Close",
-      browserMetaKind: "Kind",
-      browserMetaImportance: "Importance",
-      browserMetaAccess: "Access count",
-      browserMetaStatus: "Status",
-      browserMetaCreated: "Created",
-      browserMetaUpdated: "Updated",
-      browserMetaId: "ID",
-      browserMetaSupersedes: "Supersedes",
-      browserCorrect: "Correct",
-      browserForget: "Forget",
-      browserCorrectPrompt: "Correct to:",
-      browserCorrectCancel: "Cancel",
-      browserCorrected: "Corrected",
-      browserForgetConfirm: "Forget this memory?",
-      browserForgotten: "Forgotten",
+      /* episode learning */
       groupEpisodes: "Episode learning (tool outcomes, disabled by default)",
       fEpEnabled: "Enable episode learning",
       fEpEnabledHint: "Captures every tool call + result (arguments/results redacted at capture, bounded) into the local episode store. If LLM outcome review is enabled, redacted evidence is sent to the configured provider. Purge anytime from the Memory tab.",
@@ -275,23 +269,59 @@ window.__ModuleLoader__.load({
       fEpRecallHint: "Off by default: injects derived, project-scoped operational knowledge as a fallible labeled block — never into persona/baseline.",
       fEpRecallMax: "Max operational recall results",
       fEpRecallChars: "Max operational recall chars",
-      fEpSkillMin: "Episodes required to synthesize one skill",
+      fEpSkillMin: "Minimum independent sessions per draft",
+      fEpSkillDrafts: "Generate inactive skill drafts (opt-in)",
+      fEpSkillDraftsHint: "On full review, sends reviewed redacted episode evidence to the configured LLM provider. Stores proposals locally as inactive drafts; it never loads or activates a skill.",
       episodeEnableWarning: "Episode learning stores every tool call and result (redacted and bounded) locally. If LLM outcome review is enabled, redacted episode evidence is sent to your configured LLM provider. Purge stored episodes from the Memory tab. Enable capture now?",
-      browserEpisodes: "Episodes (tool outcomes)",
-      browserEpisodesDisabled: "(episode learning disabled — enable it in Config to capture episodes; purge below still works)",
+      /* memory browser */
+      browserSearch: "Filter",
+      browserRefresh: "Refresh",
+      browserSummary: "{n} active memories · {p} pending · {s} scenes · persona v{v} · {k} skills · {e} episodes",
+      browserEmpty: "(no active memories)",
+      browserPersona: "Persona",
+      browserPersonaEmpty: "(no persona yet — self-evolution synthesizes it as memories accumulate)",
+      browserMemories: "Memories",
+      browserScenes: "Scenes",
+      browserScenesEmpty: "(no scenes yet)",
+      browserSkills: "Learned skills",
+      browserSkillsEmpty: "(no skills yet)",
+      browserSynth: "synthesized",
+      browserSkillDelete: "Delete",
+      browserSkillDeleteConfirm: "Delete this synthesized skill? (system skills are protected)",
+      browserSkillDeleted: "Deleted",
+      browserDetail: "Detail",
+      browserDetailClose: "Close",
+      browserConfirm: "Confirm",
+      browserCancel: "Cancel",
+      browserStaged: "Staged — confirm to run",
+      browserRemoteUnavailable: "Memory actions are unavailable in this channel (the typed business remote is not reachable from this host).",
+      browserMetaKind: "Kind",
+      browserMetaImportance: "Importance",
+      browserMetaAccess: "Access count",
+      browserMetaStatus: "Status",
+      browserMetaCreated: "Created",
+      browserMetaUpdated: "Updated",
+      browserMetaId: "ID",
+      browserMetaSupersedes: "Supersedes",
+      browserCorrect: "Correct",
+      browserForget: "Forget",
+      browserCorrectPrompt: "Correct to:",
+      browserCorrected: "Corrected",
+      browserForgotten: "Forgotten",
+      groupEpisodesBrowser: "Episodes (tool outcomes)",
+      browserEpisodesDisabled: "(episode learning disabled — enable it in Config to inspect stored rows; counts below still show)",
       browserEpisodesEmpty: "(no episodes recorded yet)",
       browserEpisodePurge: "Purge >30d",
       browserEpisodePurgeAll: "Purge all",
-      browserEpisodePurgeConfirm: "Purge stored episode records (steps + events)? Memories and skills are untouched.",
+      browserEpisodePurgeConfirm: "Purge episode records and linked tool evidence? This also forgets episode-derived operational memories and invalidates supported skill drafts; user-authored memories remain.",
       browserEpisodeDryReview: "Dry-review",
+      browserEpisodeDryReviewRun: "Dry-review running…",
       browserEpisodeDetailTitle: "Episode detail (redacted)",
       browserEpisodeNoSteps: "(no steps recorded)",
       browserEpisodeLastReview: "Last review:",
-      browserEpisodeReviewNone: "no review run yet",
       browserMetaSession: "Session",
       browserMetaTurn: "Turn",
       browserMetaProject: "Project",
-      browserMetaSteps: "Steps",
       browserMetaSummary: "Summary",
       browserMetaConfidence: "Confidence",
       browserMetaFingerprint: "Fingerprint",
@@ -300,13 +330,19 @@ window.__ModuleLoader__.load({
       browserMetaEnded: "Ended"
     };
     var en = {
-      nav: "Evolving Memory",
-      tabConfig: "Config",
+      nav: "进化记忆",
+      tabOverview: "Overview",
+       tabSessions: "Sessions",
+       tabConfig: "Settings",
       tabMemories: "Memory",
       intro: "Long-term memory & self-evolution: captures conversations, extracts memories, injects recall before turns, and consolidates/forgets/evolves over time.",
       helpTitle: "About this plugin",
       help: [
         "dsh-self-improved adds cross-session long-term memory and self-evolution to DSH. Data is stored locally by default ($DSH_HOME/memory); LLM-backed features send their required prompt content to the configured provider.",
+        "",
+        "[Changes apply live]",
+        "Editable settings here are volatile: saving applies to the running plugin without a restart. Filesystem roots are initialization-only (the memory storage directory, and the synthesized-skills root): a change to either takes effect after the plugin restarts; the running fiber keeps the startup value.",
+        "An embedding API key is stored as a secret: it never comes back to this form; leave the field blank to keep the current key.",
         "",
         "[Pipeline]",
         "L0 capture: each session's conversation is saved locally for the extraction pipeline.",
@@ -314,39 +350,26 @@ window.__ModuleLoader__.load({
         "L2 scenes / L3 persona: memories are grouped into scene blocks; a versioned user persona is synthesized incrementally.",
         "Auto recall injection: before each turn, relevant memories are retrieved by the current question and injected to the model as a memory block.",
         "Self-evolution: memories decay by importance × recency × access; users can correct memories; successful patterns can become reusable skills in dsh-skill.",
-        "Schedule: every 15 min only extraction + free maintenance (decay/cleanup) runs — no LLM cost; a full review (drain extraction + scenes/persona + skills + governance) runs daily at a fixed time (default 22:00, configurable) and ~60s after startup; trigger manually via /memory evolve.",
         "",
-        "[Module switches]",
-        "• Capture (L0): records conversations (off = no new memory material)",
-        "• Extract (L1): distillation (off = recall still uses old memories)",
-        "• Consolidate (L2/L3): scenes/persona (off = persona not updated)",
-        "• Evolve: decay & skill synthesis (off = memory only grows)",
-        "• Recall injection: pre-turn injection (off = tools still allow manual search)",
-        "• Tools: memory_search / memory_correct / memory_forget model-visible tools",
-        "",
-        "[Conservative policy (hermes defaults)]",
+        "[Conservative policy]",
         "• Extraction provenanceFilter=strict + requireEvidence=true: only human-confirmed memories with evidence enter the store",
-        "• Recall is gated by relevance margin (0.5), importance floor, and a 4-memories-per-turn injection cap",
-        "• Scene grouping (L2) is off by default — recall uses the curated baseline + contextual search",
-        "• Skill synthesis is off by default; enable it under Self-evolution if wanted",
+        "• Recall is gated by relevance margin, importance floor, and a per-turn injection cap",
+        "• Skill synthesis is opt-in; learned skills stay reviewable before use",
         "",
         "[Usage]",
         "• Type \"/\" in the chat input to open the command menu: /memory status, /memory list, /memory search <q>, /memory forget <id>, /memory correct <id> <text>",
         "• The model auto-uses memory tools (memory_search etc.) — no manual action needed",
-        "• Changes here apply immediately after saving — no restart",
-        "",
-        "[Models & privacy]",
-        "• Extraction/persona/skills use DSH's default model; you can set a dedicated one under Extraction",
-        "• Secrets (API keys / passwords) are filtered out of memories",
-        "• Local storage by default; LLM-backed extraction, episode review, and synthesis send required prompt/evidence to their configured provider; vector recall needs an embedding endpoint, otherwise keyword-only",
         "",
         "[Notes]",
-        "• Extraction needs a working, stable model; long sessions are drained in batches (one LLM call per batch, 30s throttle)",
-        "• Persona and skills appear once memories accumulate",
-        "• Disabling the master switch stops all background timers (extraction/maintenance/nightly review); stored memories are kept and everything resumes when re-enabled",
+        "• Disabling the master switch stops background work; stored memories are kept and everything resumes when re-enabled — the Memory tab stays accessible for inspection while paused",
         "• Uninstalling the plugin does not delete local memory data"
       ].join("\n"),
       groupMaster: "Master",
+      fContinuityEnabled: "Continuity checkpoint capture (local structural metadata only)",
+      fContinuitySummary: "Send minimized excerpts for partial handoffs (separate opt-in)",
+      fContinuitySummaryHint: "Default off. Sends bounded own user-text excerpts to the Extraction model/provider, or host default. Best-effort redaction can miss sensitive or copied prose. Requires checkpoint capture and Capture. Handoffs are partial and unverified; tasks and approvals never resume automatically. Off stops processing but keeps saved handoffs for inspection.",
+      fContinuitySessions: "Excluded native session IDs (JSON string array)",
+      fContinuityProjects: "Excluded opaque project IDs (JSON string array)",
       groupModules: "Modules",
       groupStorage: "Storage",
       groupExtract: "Extraction (L1)",
@@ -356,13 +379,23 @@ window.__ModuleLoader__.load({
       groupHousekeeping: "Growth governance",
       groupReview: "Nightly review (daily full evolution)",
       save: "Save",
-      reset: "Reset to defaults",
-      saved: "Saved — applied immediately",
+      resetScoped: "Restore inherited defaults",
+      resetConfirm: "Restore this group to the inherited (composition) defaults? Only this group's overrides are cleared.",
+      saved: "Saved — applied without restart",
       saving: "Saving…",
       error: "Save failed",
-      conflict: "Config changed elsewhere (revision conflict): refreshed to latest, your edits are kept — please save again",
-      unavailable: "Settings namespace unavailable (dsh-self-improved not registered server-side?)",
+      conflict: "These settings changed elsewhere since you started editing. Your edits are kept below; review them and save again to rebase.",
+      conflictKeep: "Keep my edits (rebase)",
+      conflictDiscard: "Discard my edits",
+      conflictDiscardConfirm: "Discard your unsaved edits? This restores the host section in the form.",
+      dirtyBadge: "unsaved",
+      dirtySummary: "{n} field(s) with unsaved edits",
+      restartNote: "restart required",
+      unavailable: "Settings for this plugin are not available from this host (dsh-self-improved not mounted?)",
       overridden: "overridden",
+      secretSet: "key stored",
+      secretUnset: "no key",
+      secretHint: "Leave blank to keep the stored key. The key never re-appears here.",
       loading: "Loading…",
       fEnabled: "Enable plugin (master switch)",
       fDebug: "Debug logs",
@@ -372,7 +405,7 @@ window.__ModuleLoader__.load({
       fEvolve: "Self-evolve (decay/skills)",
       fRecall: "Auto recall injection",
       fTools: "Memory tools (memory_search etc.)",
-      fStorageRoot: "Memory dir (blank = $DSH_HOME/memory; restart required when changed)",
+      fStorageRoot: "Memory dir (blank = $DSH_HOME/memory)",
       fSearchLimit: "Default tool result limit",
       fProvider: "Extraction provider (blank = default model)",
       fModel: "Extraction model (blank = default model)",
@@ -381,14 +414,15 @@ window.__ModuleLoader__.load({
       fMaxTokens: "Max output tokens",
       fTimeoutMs: "Extraction timeout (ms)",
       fDedup: "Dedup (token overlap)",
+      fMinImportance: "Drop memories under importance",
       fFallback: "Fallback to summary on bad JSON",
       fFlushDrain: "Drain extraction before headless exit",
       fProvenance: "Extraction provenance filter",
-      fProvenanceHint: "strict (recommended) = only memories confirmed as human-authored/curated enter the long-term store; assistant-generated or unverified content stays out. off disables the filter (not recommended).",
+      fProvenanceHint: "strict (recommended) = only memories confirmed as human-authored/curated enter the long-term store. off disables the filter (not recommended).",
       fRequireEvidence: "Require extraction evidence",
       fRequireEvidenceHint: "When on, memories the extraction model produced without quoting evidence from the conversation are rejected — the conservative default.",
       fStrategy: "Recall strategy",
-      fStrategyHint: "keyword = pure keyword (default, no embedding calls); hybrid = keyword + vector fusion (requires an Embedding endpoint below; auto-falls back to keyword if unset).",
+      fStrategyHint: "keyword = pure keyword (default, no embedding calls); hybrid = keyword + vector fusion (requires an embedding endpoint below; auto-falls back to keyword if unset).",
       fMaxResults: "Max recall results",
       fScoreThreshold: "Score threshold (0 = off)",
       fRelevanceMargin: "Relevance margin (0–1)",
@@ -412,7 +446,7 @@ window.__ModuleLoader__.load({
       fDecayAge: "Min age (days)",
       fDecayThreshold: "Decay score threshold",
       fDecayRetention: "Forgotten retention (days, 0=keep)",
-      fDecayMaxActive: "Max active memories (0=unlimited; overflow auto-decays lowest)",
+      fDecayMaxActive: "Max active memories (0=unlimited)",
       fSkill: "Skill synthesis (→ dsh-skill)",
       fSkillMin: "Skill min importance",
       fSkillRoot: "Skills root (blank = $DSH_HOME/skills)",
@@ -425,42 +459,6 @@ window.__ModuleLoader__.load({
       fRecallInjectChars: "Max injected block chars",
       fReviewEnabled: "Enable nightly review (one full evolution per day)",
       fReviewTime: "Review time (HH:MM, 24h)",
-      secretHint: "Leave blank to keep the current key.",
-      browserNav: "Memory",
-      browserNoSession: "The memory browser needs a session context: open/enter a session first (you can also type \"/\" in chat to open the command menu).",
-      browserHint: "Loading… (data from /memory browser --json)",
-      browserSearch: "Filter",
-      browserRefresh: "Refresh",
-      browserSummary: "{n} active memories · {p} pending · {s} scenes · persona v{v} · {k} skills · {e} episodes",
-      browserEmpty: "(no active memories)",
-      browserPersona: "Persona",
-      browserPersonaEmpty: "(no persona yet — self-evolution synthesizes it as memories accumulate)",
-      browserMemories: "Memories",
-      browserScenes: "Scenes",
-      browserScenesEmpty: "(no scenes yet)",
-      browserSkills: "Learned skills",
-      browserSkillsEmpty: "(no skills yet — keep accumulating memories, self-evolution will distill SOPs)",
-      browserSynth: "synthesized",
-      browserSkillDelete: "Delete",
-      browserSkillDeleteConfirm: "Delete this synthesized skill? (system skills are protected)",
-      browserSkillDeleted: "Deleted",
-      browserDetail: "Detail",
-      browserDetailClose: "Close",
-      browserMetaKind: "Kind",
-      browserMetaImportance: "Importance",
-      browserMetaAccess: "Access count",
-      browserMetaStatus: "Status",
-      browserMetaCreated: "Created",
-      browserMetaUpdated: "Updated",
-      browserMetaId: "ID",
-      browserMetaSupersedes: "Supersedes",
-      browserCorrect: "Correct",
-      browserForget: "Forget",
-      browserCorrectPrompt: "Correct to:",
-      browserCorrectCancel: "Cancel",
-      browserCorrected: "Corrected",
-      browserForgetConfirm: "Forget this memory?",
-      browserForgotten: "Forgotten",
       groupEpisodes: "Episode learning (tool outcomes, disabled by default)",
       fEpEnabled: "Enable episode learning",
       fEpEnabledHint: "Captures every tool call + result (arguments/results redacted at capture, bounded) into the local episode store. If LLM outcome review is enabled, redacted evidence is sent to the configured provider. Purge anytime from the Memory tab.",
@@ -475,23 +473,58 @@ window.__ModuleLoader__.load({
       fEpRecallHint: "Off by default: injects derived, project-scoped operational knowledge as a fallible labeled block — never into persona/baseline.",
       fEpRecallMax: "Max operational recall results",
       fEpRecallChars: "Max operational recall chars",
-      fEpSkillMin: "Episodes required to synthesize one skill",
+      fEpSkillMin: "Minimum independent sessions per draft",
+      fEpSkillDrafts: "Generate inactive skill drafts (opt-in)",
+      fEpSkillDraftsHint: "On full review, sends reviewed redacted episode evidence to the configured LLM provider. Stores proposals locally as inactive drafts; it never loads or activates a skill.",
       episodeEnableWarning: "Episode learning stores every tool call and result (redacted and bounded) locally. If LLM outcome review is enabled, redacted episode evidence is sent to your configured LLM provider. Purge stored episodes from the Memory tab. Enable capture now?",
-      browserEpisodes: "Episodes (tool outcomes)",
-      browserEpisodesDisabled: "(episode learning disabled — enable it in Config to capture episodes; purge below still works)",
+      browserSearch: "Filter",
+      browserRefresh: "Refresh",
+      browserSummary: "{n} active memories · {p} pending · {s} scenes · persona v{v} · {k} skills · {e} episodes",
+      browserEmpty: "(no active memories)",
+      browserPersona: "Persona",
+      browserPersonaEmpty: "(no persona yet — self-evolution synthesizes it as memories accumulate)",
+      browserMemories: "Memories",
+      browserScenes: "Scenes",
+      browserScenesEmpty: "(no scenes yet)",
+      browserSkills: "Learned skills",
+      browserSkillsEmpty: "(no skills yet)",
+      browserSynth: "synthesized",
+      browserSkillDelete: "Delete",
+      browserSkillDeleteConfirm: "Delete this synthesized skill? (system skills are protected)",
+      browserSkillDeleted: "Deleted",
+      browserDetail: "Detail",
+      browserDetailClose: "Close",
+      browserConfirm: "Confirm",
+      browserCancel: "Cancel",
+      browserStaged: "Staged — confirm to run",
+      browserRemoteUnavailable: "Memory actions are unavailable in this channel (the typed business remote is not reachable from this host).",
+      browserMetaKind: "Kind",
+      browserMetaImportance: "Importance",
+      browserMetaAccess: "Access count",
+      browserMetaStatus: "Status",
+      browserMetaCreated: "Created",
+      browserMetaUpdated: "Updated",
+      browserMetaId: "ID",
+      browserMetaSupersedes: "Supersedes",
+      browserCorrect: "Correct",
+      browserForget: "Forget",
+      browserCorrectPrompt: "Correct to:",
+      browserCorrected: "Corrected",
+      browserForgotten: "Forgotten",
+      groupEpisodesBrowser: "Episodes (tool outcomes)",
+      browserEpisodesDisabled: "(episode learning disabled — enable it in Config to inspect stored rows; counts below still show)",
       browserEpisodesEmpty: "(no episodes recorded yet)",
       browserEpisodePurge: "Purge >30d",
       browserEpisodePurgeAll: "Purge all",
-      browserEpisodePurgeConfirm: "Purge stored episode records (steps + events)? Memories and skills are untouched.",
+      browserEpisodePurgeConfirm: "Purge episode records and linked tool evidence? This also forgets episode-derived operational memories and invalidates supported skill drafts; user-authored memories remain.",
       browserEpisodeDryReview: "Dry-review",
+      browserEpisodeDryReviewRun: "Dry-review running…",
       browserEpisodeDetailTitle: "Episode detail (redacted)",
       browserEpisodeNoSteps: "(no steps recorded)",
       browserEpisodeLastReview: "Last review:",
-      browserEpisodeReviewNone: "no review run yet",
       browserMetaSession: "Session",
       browserMetaTurn: "Turn",
       browserMetaProject: "Project",
-      browserMetaSteps: "Steps",
       browserMetaSummary: "Summary",
       browserMetaConfidence: "Confidence",
       browserMetaFingerprint: "Fingerprint",
@@ -500,74 +533,149 @@ window.__ModuleLoader__.load({
       browserMetaEnded: "Ended"
     };
 
-    // ── field spec: dotted path + type + group ─────────────────────────────
+    // ─═ [settings-form] ════════════════════════════════════════════════════
+    /**
+     * Field inventory — the client-side mirror of src/runtime-config.ts's
+     * FIELD_CLASSIFICATION (scripts/test-v02-settings.mjs asserts parity).
+     * uiClass: everyday | advanced | init-only | secret
+     */
     var FIELDS = [
-      { path: ["enabled"], label: "fEnabled", type: "checkbox", group: "groupMaster" },
-      { path: ["debug"], label: "fDebug", type: "checkbox", group: "groupMaster" },
-      { path: ["modules", "capture"], label: "fCapture", type: "checkbox", group: "groupModules" },
-      { path: ["modules", "extract"], label: "fExtract", type: "checkbox", group: "groupModules" },
-      { path: ["modules", "consolidate"], label: "fConsolidate", type: "checkbox", group: "groupModules" },
-      { path: ["modules", "evolve"], label: "fEvolve", type: "checkbox", group: "groupModules" },
-      { path: ["modules", "recall"], label: "fRecall", type: "checkbox", group: "groupModules" },
-      { path: ["modules", "tools"], label: "fTools", type: "checkbox", group: "groupModules" },
-      { path: ["storageRoot"], label: "fStorageRoot", type: "text", group: "groupStorage" },
-      { path: ["searchLimit"], label: "fSearchLimit", type: "number", group: "groupStorage" },
-      { path: ["extract", "provider"], label: "fProvider", type: "text", group: "groupExtract" },
-      { path: ["extract", "model"], label: "fModel", type: "text", group: "groupExtract" },
-      { path: ["extract", "intervalMinutes"], label: "fInterval", type: "number", group: "groupExtract" },
-      { path: ["extract", "batchMaxChars"], label: "fBatchChars", type: "number", group: "groupExtract" },
-      { path: ["extract", "maxOutputTokens"], label: "fMaxTokens", type: "number", group: "groupExtract" },
-      { path: ["extract", "timeoutMs"], label: "fTimeoutMs", type: "number", group: "groupExtract" },
-      { path: ["extract", "dedup"], label: "fDedup", type: "checkbox", group: "groupExtract" },
-      { path: ["extract", "fallbackOnBadJson"], label: "fFallback", type: "checkbox", group: "groupExtract" },
-      { path: ["extract", "flushDrain"], label: "fFlushDrain", type: "checkbox", group: "groupExtract" },
-      { path: ["extract", "provenanceFilter"], label: "fProvenance", type: "select", options: ["strict", "off"], includeBlank: false, fallback: "strict", hint: "fProvenanceHint", group: "groupExtract" },
-      { path: ["extract", "requireEvidence"], label: "fRequireEvidence", type: "checkbox", group: "groupExtract" },
-      { path: ["recall", "strategy"], label: "fStrategy", type: "select", options: ["keyword", "hybrid"], hint: "fStrategyHint", group: "groupRecall" },
-      { path: ["recall", "maxResults"], label: "fMaxResults", type: "number", group: "groupRecall" },
-      { path: ["recall", "scoreThreshold"], label: "fScoreThreshold", type: "number", group: "groupRecall" },
-      { path: ["recall", "relevanceMargin"], label: "fRelevanceMargin", type: "number", hint: "fRelevanceMarginHint", group: "groupRecall" },
-      { path: ["recall", "minImportance"], label: "fRecallMinImportance", type: "number", hint: "fRecallMinImportanceHint", group: "groupRecall" },
-      { path: ["recall", "maxInjectPerTurn"], label: "fMaxInjectPerTurn", type: "number", hint: "fMaxInjectPerTurnHint", group: "groupRecall" },
-      { path: ["recall", "timeoutMs"], label: "fRecallTimeout", type: "number", group: "groupRecall" },
-      { path: ["recall", "embedding", "baseUrl"], label: "fEmbBase", type: "text", group: "groupRecall" },
-      { path: ["recall", "embedding", "apiKey"], label: "fEmbKey", type: "password", secret: true, group: "groupRecall" },
-      { path: ["recall", "embedding", "model"], label: "fEmbModel", type: "text", group: "groupRecall" },
-      { path: ["recall", "embedding", "dimensions"], label: "fEmbDims", type: "number", group: "groupRecall" },
-      { path: ["recall", "embedding", "timeoutMs"], label: "fEmbTimeout", type: "number", group: "groupRecall" },
-      { path: ["consolidate", "scenesEnabled"], label: "fScenesEnabled", type: "checkbox", group: "groupConsolidate" },
-      { path: ["consolidate", "sceneMaxMemories"], label: "fSceneMax", type: "number", group: "groupConsolidate" },
-      { path: ["consolidate", "personaMaxMemories"], label: "fPersonaMax", type: "number", group: "groupConsolidate" },
-      { path: ["consolidate", "sceneBatchSize"], label: "fSceneBatch", type: "number", group: "groupConsolidate" },
-      { path: ["evolve", "decay", "enabled"], label: "fDecay", type: "checkbox", group: "groupEvolve" },
-      { path: ["evolve", "decay", "minAgeDays"], label: "fDecayAge", type: "number", group: "groupEvolve" },
-      { path: ["evolve", "decay", "threshold"], label: "fDecayThreshold", type: "number", group: "groupEvolve" },
-      { path: ["evolve", "decay", "retentionDays"], label: "fDecayRetention", type: "number", group: "groupEvolve" },
-      { path: ["evolve", "decay", "maxActiveMemories"], label: "fDecayMaxActive", type: "number", group: "groupEvolve" },
-      { path: ["evolve", "skillSynthesis", "enabled"], label: "fSkill", type: "checkbox", group: "groupEvolve" },
-      { path: ["evolve", "skillSynthesis", "minImportance"], label: "fSkillMin", type: "number", group: "groupEvolve" },
-      { path: ["evolve", "skillSynthesis", "skillsRoot"], label: "fSkillRoot", type: "text", group: "groupEvolve" },
-      { path: ["evolve", "skillSynthesis", "prefix"], label: "fSkillPrefix", type: "text", group: "groupEvolve" },
-      { path: ["evolve", "skillSynthesis", "maxSkills"], label: "fSkillMax", type: "number", group: "groupEvolve" },
-      { path: ["housekeeping", "personaVersions"], label: "fHkPersona", type: "number", group: "groupHousekeeping" },
-      { path: ["housekeeping", "maxScenes"], label: "fHkScenes", type: "number", group: "groupHousekeeping" },
-      { path: ["housekeeping", "sceneActiveRatio"], label: "fHkSceneRatio", type: "number", group: "groupHousekeeping" },
-      { path: ["housekeeping", "conversationRetentionDays"], label: "fHkConvDays", type: "number", group: "groupHousekeeping" },
-      { path: ["review", "enabled"], label: "fReviewEnabled", type: "checkbox", group: "groupReview" },
-      { path: ["review", "time"], label: "fReviewTime", type: "text", group: "groupReview" },
-      { path: ["episodeLearning", "enabled"], label: "fEpEnabled", type: "checkbox", hint: "fEpEnabledHint", group: "groupEpisodes" },
-      { path: ["episodeLearning", "captureArguments"], label: "fEpCaptureArgs", type: "checkbox", group: "groupEpisodes" },
-      { path: ["episodeLearning", "resultExcerptChars"], label: "fEpExcerpt", type: "number", group: "groupEpisodes" },
-      { path: ["episodeLearning", "retentionDays"], label: "fEpRetention", type: "number", group: "groupEpisodes" },
-      { path: ["episodeLearning", "reviewEnabled"], label: "fEpReview", type: "checkbox", hint: "fEpReviewHint", group: "groupEpisodes" },
-      { path: ["episodeLearning", "confidenceFloor"], label: "fEpConf", type: "number", group: "groupEpisodes" },
-      { path: ["episodeLearning", "expiryDays"], label: "fEpExpiry", type: "number", group: "groupEpisodes" },
-      { path: ["episodeLearning", "operationalRecallEnabled"], label: "fEpRecall", type: "checkbox", hint: "fEpRecallHint", group: "groupEpisodes" },
-      { path: ["episodeLearning", "maxRecallResults"], label: "fEpRecallMax", type: "number", group: "groupEpisodes" },
-      { path: ["episodeLearning", "maxRecallChars"], label: "fEpRecallChars", type: "number", group: "groupEpisodes" },
-      { path: ["episodeLearning", "skillMinEpisodes"], label: "fEpSkillMin", type: "number", group: "groupEpisodes" }
+      { path: ["enabled"], uiClass: "everyday", group: "groupMaster" },
+      { path: ["continuity", "enabled"], uiClass: "everyday", group: "groupMaster", type: "checkbox" },
+      { path: ["continuity", "summaryEnabled"], uiClass: "everyday", group: "groupMaster", type: "checkbox", hint: "fContinuitySummaryHint", fallback: false },
+      { path: ["continuity", "excludedSessionIds"], uiClass: "everyday", group: "groupMaster", type: "string-list" },
+      { path: ["continuity", "excludedProjectIds"], uiClass: "everyday", group: "groupMaster", type: "string-list" },
+      { path: ["debug"], uiClass: "advanced", group: "groupMaster" },
+      { path: ["modules", "capture"], uiClass: "everyday", group: "groupModules" },
+      { path: ["modules", "extract"], uiClass: "everyday", group: "groupModules" },
+      { path: ["modules", "consolidate"], uiClass: "advanced", group: "groupModules" },
+      { path: ["modules", "evolve"], uiClass: "advanced", group: "groupModules" },
+      { path: ["modules", "recall"], uiClass: "everyday", group: "groupModules" },
+      { path: ["modules", "tools"], uiClass: "everyday", group: "groupModules" },
+      { path: ["storageRoot"], uiClass: "init-only", group: "groupStorage" },
+      { path: ["searchLimit"], uiClass: "advanced", group: "groupStorage" },
+      { path: ["extract", "provider"], uiClass: "advanced", group: "groupExtract" },
+      { path: ["extract", "model"], uiClass: "advanced", group: "groupExtract" },
+      { path: ["extract", "intervalMinutes"], uiClass: "advanced", group: "groupExtract" },
+      { path: ["extract", "batchMaxChars"], uiClass: "advanced", group: "groupExtract" },
+      { path: ["extract", "maxOutputTokens"], uiClass: "advanced", group: "groupExtract" },
+      { path: ["extract", "timeoutMs"], uiClass: "advanced", group: "groupExtract" },
+      { path: ["extract", "minImportance"], uiClass: "advanced", group: "groupExtract" },
+      { path: ["extract", "dedup"], uiClass: "advanced", group: "groupExtract" },
+      { path: ["extract", "fallbackOnBadJson"], uiClass: "retired", group: "groupExtract" },
+      { path: ["extract", "flushDrain"], uiClass: "advanced", group: "groupExtract" },
+      { path: ["extract", "provenanceFilter"], uiClass: "migration-only", group: "groupExtract", type: "select", options: ["strict", "off"], fallback: "strict", hint: "fProvenanceHint" },
+      { path: ["extract", "requireEvidence"], uiClass: "advanced", group: "groupExtract" },
+      { path: ["recall", "strategy"], uiClass: "advanced", group: "groupRecall", type: "select", options: ["keyword", "hybrid"], hint: "fStrategyHint", fallback: undefined },
+      { path: ["recall", "maxResults"], uiClass: "advanced", group: "groupRecall" },
+      { path: ["recall", "scoreThreshold"], uiClass: "advanced", group: "groupRecall" },
+      { path: ["recall", "relevanceMargin"], uiClass: "advanced", group: "groupRecall", hint: "fRelevanceMarginHint" },
+      { path: ["recall", "minImportance"], uiClass: "advanced", group: "groupRecall", hint: "fRecallMinImportanceHint" },
+      { path: ["recall", "maxInjectPerTurn"], uiClass: "advanced", group: "groupRecall", hint: "fMaxInjectPerTurnHint" },
+      { path: ["recall", "timeoutMs"], uiClass: "advanced", group: "groupRecall" },
+      { path: ["recall", "maxInjectChars"], uiClass: "advanced", group: "groupRecall" },
+      { path: ["recall", "embedding", "baseUrl"], uiClass: "advanced", group: "groupRecall" },
+      { path: ["recall", "embedding", "apiKey"], uiClass: "secret", group: "groupRecall", hint: "secretHint" },
+      { path: ["recall", "embedding", "model"], uiClass: "advanced", group: "groupRecall" },
+      { path: ["recall", "embedding", "dimensions"], uiClass: "advanced", group: "groupRecall" },
+      { path: ["recall", "embedding", "timeoutMs"], uiClass: "advanced", group: "groupRecall" },
+      { path: ["consolidate", "scenesEnabled"], uiClass: "advanced", group: "groupConsolidate" },
+      { path: ["consolidate", "sceneMaxMemories"], uiClass: "advanced", group: "groupConsolidate" },
+      { path: ["consolidate", "personaMaxMemories"], uiClass: "advanced", group: "groupConsolidate" },
+      { path: ["consolidate", "sceneBatchSize"], uiClass: "advanced", group: "groupConsolidate" },
+      { path: ["evolve", "decay", "enabled"], uiClass: "advanced", group: "groupEvolve" },
+      { path: ["evolve", "decay", "minAgeDays"], uiClass: "advanced", group: "groupEvolve" },
+      { path: ["evolve", "decay", "threshold"], uiClass: "advanced", group: "groupEvolve" },
+      { path: ["evolve", "decay", "retentionDays"], uiClass: "advanced", group: "groupEvolve" },
+      { path: ["evolve", "decay", "maxActiveMemories"], uiClass: "advanced", group: "groupEvolve" },
+      { path: ["evolve", "skillSynthesis", "enabled"], uiClass: "advanced", group: "groupEvolve" },
+      { path: ["evolve", "skillSynthesis", "minImportance"], uiClass: "advanced", group: "groupEvolve" },
+      { path: ["evolve", "skillSynthesis", "skillsRoot"], uiClass: "init-only", group: "groupEvolve" },
+      { path: ["evolve", "skillSynthesis", "prefix"], uiClass: "advanced", group: "groupEvolve" },
+      { path: ["evolve", "skillSynthesis", "maxSkills"], uiClass: "advanced", group: "groupEvolve" },
+      { path: ["housekeeping", "personaVersions"], uiClass: "advanced", group: "groupHousekeeping" },
+      { path: ["housekeeping", "maxScenes"], uiClass: "advanced", group: "groupHousekeeping" },
+      { path: ["housekeeping", "sceneActiveRatio"], uiClass: "advanced", group: "groupHousekeeping" },
+      { path: ["housekeeping", "conversationRetentionDays"], uiClass: "advanced", group: "groupHousekeeping" },
+      { path: ["review", "enabled"], uiClass: "advanced", group: "groupReview" },
+      { path: ["review", "time"], uiClass: "advanced", group: "groupReview" },
+      { path: ["episodeLearning", "enabled"], uiClass: "everyday", group: "groupEpisodes", hint: "fEpEnabledHint" },
+      { path: ["episodeLearning", "captureArguments"], uiClass: "advanced", group: "groupEpisodes" },
+      { path: ["episodeLearning", "resultExcerptChars"], uiClass: "advanced", group: "groupEpisodes" },
+      { path: ["episodeLearning", "retentionDays"], uiClass: "advanced", group: "groupEpisodes" },
+      { path: ["episodeLearning", "reviewEnabled"], uiClass: "advanced", group: "groupEpisodes", hint: "fEpReviewHint" },
+      { path: ["episodeLearning", "confidenceFloor"], uiClass: "advanced", group: "groupEpisodes" },
+      { path: ["episodeLearning", "expiryDays"], uiClass: "advanced", group: "groupEpisodes" },
+      { path: ["episodeLearning", "operationalRecallEnabled"], uiClass: "advanced", group: "groupEpisodes", hint: "fEpRecallHint" },
+      { path: ["episodeLearning", "maxRecallResults"], uiClass: "advanced", group: "groupEpisodes" },
+      { path: ["episodeLearning", "maxRecallChars"], uiClass: "advanced", group: "groupEpisodes" },
+      { path: ["episodeLearning", "skillMinEpisodes"], uiClass: "advanced", group: "groupEpisodes" },
+      { path: ["episodeLearning", "skillDraftsEnabled"], uiClass: "advanced", group: "groupEpisodes", hint: "fEpSkillDraftsHint" }
     ];
-    FIELDS.forEach(function (f) { f.key = f.path.join("."); });
+    /** checkbox/number/text shape table mirrors the host schema. */
+    var CHECKBOX_KEYS = [
+      "enabled", "debug", "modules.capture", "modules.extract", "modules.consolidate", "modules.evolve", "modules.recall", "modules.tools",
+      "extract.dedup", "extract.flushDrain", "extract.requireEvidence",
+      "consolidate.scenesEnabled", "evolve.decay.enabled", "evolve.skillSynthesis.enabled", "review.enabled",
+      "episodeLearning.enabled", "episodeLearning.captureArguments", "episodeLearning.reviewEnabled", "episodeLearning.operationalRecallEnabled", "episodeLearning.skillDraftsEnabled"
+    ];
+    var TEXT_KEYS = [
+      "storageRoot", "extract.provider", "extract.model",
+      "recall.embedding.baseUrl", "recall.embedding.model", "recall.embedding.apiKey",
+      "evolve.skillSynthesis.skillsRoot", "evolve.skillSynthesis.prefix", "review.time"
+    ];
+    var SELECT_KEYS = ["recall.strategy", "extract.provenanceFilter"];
+    function isPathLikeCheckbox(key) { return CHECKBOX_KEYS.includes(key); }
+    function isPathLikeNumber(key) {
+      return !isPathLikeCheckbox(key) && !TEXT_KEYS.includes(key) && !SELECT_KEYS.includes(key);
+    }
+
+    FIELDS.forEach(function (f) {
+      f.key = f.path.join(".");
+      f.label = ({
+        "continuity.enabled": "fContinuityEnabled", "continuity.summaryEnabled": "fContinuitySummary", "continuity.excludedSessionIds": "fContinuitySessions", "continuity.excludedProjectIds": "fContinuityProjects",
+        enabled: "fEnabled", debug: "fDebug",
+        "modules.capture": "fCapture", "modules.extract": "fExtract", "modules.consolidate": "fConsolidate",
+        "modules.evolve": "fEvolve", "modules.recall": "fRecall", "modules.tools": "fTools",
+        storageRoot: "fStorageRoot", searchLimit: "fSearchLimit",
+        "extract.provider": "fProvider", "extract.model": "fModel", "extract.intervalMinutes": "fInterval",
+        "extract.batchMaxChars": "fBatchChars", "extract.maxOutputTokens": "fMaxTokens", "extract.timeoutMs": "fTimeoutMs", "extract.minImportance": "fMinImportance",
+        "extract.dedup": "fDedup", "extract.fallbackOnBadJson": "fFallback", "extract.flushDrain": "fFlushDrain",
+        "extract.provenanceFilter": "fProvenance", "extract.requireEvidence": "fRequireEvidence",
+        "recall.strategy": "fStrategy", "recall.maxResults": "fMaxResults", "recall.scoreThreshold": "fScoreThreshold",
+        "recall.relevanceMargin": "fRelevanceMargin", "recall.minImportance": "fRecallMinImportance",
+        "recall.maxInjectPerTurn": "fMaxInjectPerTurn", "recall.timeoutMs": "fRecallTimeout", "recall.maxInjectChars": "fRecallInjectChars",
+        "recall.embedding.baseUrl": "fEmbBase", "recall.embedding.apiKey": "fEmbKey", "recall.embedding.model": "fEmbModel",
+        "recall.embedding.dimensions": "fEmbDims", "recall.embedding.timeoutMs": "fEmbTimeout",
+        "consolidate.scenesEnabled": "fScenesEnabled", "consolidate.sceneMaxMemories": "fSceneMax",
+        "consolidate.personaMaxMemories": "fPersonaMax", "consolidate.sceneBatchSize": "fSceneBatch",
+        "evolve.decay.enabled": "fDecay", "evolve.decay.minAgeDays": "fDecayAge", "evolve.decay.threshold": "fDecayThreshold",
+        "evolve.decay.retentionDays": "fDecayRetention", "evolve.decay.maxActiveMemories": "fDecayMaxActive",
+        "evolve.skillSynthesis.enabled": "fSkill", "evolve.skillSynthesis.minImportance": "fSkillMin",
+        "evolve.skillSynthesis.skillsRoot": "fSkillRoot", "evolve.skillSynthesis.prefix": "fSkillPrefix",
+        "evolve.skillSynthesis.maxSkills": "fSkillMax",
+        "housekeeping.personaVersions": "fHkPersona", "housekeeping.maxScenes": "fHkScenes",
+        "housekeeping.sceneActiveRatio": "fHkSceneRatio", "housekeeping.conversationRetentionDays": "fHkConvDays",
+        "review.enabled": "fReviewEnabled", "review.time": "fReviewTime",
+        "episodeLearning.enabled": "fEpEnabled", "episodeLearning.captureArguments": "fEpCaptureArgs",
+        "episodeLearning.resultExcerptChars": "fEpExcerpt", "episodeLearning.retentionDays": "fEpRetention",
+        "episodeLearning.reviewEnabled": "fEpReview", "episodeLearning.confidenceFloor": "fEpConf",
+        "episodeLearning.expiryDays": "fEpExpiry", "episodeLearning.operationalRecallEnabled": "fEpRecall",
+        "episodeLearning.maxRecallResults": "fEpRecallMax", "episodeLearning.maxRecallChars": "fEpRecallChars",
+        "episodeLearning.skillMinEpisodes": "fEpSkillMin",
+        "episodeLearning.skillDraftsEnabled": "fEpSkillDrafts"
+      })[f.key];
+      f.type = f.type ?? (
+        f.uiClass === "secret" ? "password"
+        : f.type !== void 0 ? f.type
+        : isPathLikeCheckbox(f.key) ? "checkbox"
+        : (f.key === "recall.strategy" || f.key === "extract.provenanceFilter") ? "select"
+        : isPathLikeNumber(f.key) ? "number"
+        : "text"
+      );
+      f.secret = f.uiClass === "secret";
+      f.initOnly = f.uiClass === "init-only";
+    });
 
     function getPath(obj, path) {
       var cur = obj;
@@ -578,156 +686,447 @@ window.__ModuleLoader__.load({
       return cur;
     }
 
+    /**
+     * The entry's settings-form state. THIS is the Phase A seam a future
+     * shell refactor replaces: the ConfigForms model stays provider-owned
+     * (we only subscribe/unsubscribe), and draft/dirty/baseline revision live
+     * here — persisted across navigation (created once in apply()).
+     */
+    function bindSettingsForm(ctx) {
+      var configForms = (function () {
+        try { return ctx.get("configForms"); } catch (e) { return void 0; }
+      })();
+      if (configForms === void 0) return null;
+      var form = configForms.get(NAMESPACE);
+      var state = {
+        snapshot: form.getSnapshot(),
+        /** user edits, keyed by dotted field path */
+        draft: {},
+        /** dotted paths the user touched (order-stable array). */
+        dirty: [],
+        /** baseline revision captured when the first edit was drafted */
+        baselineRevision: undefined,
+        /** explicit visible stale-conflict banner state */
+        conflict: null,
+        listeners: new Set()
+      };
+      var emit = function () { state.listeners.forEach(function (l) { l(); }); };
+      // Provider-owned model: subscribe, never dispose. The unsubscriber is
+      // what the consuming effect registers.
+      var unsubscribe = form.subscribe(function () {
+        var next = form.getSnapshot();
+        var revisionChanged = (
+          state.snapshot.revision !== void 0 && next.revision !== void 0 &&
+          next.revision !== state.snapshot.revision
+        );
+        state.snapshot = next;
+        if (revisionChanged && state.dirty.length > 0 && state.conflict === null) {
+          // A remote write moved the document under our dirty baseline: keep
+          // the edits and lift the visible conflict banner (no silent accept).
+          // `ours` is OUR captured edit-baseline revision, not the new snapshot
+          // (this field previously recorded `theirs` twice, hiding the cause).
+          state.conflict = { kind: "external", theirs: next.revision, ours: state.baselineRevision };
+          emit();
+          return;
+        }
+        emit();
+      });
+      return {
+        /** Shared live state (stable object identity; listeners re-render). */
+        state: state,
+        /** @returns the current ConfigFormSnapshot (redacted values included). */
+        snapshot: function () { return form.getSnapshot(); },
+        snapshotState: function () { return state.snapshot; },
+        subscribe: function (listener) {
+          state.listeners.add(listener);
+          return function () { state.listeners.delete(listener); };
+        },
+        /** Drop provider subscription (the form itself is provider-owned). */
+        unsubscribeAll: unsubscribe,
+        isDirty: function (key) { return state.dirty.includes(key); },
+        dirtyPaths: function () { return state.dirty.map(function (key) { return key.split("."); }); },
+        dirtyCount: function () { return state.dirty.length; },
+        /** One keystroke: records the edit + pins the baseline revision. */
+        setField: function (field, value) {
+          if (!state.dirty.includes(field.key)) state.dirty.push(field.key);
+          if (state.baselineRevision === void 0) {
+            var snap = form.getSnapshot();
+            state.baselineRevision = snap.revision;
+          }
+          state.draft[field.key] = value;
+          state.conflict = null;
+          emit();
+        },
+        /** Draft value the view renders for one field (falls back to host). */
+        draftValue: function (f) { return state.draft[f.key]; },
+        /** @returns true when the host accepted the write. */
+        saveDirty: function () {
+          var snap = form.getSnapshot();
+          var ops = [];
+          var invalidList = false;
+          state.dirty.forEach(function (key) {
+            var f = FIELDS.find(function (c) { return c.key === key; });
+            if (!f || f.initOnly) return;
+            // Migration-only/retired fields are inventoried but never
+            // write-enabled from the ordinary form (no render, no save, no reset).
+            if (f.uiClass === "migration-only" || f.uiClass === "retired") return;
+            var d = state.draft[key];
+            var current = getPath(snap.value, f.path);
+            if (f.secret) {
+              if (!d) return; // blank keeps the stored key (never echoed)
+              if (d === String(current ?? "")) return;
+              ops.push({ op: "set", path: f.path, value: d });
+              return;
+            }
+            if (f.type === "checkbox") {
+              // Note: disabling must use set false — unset would let the parsed
+              // value fall back to the schema default, so the switch never turns off.
+              ops.push({ op: "set", path: f.path, value: Boolean(d) });
+              return;
+            }
+            if (f.type === "string-list") {
+              var list;
+              try { list = JSON.parse(String(d)); } catch (_) { invalidList = true; return; }
+              if (!Array.isArray(list) || list.some(function (item) { return typeof item !== "string"; })) { invalidList = true; return; }
+              if (JSON.stringify(list) === JSON.stringify(current ?? [])) return;
+              ops.push({ op: "set", path: f.path, value: list }); // empty explicitly clears exclusions
+              return;
+            }
+            if (f.type === "select") {
+              if (String(d) === String(current ?? "")) return;
+              ops.push(String(d) ? { op: "set", path: f.path, value: String(d) } : { op: "unset", path: f.path });
+              return;
+            }
+            if (String(d) === String(current ?? "")) return;
+            var isOverridden = getPath(snap.user, f.path) !== void 0;
+            if (String(d).trim() === "" && !isOverridden) return;
+            ops.push(String(d).trim() === "" ? { op: "unset", path: f.path } : { op: "set", path: f.path, value: f.type === "number" ? Number(d) : d });
+          });
+          if (invalidList) {
+            state.lastError = "Exclusions must be a JSON array of strings; use [] to clear.";
+            emit(); return Promise.resolve(false); // retain ALL drafts; no partial remote mutation
+          }
+          if (ops.length === 0) {
+            // Every dirty draft already equals the live host value (restored or
+            // no-op): clear the marker instead of leaving a stale "unsaved"
+            // badge and enabled Save (mounted probe showed the stale badge).
+            state.dirty = [];
+            state.baselineRevision = void 0;
+            state.conflict = null;
+            Object.keys(state.draft).forEach(function (k) { delete state.draft[k]; });
+            emit();
+            return Promise.resolve(true);
+          }
+          // The baseline revision is the fence: a stale write is refused by
+          // the host (ConfigFormController folds the refusal into a mirror
+          // refresh and resolves false) → surfaced as the conflict banner.
+          var fence = state.baselineRevision !== void 0 ? state.baselineRevision : snap.revision;
+          return form.mutate(ops, fence).then(function (accepted) {
+            if (accepted) {
+              state.dirty = [];
+              state.baselineRevision = void 0;
+              state.conflict = null;
+              Object.keys(state.draft).forEach(function (k) { delete state.draft[k]; });
+              emit();
+            } else {
+              state.conflict = { kind: "refused", theirs: form.getSnapshot().revision, ours: fence };
+              emit();
+            }
+            return accepted;
+          }, function (error) {
+            // Transport failures reject (rc.2 contract): surfaced as an error.
+            state.conflict = null;
+            state.lastError = String(error && error.message || error);
+            emit();
+            return false;
+          });
+        },
+        /** Confirmed scoped reset ("Restore inherited defaults"). */
+        resetScoped: function (group, confirmFn) {
+          if (!confirmFn) return Promise.resolve(false);
+          // Init-only fields are never part of a live scoped reset (the host
+          // rejects nonvolatile paths risk-free anyway — explicit here), and
+          // migration-only/retired fields are not write-enabled at all.
+          var paths = FIELDS.filter(function (f) {
+            return f.group === group && !f.secret && !f.initOnly &&
+              f.uiClass !== "migration-only" && f.uiClass !== "retired";
+          }).map(function (f) { return f.path; });
+          if (paths.length === 0) return Promise.resolve(true);
+          var snap = form.getSnapshot();
+          var ops = paths.map(function (p) { return { op: "unset", path: p }; });
+          return form.mutate(ops, snap.revision).then(function (accepted) {
+            if (accepted) {
+              paths.forEach(function (p) {
+                var key = p.join(".");
+                state.dirty = state.dirty.filter(function (k) { return k !== key; });
+                delete state.draft[key];
+              });
+              if (state.dirty.length === 0) state.baselineRevision = void 0;
+              state.conflict = null;
+              emit();
+            } else {
+              state.conflict = { kind: "refused", theirs: form.getSnapshot().revision, ours: snap.revision };
+              emit();
+            }
+            return accepted;
+          });
+        },
+        /** Visible conflict/rebase actions. */
+        rebaseDirty: function () {
+          var snap = form.getSnapshot();
+          state.baselineRevision = snap.revision;
+          state.conflict = null;
+          emit();
+        },
+        discardDirty: function () {
+          state.dirty = [];
+          state.baselineRevision = void 0;
+          state.conflict = null;
+          Object.keys(state.draft).forEach(function (k) { delete state.draft[k]; });
+          emit();
+        },
+        clearError: function () { state.lastError = void 0; emit(); },
+        /** Presence-only secret positions for this entry (never values). */
+        secretPaths: function () {
+          var face = configForms.describe();
+          try { face.ensure(); } catch (e) { /* best effort */ }
+          var view = face.getSnapshot().view;
+          if (!view || !view.namespaces) return [];
+          var row = view.namespaces.find(function (n) { return n.ns === NAMESPACE; });
+          return row && row.secrets ? row.secrets.map(function (s) { return { path: s.path.slice(), set: s.set === true }; }) : [];
+        },
+        consentGateRead: function () {
+          var snap = form.getSnapshot();
+          var v = snap.value;
+          return Boolean(v && v.episodeLearning && v.episodeLearning.enabled);
+        }
+      };
+    }
+
+    // ─═ [business-remote] ══════════════════════════════════════════════════
+    /**
+     * Typed client descriptors for the host business service
+     * (src/business.ts MemoryBusinessService, service key
+     * selfImprovedMemoryUi). Mirror of the host's @Remote SRC markers;
+     * scripts/test-v02-settings.mjs asserts parity with the built source.
+     *
+     * Codecs are strict JSON validators (TypertSchema.parse + typeSymbol);
+     * the trailing `signal` parameter is the Gateway SRC cancellation.
+     */
+    var STR_CODEC = { mode: "strict", typeSymbol: "dsh-self-improved#string", create: function () { return { parse: function (v) { if (typeof v !== "string") throw new TypeError("expected string"); return v; } }; } };
+    var ARGS_CODEC = { mode: "strict", typeSymbol: "dsh-self-improved#browserActionArgs", create: function () {
+      return { parse: function (v) {
+        if (typeof v !== "object" || v === null || Array.isArray(v)) throw new TypeError("expected object");
+        var out = { op: String(v.op) };
+        ["id", "content", "name", "newId"].forEach(function (k) { if (typeof v[k] === "string") out[k] = v[k]; });
+        if (typeof v.op !== "string" || v.op.length === 0) throw new TypeError("op required");
+        return out;
+      } };
+    } };
+    var TOKEN_CODEC = { mode: "strict", typeSymbol: "dsh-self-improved#authorization", create: function () {
+      return { parse: function (v) { if (typeof v !== "object" || v === null || typeof v.token !== "string") throw new TypeError("authorization.token required"); return { token: v.token }; } };
+    } };
+    var PASS_CODEC = { mode: "strict", typeSymbol: "dsh-self-improved#json", create: function () { return { parse: function (v) { return v; } }; } };
+
+    function param(name) { return { name: name, wire: name, source: "json", codec: STR_CODEC }; }
+    var BUSINESS_DESCRIPTORS = [
+      { id: "dsh-self-improved#selfImproved/snapshot", service: "selfImprovedMemoryUi", namespace: REMOTE_NS, method: "snapshot", invocation: { kind: "direct" }, parameters: [], result: PASS_CODEC, cancellation: { parameter: "signal" } },
+      { id: "dsh-self-improved#selfImproved/memoryDetail", service: "selfImprovedMemoryUi", namespace: REMOTE_NS, method: "memoryDetail", invocation: { kind: "direct" }, parameters: [param("id")], result: PASS_CODEC, cancellation: { parameter: "signal" } },
+      { id: "dsh-self-improved#selfImproved/episodeDetail", service: "selfImprovedMemoryUi", namespace: REMOTE_NS, method: "episodeDetail", invocation: { kind: "direct" }, parameters: [param("id")], result: PASS_CODEC, cancellation: { parameter: "signal" } },
+      { id: "dsh-self-improved#selfImproved/prepareMutation", service: "selfImprovedMemoryUi", namespace: REMOTE_NS, method: "prepareMutation", invocation: { kind: "direct" }, parameters: [{ name: "args", wire: "args", source: "json", codec: ARGS_CODEC }], result: PASS_CODEC },
+      { id: "dsh-self-improved#selfImproved/forget", service: "selfImprovedMemoryUi", namespace: REMOTE_NS, method: "forget", invocation: { kind: "direct" }, parameters: [param("id")], result: PASS_CODEC, cancellation: { parameter: "signal" } },
+      { id: "dsh-self-improved#selfImproved/correct", service: "selfImprovedMemoryUi", namespace: REMOTE_NS, method: "correct", invocation: { kind: "direct" }, parameters: [param("id"), param("content")], result: PASS_CODEC, cancellation: { parameter: "signal" } },
+      { id: "dsh-self-improved#selfImproved/confirmCorrect", service: "selfImprovedMemoryUi", namespace: REMOTE_NS, method: "confirmCorrect", invocation: { kind: "direct" }, parameters: [param("newId")], result: PASS_CODEC, cancellation: { parameter: "signal" } },
+      { id: "dsh-self-improved#selfImproved/deleteSkillRemoval", service: "selfImprovedMemoryUi", namespace: REMOTE_NS, method: "deleteSkillRemoval", invocation: { kind: "direct" }, parameters: [param("name")], result: PASS_CODEC, cancellation: { parameter: "signal" } },
+      { id: "dsh-self-improved#selfImproved/purgeEpisodes", service: "selfImprovedMemoryUi", namespace: REMOTE_NS, method: "purgeEpisodes", invocation: { kind: "direct" }, parameters: [param("scope")], result: PASS_CODEC, cancellation: { parameter: "signal" } },
+      { id: "dsh-self-improved#selfImproved/dryReview", service: "selfImprovedMemoryUi", namespace: REMOTE_NS, method: "dryReview", invocation: { kind: "direct" }, parameters: [], result: PASS_CODEC, cancellation: { parameter: "signal" } },
+       { id: "dsh-self-improved#selfImproved/continuityStatus", service: "selfImprovedMemoryUi", namespace: REMOTE_NS, method: "continuityStatus", invocation: { kind: "direct" }, parameters: [param("targetSessionId")], result: PASS_CODEC, cancellation: { parameter: "signal" } }
+    ];
+    /** Thr TokenType table: mutating endpoints list their authorization parameter. */
+    var AUTH_PARAM = function (name) { return { name: name, wire: name, source: "json", codec: TOKEN_CODEC }; };
+    BUSINESS_DESCRIPTORS.forEach(function (d) {
+      if (["forget", "correct", "confirmCorrect", "deleteSkillRemoval", "purgeEpisodes", "dryReview"].includes(d.method)) {
+        var hasSignal = d.cancellation !== void 0;
+        d.parameters = d.parameters.concat([AUTH_PARAM("authorization")]);
+        if (hasSignal) { /* the gateway appends the signal after business args */ }
+      }
+    });
+
+    /**
+     * Mount the plugin's business remote in this fiber (typed contributions).
+     * @returns {{ settled: Promise<boolean>, dispose: () => Promise<void> | void }}
+     *   `settled` exercises the mount, `dispose` is idempotent teardown.
+     */
+    function mountBusinessRemote(ctx) {
+      var remote = (function () { try { return ctx.get("remote"); } catch (e) { return void 0; } })();
+      if (remote === void 0 || typeof remote.$mount !== "function") {
+        return { settled: Promise.resolve(false), dispose: function () {} };
+      }
+      var unmount = null;
+      var settled = new Promise(function (resolve) {
+        Promise.resolve(remote.$mount({ package: "dsh-self-improved", descriptors: BUSINESS_DESCRIPTORS }))
+          .then(function (u) {
+            unmount = u;
+            resolve(true);
+          }, function () { resolve(false); });
+      });
+      return {
+        settled: settled,
+        dispose: function () {
+          var current = unmount;
+          unmount = null;
+          if (current) void Promise.resolve(current()).catch(function () { /* idempotent teardown */ });
+          return settled;
+        }
+      };
+    }
+
+    /** Read the mounted business namespace.
+     *
+     * Governance note (measured): a context may only read services declared in
+     * ITS inject list. The namespace lives under the service key
+     * `remote.selfImproved`, and neither a property read of the `remote`
+     * instance nor an undeclared fallback `ctx.get` is allowed — the mounted
+     * render proved both throw/gate. Callers must run inside the child context
+     * whose inject list grants `remote.` + REMOTE_NS (buildUiContext below).
+     */
+    function businessApi(ctx) {
+      try {
+        var ns = ctx.get("remote." + REMOTE_NS);
+        if (!ns) return undefined;
+        return ns;
+      } catch (e) {
+        return undefined;
+      }
+    }
+
+    // ─═ [views] ════════════════════════════════════════════════════════════
+    var KIND_LABEL = { fact: "📖 Fact", preference: "📌 Preference", event: "🧭 Event", instruction: "📋 Instruction", persona: "👤 Persona" };
+
+    /** Modal dialog focus lifecycle (a11y gate): focus lands inside an opened
+     *  dialog, Tab cycles within the dialog, and closing restores focus to the
+     *  control that opened it. Self-contained: bound to the dialog node via a
+     *  callback ref, so no mounted DOM is required. */
+    var dialogFocus = {
+      opener: null,
+      open: function () {
+        try {
+          dialogFocus.opener = (typeof document !== "undefined" && document.activeElement && document.activeElement !== document.body) ? document.activeElement : null;
+        } catch (e) { dialogFocus.opener = null; }
+      },
+      focusNode: function (node) {
+        if (!node || typeof node.focus !== "function") return;
+        if (node.setAttribute) node.setAttribute("tabindex", "-1");
+        try { node.focus(); } catch (e) { /* inert document */ }
+      },
+      restore: function () {
+        var op = dialogFocus.opener;
+        dialogFocus.opener = null;
+        if (!op || typeof op.focus !== "function") return;
+        // Deferred: closing swaps the row (React re-render) and replaces the
+        // opener node; a synchronous restore lands on a detached node while a
+        // same-frame focus survives (mounted probe: opener focus was lost).
+        requestAnimationFrame(function () {
+          if (!op.ownerDocument || !op.ownerDocument.contains(op)) return;
+          try { op.focus(); } catch (e) { /* detached during the next frame */ }
+        });
+      },
+      trap: function (e) {
+        if (e.key !== "Tab") return;
+        var dlg = e.currentTarget;
+        if (!dlg || typeof dlg.querySelectorAll !== "function") return;
+        var tabs = dlg.querySelectorAll('button, [href], input, textarea, select, [tabindex]:not([tabindex="-1"])');
+        if (!tabs || tabs.length === 0) { e.preventDefault(); return; }
+        var first = tabs[0];
+        var last = tabs[tabs.length - 1];
+        if (e.shiftKey && e.target === first) { e.preventDefault(); last.focus(); return; }
+        if (!e.shiftKey && e.target === last) { e.preventDefault(); first.focus(); }
+      }
+    };
+
+    /** Config form (Config tab). */
     function MemorySection(props) {
       var t = props.t;
-      var scope = props.scope;
-      var api = props.api;
-      var [snapshot, setSnapshot] = react.useState(function () { return scope.getSnapshot(); });
-      var ready = snapshot.status === "ready" && snapshot.value !== void 0;
-      var [draft, setDraft] = react.useState({});
-      var [busy, setBusy] = react.useState(false);
-      var [notice, setNotice] = react.useState(null);
-      var [error, setError] = react.useState(null);
-      var [showHelp, setShowHelp] = react.useState(false);
-
+      var formBinding = props.formBinding;
+      var app = props.app; // { consentConfirm: fn, businessReady ref }
+      var [tick, setTick] = react.useState(0);
       react.useEffect(function () {
-        var alive = true;
-        var sync = function () { if (alive) setSnapshot(scope.getSnapshot()); };
-        var un = typeof scope.subscribe === "function" ? scope.subscribe(sync) : null;
-        return function () { alive = false; if (un) un(); };
-      }, [scope]);
-      react.useEffect(function () {
-        if (ready) setDraft(Object.assign({}, valueToDraft(snapshot.value)));
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-      }, [ready]);
-
+        if (!formBinding) return function () {};
+        // Consumer subscription: unsubscribed on unmount; the shared form
+        // model is provider-owned and survives navigation.
+        var un = formBinding.subscribe(function () { setTick(function (x) { return x + 1; }); });
+        setTick(function (x) { return x + 1; });
+        return un;
+      }, [formBinding]);
+      if (!formBinding) return h("p", { className: "__dsi_unavailable" }, t("unavailable"));
+      var state = formBinding.state;
+      var snapshot = state.snapshot;
       if (snapshot.status === "unavailable") {
         return h("p", { className: "__dsi_unavailable" }, t("unavailable"));
       }
-      if (!ready) return h("p", { className: "__dsi_status" }, t("loading"));
-
+      if (snapshot.status !== "ready" || snapshot.value === void 0) {
+        return h("p", { className: "__dsi_status" }, t("loading"));
+      }
       var value = snapshot.value;
       var user = snapshot.user || {};
+      var secretPaths = formBinding.secretPaths();
+      var secretsByPath = {};
+      secretPaths.forEach(function (s) { secretsByPath[s.path.join(".")] = s.set; });
+      var writable = snapshot.writable !== false && snapshot.mode === "host";
+      var busy = Boolean(state.busy);
 
-      function fieldDraft(f, sourceValue) {
-        var source = sourceValue === void 0 ? value : sourceValue;
-        if (f.type === "checkbox") return draft[f.key] !== void 0 ? draft[f.key] : Boolean(getPath(source, f.path));
-        // Select fields may carry a schema-default fallback so an unset (or never-initialized
-        // empty-draft) value still renders a valid option — valueToDraft writes "" for unset
-        // selects, so treat both undefined and "" as unset here.
-        if (f.type === "select" && (draft[f.key] === void 0 || draft[f.key] === "") && f.fallback !== void 0) {
-          var cur = getPath(source, f.path);
-          return cur === void 0 || cur === null || cur === "" ? String(f.fallback) : String(cur);
+      function draftOf(f) {
+        var d = state.draft[f.key];
+        if (d !== void 0) return d;
+        var cur = getPath(value, f.path);
+        if (f.secret) return "";
+        if (f.type === "checkbox") return Boolean(cur);
+        if (f.type === "string-list") return JSON.stringify(Array.isArray(cur) ? cur : []);
+        if (f.type === "select") {
+          if (cur === void 0 || cur === null || cur === "") {
+            return f.fallback !== void 0 ? String(f.fallback) : "";
+          }
+          return String(cur);
         }
-        return draft[f.key] !== void 0 ? draft[f.key] : String(getPath(source, f.path) ?? "");
+        return cur === void 0 || cur === null ? "" : String(cur);
       }
       function setField(f, v) {
-        setDraft(function (prev) { var next = Object.assign({}, prev); next[f.key] = v; return next; });
-        setNotice(null);
-        setError(null);
-      }
-
-      // Save-failure handling: on a revision conflict (the namespace changed after it was read),
-      // refresh the latest config, keep the user's draft, and ask to save again; other errors are shown as-is
-      function handleMutateFailure(response) {
-        setBusy(false);
-        var detail = response && response.result && response.result.error || {};
-        var msg = String(detail.message || detail.code || "unknown");
-        if (/changed since it was read|revision conflict/i.test(msg)) {
-          // The shared settings mirror refreshes snapshots automatically.
-          setError(t("conflict"));
-          return;
-        }
-        setError(t("error") + ": " + msg);
+        formBinding.setField(f, v);
+        setTick(function (x) { return x + 1; });
       }
 
       function onSave() {
-        var saveSnapshot = scope.getSnapshot();
-        var currentValue = saveSnapshot.status === "ready" && saveSnapshot.value !== void 0 ? saveSnapshot.value : value;
-        var currentUser = saveSnapshot.user || user;
-        var currentEpisodeEnabled = Boolean(getPath(currentValue, ["episodeLearning", "enabled"]));
-        var draftEpisodeEnabled = Boolean(
-          draft["episodeLearning.enabled"] !== void 0
-            ? draft["episodeLearning.enabled"]
-            : currentEpisodeEnabled
-        );
-        // Consent is checked at the authoritative save boundary, not when a
-        // checkbox changes: a stale draft cannot silently re-enable capture.
-        if (draftEpisodeEnabled && !currentEpisodeEnabled && !window.confirm(t("episodeEnableWarning"))) {
-          setDraft(function (prev) {
-            var next = Object.assign({}, prev);
-            next["episodeLearning.enabled"] = false;
-            return next;
-          });
-          setNotice(null);
-          setError(null);
-          return;
+        // Consent stays a save-boundary check (a stale checkbox cannot arm
+        // capture silently: flipping episodeLearning.enabled OFF→ON asks).
+        var epKey = "episodeLearning.enabled";
+        if (state.draft[epKey] === true) {
+          var current = Boolean(getPath(value, ["episodeLearning", "enabled"]));
+          if (!current && app && app.confirmConsent && !app.confirmConsent()) {
+            setField(FIELDS.find(function (f) { return f.key === epKey; }), false);
+            return;
+          }
         }
-
-        setBusy(true); setNotice(null); setError(null);
-        var ops = [];
-        for (var i = 0; i < FIELDS.length; i += 1) {
-          var f = FIELDS[i];
-          var d = fieldDraft(f, currentValue);
-          var current = getPath(currentValue, f.path);
-          if (f.type === "password") {
-            if (!d) continue; // blank keeps the current key
-            if (d === String(current ?? "")) continue;
-            ops.push({ op: "set", path: f.path, value: d });
-            continue;
-          }
-          if (f.type === "checkbox") {
-            if (Boolean(d) === Boolean(current)) continue;
-            // Note: disabling must use set false — unset would let the parsed value fall back to the schema default (usually true), so the switch would never turn off
-            ops.push({ op: "set", path: f.path, value: Boolean(d) });
-            continue;
-          }
-          if (f.type === "select") {
-            if (String(d) === String(current ?? "")) continue;
-            // An unset field rendering its schema fallback equals the default: no write needed
-            if (String(current ?? "") === "" && f.fallback !== void 0 && String(d) === String(f.fallback)) continue;
-            ops.push(String(d) ? { op: "set", path: f.path, value: d } : { op: "unset", path: f.path });
-            continue;
-          }
-          if (String(d) === String(current ?? "")) continue;
-          if (String(d).trim() === "" && getPath(currentUser, f.path) === void 0) continue;
-          ops.push(String(d).trim() === "" ? { op: "unset", path: f.path } : { op: "set", path: f.path, value: f.type === "number" ? Number(d) : d });
-        }
-        if (ops.length === 0) { setBusy(false); setNotice(t("saved")); return; }
-        api.settings.mutate({
-          ns: "dsh-self-improved",
-          ops: ops,
-          ...saveSnapshot.revision === void 0 ? {} : { expectedRevision: saveSnapshot.revision }
-        }).then(function (response) {
-          if (!response.result.ok) { handleMutateFailure(response); return; }
-          setBusy(false);
-          setNotice(t("saved"));
-          // The shared settings mirror folds the mutation response into the scope snapshot.
-        }).catch(function (e) {
-          setBusy(false); setError(t("error") + ": " + String(e && e.message || e));
-        });
+        state.busy = true;
+        setTick(function (x) { return x + 1; });
+        formBinding.saveDirty().then(function (accepted) {
+          state.busy = false;
+          if (accepted) state.lastNotice = t("saved");
+          setTick(function (x) { return x + 1; });
+        }).catch(function () { state.busy = false; setTick(function (x) { return x + 1; }); });
       }
 
-      function onReset() {
-        setBusy(true); setNotice(null); setError(null);
-        api.settings.mutate({
-          ns: "dsh-self-improved",
-          ops: FIELDS.map(function (f) { return { op: "unset", path: f.path }; }),
-          ...snapshot.revision === void 0 ? {} : { expectedRevision: snapshot.revision }
-        }).then(function (response) {
-          if (!response.result.ok) { handleMutateFailure(response); return; }
-          setBusy(false);
-          setNotice(t("saved"));
-          // Refresh the draft from the authoritative (default-resolved) settings snapshot so
-          // controls immediately show schema defaults instead of stale pre-reset values.
-          var fresh = scope.getSnapshot();
-          if (fresh.status === "ready" && fresh.value !== void 0) setDraft(Object.assign({}, valueToDraft(fresh.value)));
-        }).catch(function (e) {
-          setBusy(false); setError(t("error") + ": " + String(e && e.message || e));
-        });
+      function onResetGroup(group) {
+        var ok = window.confirm(t("resetConfirm"));
+        if (!ok) return;
+        state.busy = true;
+        setTick(function (x) { return x + 1; });
+        formBinding.resetScoped(group).then(function () {
+          state.busy = false;
+          setTick(function (x) { return x + 1; });
+        }).catch(function () { state.busy = false; setTick(function (x) { return x + 1; }); });
       }
 
-      // Collapse groups in sync with module switches: a disabled module hides its config group; all groups collapse when the master switch is off
+      // Collapse groups in sync with module switches (unchanged UX).
       var GROUP_SWITCH = {
         groupExtract: "modules.extract",
         groupRecall: "modules.recall",
@@ -738,262 +1137,248 @@ window.__ModuleLoader__.load({
         groupEpisodes: "enabled",
         groupStorage: "enabled"
       };
-      function switchValue(key) {
-        return Boolean(draft[key] !== void 0 ? draft[key] : getPath(value, key.split(".")));
-      }
-      var masterOn = switchValue("enabled");
+      var draftKey = function (key) {
+        var f = FIELDS.find(function (c) { return c.key === key; });
+        return f ? draftOf(f) : false;
+      };
+      var masterOn = Boolean(draftKey("enabled"));
       function groupVisible(g) {
         if (g === "groupMaster" || g === "groupModules") return true;
         var sw = GROUP_SWITCH[g];
         if (!sw) return true;
         if (sw === "enabled") return masterOn;
-        return masterOn && switchValue(sw);
+        return masterOn && Boolean(draftKey(sw));
       }
 
       var nodes = [];
       var lastGroup = null;
-      FIELDS.forEach(function (f) {
-        if (!groupVisible(f.group)) return; // hidden by collapse
-        if (f.group !== lastGroup) {
-          lastGroup = f.group;
-          nodes.push(h("div", { key: "g" + f.group, className: "__dsi_group" }, t(f.group)));
-        }
-        var overridden = getPath(user, f.path) !== void 0;
-        if (f.type === "checkbox") {
-          // Slide switch
-          nodes.push(h("label", { key: f.path.join("."), className: "__dsi_field" },
-            h("span", { className: "__dsi_row" },
-              h("span", { className: "__dsi_switch" },
-                h("input", { type: "checkbox", checked: Boolean(fieldDraft(f)), onChange: function (e) { setField(f, e.target.checked); } }),
-                h("span", { className: "__dsi_switchTrack" }),
-                h("span", { className: "__dsi_switchThumb" })
-              ),
-              h("span", { className: "__dsi_label" }, t(f.label)),
-              overridden ? h("span", { className: "__dsi_override" }, t("overridden")) : null
-            )
-          ));
-          return;
-        }
-        var input;
-        if (f.type === "select") {
-          input = h("select", {
-            className: "__dsi_input",
-            value: fieldDraft(f),
-            onChange: function (e) { setField(f, e.target.value); }
-          }, f.options.map(function (opt) {
-            return h("option", { key: opt, value: opt }, opt);
-          }));
-        } else {
-          input = h("input", {
-            className: "__dsi_input",
-            type: f.type === "password" ? "password" : f.type === "number" ? "number" : "text",
-            value: fieldDraft(f),
-            placeholder: f.type === "password" ? (overridden ? "••••••••" : t("secretHint")) : "",
-            onChange: function (e) { setField(f, e.target.value); }
-          });
-        }
-        nodes.push(h("label", { key: f.path.join("."), className: "__dsi_field" },
-          h("span", { className: "__dsi_label" },
-            t(f.label),
-            overridden ? h("span", { className: "__dsi_override" }, t("overridden")) : null
-          ),
-          input,
-          f.type === "password" ? h("span", { className: "__dsi_hint" }, t("secretHint")) : null,
-          f.hint ? h("span", { className: "__dsi_hint" }, t(f.hint)) : null
+      var groups = [];
+      FIELDS.forEach(function (f) { if (groupVisible(f.group) && groups.indexOf(f.group) < 0) groups.push(f.group); });
+      var GROUP_ORDER = ["groupMaster", "groupModules", "groupStorage", "groupExtract", "groupRecall", "groupConsolidate", "groupEvolve", "groupHousekeeping", "groupReview", "groupEpisodes"];
+      GROUP_ORDER.forEach(function (group) {
+        if (groups.indexOf(group) < 0) return;
+        nodes.push(h("div", {
+          key: "g" + group, className: "__dsi_group", style: { display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8 }
+        },
+          h("span", null, t(group)),
+          group !== "groupMaster" && group !== "groupModules"
+            ? h("button", {
+                type: "button", className: "__dsi_btn", style: { height: 24, padding: "0 8px", fontSize: 12 },
+                onClick: function () { onResetGroup(group); }, disabled: busy || !writable
+              }, t("resetScoped"))
+            : null
         ));
+        FIELDS.forEach(function (f) {
+          if (f.group !== group) return;
+          // Inventory-kept but policy-hidden fields (migration-only bypass,
+          // retired unsafe defaults) render nowhere in the ordinary form.
+          if (f.uiClass === "migration-only" || f.uiClass === "retired") return;
+          var overridden = getPath(user, f.path) !== void 0;
+          var dirty = formBinding.isDirty(f.key);
+          var badges = [
+            dirty ? h("span", { key: "d", className: "__dsi_dirty" }, t("dirtyBadge")) : null,
+            overridden && !dirty ? h("span", { key: "o", className: "__dsi_override" }, t("overridden")) : null,
+            f.initOnly ? h("span", { key: "r", className: "__dsi_restart" }, t("restartNote")) : null
+          ];
+          if (f.type === "checkbox") {
+            nodes.push(h("div", { key: f.key, className: "__dsi_field" },
+              h("label", { className: "__dsi_row" },
+                h("input", {
+                  type: "checkbox", className: "__dsi_check", ariaLabel: t(f.label),
+                  checked: Boolean(draftOf(f)), disabled: busy || !writable,
+                  onChange: function (e) { setField(f, e.target.checked); }
+                }),
+                h("span", { className: "__dsi_label" }, t(f.label)),
+                badges
+              ),
+              f.hint ? h("span", { className: "__dsi_hint" }, t(f.hint)) : null
+            ));
+            return;
+          }
+          var input;
+          if (f.type === "select") {
+            input = h("select", {
+              className: "__dsi_input", value: draftOf(f), disabled: busy || !writable,
+              onChange: function (e) { setField(f, e.target.value); }
+            }, f.options.map(function (opt) { return h("option", { key: opt, value: opt }, opt); }));
+          } else {
+            var isSecret = f.secret;
+            var secretSet = secretsByPath[f.key];
+            input = h("input", {
+              className: "__dsi_input",
+              type: isSecret ? "password" : f.type === "number" ? "number" : "text",
+              value: draftOf(f),
+              disabled: busy || !writable || f.initOnly,
+              id: "dsi-" + f.key,
+              placeholder: isSecret ? (secretSet ? "••••••••" : t("secretHint")) : "",
+              onChange: function (e) { setField(f, e.target.value); }
+            });
+          }
+          nodes.push(h("div", { key: f.key, className: "__dsi_field" },
+            h("label", { className: "__dsi_label", htmlFor: "dsi-" + f.key },
+              t(f.label),
+              badges
+            ),
+            input,
+            isSecret ? h("span", { className: "__dsi_hint" }, t("secretHint") + " " + (secretSet ? "(" + t("secretSet") + ")" : "(" + t("secretUnset") + ")")) : null,
+            f.hint ? h("span", { className: "__dsi_hint" }, t(f.hint)) : null
+          ));
+        });
       });
 
+      var dirtyCount = formBinding.dirtyCount();
+      var conflict = state.conflict;
       return h("div", { className: "__dsi_root" },
         h("div", { className: "__dsi_header" },
           h("p", { className: "__dsi_intro" }, t("intro")),
           h("button", {
-            type: "button",
-            className: "__dsi_helpBtn",
-            title: t("helpTitle"),
-            onClick: function () { setShowHelp(!showHelp); }
+            type: "button", className: "__dsi_helpBtn", title: t("helpTitle"), "aria-label": t("helpTitle"),
+            onClick: function () { state.helpOpen = !state.helpOpen; setTick(function (x) { return x + 1; }); }
           }, "?")
         ),
-        showHelp ? h("div", { className: "__dsi_help" },
+        state.helpOpen ? h("div", { className: "__dsi_help" },
           h("h4", null, t("helpTitle")),
           h("p", null, t("help"))
         ) : null,
+        conflict !== null ? h("div", { className: "__dsi_conflict", role: "alert", "aria-live": "assertive" },
+          h("span", { className: "__dsi_error" }, t("conflict")),
+          h("div", { className: "__dsi_row" },
+            h("button", { type: "button", className: "__dsi_btn", onClick: function () { formBinding.rebaseDirty(); setTick(function (x) { return x + 1; }); } }, t("conflictKeep")),
+            h("button", {
+              type: "button", className: "__dsi_btn __dsi_btnDanger",
+              onClick: function () {
+                if (!window.confirm(t("conflictDiscardConfirm"))) return;
+                formBinding.discardDirty();
+                setTick(function (x) { return x + 1; });
+              }
+            }, t("conflictDiscard"))
+          )
+        ) : null,
+        dirtyCount > 0 ? h("p", { className: "__dsi_status", "aria-live": "polite", role: "status" },
+          t("dirtySummary").replace("{n}", String(dirtyCount))
+        ) : null,
         nodes,
         h("div", { className: "__dsi_actions" },
-          h("button", { type: "button", className: "__dsi_btn __dsi_btnPrimary", onClick: onSave, disabled: busy || !snapshot.writable }, t("save")),
-          h("button", { type: "button", className: "__dsi_btn", onClick: onReset, disabled: busy || !snapshot.writable }, t("reset")),
-          notice ? h("span", { className: "__dsi_ok" }, notice) : null,
+          h("button", { type: "button", className: "__dsi_btn __dsi_btnPrimary", onClick: onSave, disabled: busy || !writable || dirtyCount === 0 }, t("save")),
+          state.lastNotice ? h("span", { className: "__dsi_ok", role: "status" }, state.lastNotice) : null,
           busy ? h("span", { className: "__dsi_status" }, t("saving")) : null,
-          error ? h("span", { className: "__dsi_error" }, error) : null
+          state.lastError ? h("span", { className: "__dsi_error", role: "alert" }, t("error") + ": " + state.lastError) : null
         )
       );
     }
 
-    function valueToDraft(value) {
-      var out = {};
-      for (var i = 0; i < FIELDS.length; i += 1) {
-        var f = FIELDS[i];
-        out[f.key] = f.type === "checkbox" ? Boolean(getPath(value, f.path)) : String(getPath(value, f.path) ?? "");
-      }
-      return out;
-    }
-
-    // ── Memory browser (second settings tab; data channel via the dsh-self-improved-browser namespace, no session needed) ─────
-    var KIND_LABEL = { fact: "📖 Fact", preference: "📌 Preference", event: "🧭 Event", instruction: "📋 Instruction", persona: "👤 Persona" };
-
+    /** Memory browser (Memory tab) — typed business-remote consumer. */
     function BrowserSection(props) {
       var t = props.t;
+      var ctx = props.ctx;
       var api = props.api;
-      var scope = props.browserScope;
-      var [snapshot, setSnapshot] = react.useState(function () { return scope.getSnapshot(); });
-      var [busy, setBusy] = react.useState(false);
-      var [error, setError] = react.useState(null);
-      var [query, setQuery] = react.useState("");
-      var [notice, setNotice] = react.useState(null);
+      var [state, setState] = react.useState({ data: null, busy: false, error: null, notice: null, query: "", pending: null, pendingKind: null, episodeStatus: null });
+      var [open, setOpen] = react.useState({ persona: false, memories: true, scenes: false, skills: false, episodes: false });
       var [closedDetailId, setClosedDetailId] = react.useState(null);
-      // Phase 6: episode evidence inspector (separate modal data channel field)
-      var [closedEpisodeDetailId, setClosedEpisodeDetailId] = react.useState(null);
-      // Inline correction editor (replaces window.prompt, which the host page may suppress)
+      var closedEpisodeDetailRef = react.useRef(null);
+      var [episodeDetail, setEpisodeDetail] = react.useState(null);
       var [editingId, setEditingId] = react.useState(null);
       var [editDraft, setEditDraft] = react.useState("");
-      var [open, setOpen] = react.useState({ persona: false, memories: true, scenes: false, skills: false, episodes: false });
+      var busy = state.busy;
 
-      react.useEffect(function () {
-        var alive = true;
-        var sync = function () { if (alive) setSnapshot(scope.getSnapshot()); };
-        var un = typeof scope.subscribe === "function" ? scope.subscribe(sync) : null;
-        // Trigger one server-side snapshot rebuild on open (noop action) so the view starts with fresh data
-        try {
-          api.settings.mutate({
-            ns: "dsh-self-improved-browser",
-            ops: [{ op: "set", path: ["action"], value: JSON.stringify({ op: "noop" }) }]
+      var refresh = react.useCallback(function () {
+        if (!api) {
+          setState(function (s) { return { ...s, error: t("browserRemoteUnavailable"), data: null }; });
+          return;
+        }
+        setState(function (s) { return { ...s, busy: true, error: null }; });
+        Promise.resolve(api.snapshot())
+          .then(function (r) {
+            if (!r.ok) { setState(function (s) { return { ...s, busy: false, error: remoteMessage(r) }; }); return; }
+            setState(function (s) {
+              var data = r.value;
+              return { ...s, busy: false, data: data, episodeStatus: s.episodeStatus };
+            });
+          })
+          .catch(function (e) { setState(function (s) { return { ...s, busy: false, error: String(e && e.message || e) }; }); });
+      }, [api]);
+      react.useEffect(function () { refresh(); }, [refresh]);
+
+      /** Authorized two-step mutation: stage then echo the one-shot token. */
+      function mutate(args, after) {
+        if (!api) { setState(function (s) { return { ...s, error: t("browserRemoteUnavailable") }; }); return; }
+        if (state.pending) return; // one pending handshake at a time
+        setState(function (s) { return { ...s, busy: true, error: null, notice: null, pending: args, pendingKind: args.op }; });
+        Promise.resolve(api.prepareMutation(args))
+          .then(function (r) {
+            if (!r.ok) { setState(function (s) { return { ...s, busy: false, pending: null, pendingKind: null, error: remoteMessage(r) }; }); return; }
+            var executor = EXECUTORS[args.op];
+            if (!executor) { setState(function (s) { return { ...s, busy: false, pending: null, pendingKind: null, error: "unsupported op" }; }); return; }
+            return Promise.resolve(executor(api, args, r.value.token))
+              .then(function (res) {
+                setState(function (s) { return { ...s, busy: false, pending: null, pendingKind: null }; });
+                if (res && !res.ok) { setState(function (s) { return { ...s, error: remoteMessage(res) }; }); return; }
+                if (after) after(res && res.ok ? res.value : undefined);
+                refresh();
+              });
+          })
+          .catch(function (e) {
+            setState(function (s) { return { ...s, busy: false, pending: null, pendingKind: null, error: String(e && e.message || e) }; });
           });
-        } catch (e) { /* noop */ }
-        return function () { alive = false; if (un) un(); };
-      }, [scope]);
+      }
+      var EXECUTORS = {
+        forget: function (api, args, token) { return api.forget(args.id, { token }); },
+        correct: function (api, args, token) { return api.correct(args.id, args.content, { token }); },
+        "confirm-correct": function (api, args, token) { return api.confirmCorrect(args.newId, { token }); },
+        deleteSkill: function (api, args, token) { return api.deleteSkillRemoval(args.name, { token }); },
+        purgeEpisodes: function (api, args, token) { return api.purgeEpisodes(args.id, { token }); },
+        dryReview: function (api, args, token) {
+          setState(function (s) { return { ...s, notice: t("browserEpisodeDryReviewRun") }; });
+          return api.dryReview({ token });
+        }
+      };
 
-      var data = null;
-      if (snapshot.status === "ready" && snapshot.value && typeof snapshot.value.snapshot === "string") {
-        try { data = JSON.parse(snapshot.value.snapshot); } catch (e) { data = null; }
-      }
-      // Detail modal data (the server returns the full memory on demand)
-      var detailObj = null;
-      if (snapshot.status === "ready" && snapshot.value && typeof snapshot.value.detail === "string" && snapshot.value.detail) {
-        try { detailObj = JSON.parse(snapshot.value.detail); } catch (e) { detailObj = null; }
-      }
-      var showDetail = detailObj && detailObj.id !== closedDetailId;
-      // Phase 6 episode detail modal data (server returns the full redacted episode on demand)
-      var episodeDetailObj = null;
-      if (snapshot.status === "ready" && snapshot.value && typeof snapshot.value.episodeDetail === "string" && snapshot.value.episodeDetail) {
-        try { episodeDetailObj = JSON.parse(snapshot.value.episodeDetail); } catch (e) { episodeDetailObj = null; }
-      }
-      var showEpisodeDetail = episodeDetailObj && episodeDetailObj.id !== closedEpisodeDetailId;
-      // Last review verdict line (published by the dry-review/full-review runner)
-      var episodeStatusObj = null;
-      if (snapshot.status === "ready" && snapshot.value && typeof snapshot.value.episodeStatus === "string" && snapshot.value.episodeStatus) {
-        try { episodeStatusObj = JSON.parse(snapshot.value.episodeStatus); } catch (e) { episodeStatusObj = null; }
-      }
-
-      if (snapshot.status === "unavailable") {
-        return h("p", { className: "__dsi_unavailable" }, t("unavailable"));
-      }
-      if (!data) {
+      var data = state.data;
+      if (data === null) {
         return h("div", { className: "__dsi_root" },
-          h("p", { className: "__dsi_status" }, t("browserHint")),
-          error ? h("p", { className: "__dsi_error" }, error) : null);
+          h("p", { className: "__dsi_status" }, busy ? t("loading") : (state.error || t("browserRemoteUnavailable"))),
+          api ? h("button", { type: "button", className: "__dsi_btn", onClick: refresh, disabled: busy }, t("browserRefresh")) : null,
+          state.error ? h("p", { className: "__dsi_error", role: "alert" }, state.error) : null
+        );
       }
 
       var memories = (data.memories || []).filter(function (m) { return m.status === "active"; });
-      var q = query.trim().toLowerCase();
+      var q = state.query.trim().toLowerCase();
       var filtered = q ? memories.filter(function (m) { return m.content.toLowerCase().indexOf(q) >= 0 || m.kind.indexOf(q) >= 0; }) : memories;
 
-      // Mutating ops run a two-step one-shot challenge handshake: the noble
-      // (prepare) submit voices intended op+arguments gated by the snapshot
-      // token; the host mints a short-TTL challenge bound to those exact args
-      // and consumes it atomically at the confirm submit, so captured payloads
-      // cannot be replayed for arbitrary actions.
-      var MUTATING_OPS = { forget: 1, correct: 1, "confirm-correct": 1, deleteSkill: 1, purgeEpisodes: 1, dryReview: 1 };
-      function readServedToken() {
-        try {
-          var sv = scope.getSnapshot();
-          var svVal = sv && sv.value;
-          if (svVal && typeof svVal.snapshot === "string") {
-            var sd = JSON.parse(svVal.snapshot);
-            if (sd && typeof sd.actionToken === "string") return sd.actionToken;
-          }
-        } catch (e) { /* host rejects unsigned actions */ }
-        return "";
-      }
-      function sendAction(action) {
-        var payload = readServedToken()
-          ? Object.assign({}, action, { token: readServedToken() })
-          : action;
-        var first = api.settings.mutate({
-          ns: "dsh-self-improved-browser",
-          ops: [{ op: "set", path: ["action"], value: JSON.stringify(payload) }]
-        });
-        if (!MUTATING_OPS[action.op]) return first;
-        // Poll the served snapshot for the pending challenge, then echo it back.
-        return new Promise(function (resolve, reject) {
-          var tries = 0;
-          var poll = setInterval(function () {
-            tries += 1;
-            var snap = null;
-            try {
-              var sv = scope.getSnapshot();
-              var svVal = sv && sv.value;
-              var sd = svVal && typeof svVal.snapshot === "string" ? JSON.parse(svVal.snapshot) : null;
-              snap = sd && sd.confirm;
-            } catch (e) { snap = null; }
-            if (snap && snap.token && snap.args && snap.args.op === action.op) {
-              clearInterval(poll);
-              resolve(api.settings.mutate({
-                ns: "dsh-self-improved-browser",
-                ops: [{ op: "set", path: ["action"], value: JSON.stringify(Object.assign({}, action, { confirmToken: snap.token })) }]
-              }));
-              return;
-            }
-            if (tries > 50) {
-              clearInterval(poll);
-              reject(new Error("browser action confirm timed out"));
-            }
-          }, 120);
-        });
-      }
       function viewDetail(m) {
-        setBusy(true); setNotice(null); setError(null);
+        dialogFocus.open();
+        setState(function (s) { return { ...s, busy: true }; });
         setClosedDetailId(null);
-        sendAction({ op: "detail", id: m.id }).then(function () { setBusy(false); }).catch(function (e) { setBusy(false); setError(String(e && e.message || e)); });
+        Promise.resolve(api.memoryDetail(m.id)).then(function (r) {
+          setState(function (s) { return { ...s, busy: false }; });
+          if (!r.ok) { setState(function (s) { return { ...s, error: remoteMessage(r) }; }); return; }
+          setState(function (s) {
+            return { ...s, data: { ...s.data, __detail: r.value }, busy: false };
+          });
+        }).catch(function () { setState(function (s) { return { ...s, busy: false, error: "detail failed" }; }); });
       }
-      function refresh() {
-        setBusy(true); setNotice(null); setError(null);
-        sendAction({ op: "noop" }).catch(function (e) {
-          setError(String(e && e.message || e));
-        }).finally(function () { setBusy(false); });
+      var detailObj = data.__detail;
+      var showDetail = detailObj && detailObj.id !== closedDetailId;
+      function closeMemoryDetail() {
+        setClosedDetailId(detailObj ? detailObj.id : null);
+        dialogFocus.restore();
       }
-      function forget(m) {
-        if (!window.confirm(t("browserForgetConfirm") + "\n" + m.content.slice(0, 60))) return;
-        setBusy(true); setNotice(null); setError(null);
-        sendAction({ op: "forget", id: m.id }).then(function () { setNotice(t("browserForgotten")); }).catch(function (e) { setError(String(e && e.message || e)); }).finally(function () { setBusy(false); });
+
+      function forget(memory) {
+        if (!window.confirm(t("browserForgetConfirm") + "\n" + memory.content.slice(0, 60))) return;
+        mutate({ op: "forget", id: memory.id }, function () { setState(function (s) { return { ...s, notice: t("browserForgotten") }; }); });
       }
-      function correct(m) {
-        // Open the inline editor for this row (no window.prompt: it can be suppressed and return null silently)
-        setNotice(null); setError(null);
-        setEditingId(m.id);
-        setEditDraft(m.content);
+      function correct(memory) {
+        setEditingId(memory.id);
+        setEditDraft(memory.content);
       }
-      function cancelCorrect() {
-        setEditingId(null);
-        setEditDraft("");
-      }
-      function saveCorrect(m) {
+      function saveCorrect(memory) {
         var next = editDraft.trim();
-        if (!next || next === m.content) { cancelCorrect(); return; }
-        setBusy(true); setNotice(null); setError(null);
-        sendAction({ op: "correct", id: m.id, content: next }).then(function () {
-          setNotice(t("browserCorrected"));
-          cancelCorrect();
-        }).catch(function (e) { setError(String(e && e.message || e)); }).finally(function () { setBusy(false); });
+        if (!next || next === memory.content) { cancelCorrect(); return; }
+        mutate({ op: "correct", id: memory.id, content: next }, function () { setState(function (s) { return { ...s, notice: t("browserCorrected") }; }); cancelCorrect(); });
       }
+      function cancelCorrect() { setEditingId(null); setEditDraft(""); }
 
       var listNodes = filtered.slice(0, 200).map(function (m) {
         if (editingId === m.id) {
@@ -1001,11 +1386,8 @@ window.__ModuleLoader__.load({
             h("div", { className: "__dsi_browserMain" },
               h("span", { className: "__dsi_browserKind" }, (KIND_LABEL[m.kind] || m.kind) + " · " + t("browserCorrectPrompt")),
               h("textarea", {
-                className: "__dsi_input",
-                style: { height: "auto", minHeight: 60, resize: "vertical" },
-                autoFocus: true,
-                value: editDraft,
-                disabled: busy,
+                className: "__dsi_input", style: { height: "auto", minHeight: 60, resize: "vertical" },
+                autoFocus: true, value: editDraft, disabled: busy,
                 onChange: function (e) { setEditDraft(e.target.value); },
                 onKeyDown: function (e) {
                   if (e.key === "Escape") { e.preventDefault(); cancelCorrect(); }
@@ -1015,7 +1397,7 @@ window.__ModuleLoader__.load({
             ),
             h("span", { className: "__dsi_browserOps" },
               h("button", { type: "button", className: "__dsi_btn", onClick: function () { saveCorrect(m); }, disabled: busy || !editDraft.trim() }, t("save")),
-              h("button", { type: "button", className: "__dsi_btn", onClick: cancelCorrect, disabled: busy }, t("browserCorrectCancel"))
+              h("button", { type: "button", className: "__dsi_btn", onClick: cancelCorrect, disabled: busy }, t("browserCancel"))
             )
           );
         }
@@ -1028,22 +1410,21 @@ window.__ModuleLoader__.load({
           h("span", { className: "__dsi_browserOps" },
             h("button", { type: "button", className: "__dsi_btn", onClick: function () { viewDetail(m); }, disabled: busy }, t("browserDetail")),
             h("button", { type: "button", className: "__dsi_btn", onClick: function () { correct(m); }, disabled: busy }, t("browserCorrect")),
-            h("button", { type: "button", className: "__dsi_btn", onClick: function () { forget(m); }, disabled: busy }, t("browserForget"))
+            h("button", { type: "button", className: "__dsi_btn __dsi_btnDanger", onClick: function () { forget(m); }, disabled: busy }, t("browserForget"))
           )
         );
       });
 
-      var scenesNodes = (data.scenes || []).slice(0, 20).map(function (s) {
+      var scenesArr = data.scenes || [];
+      var scenesNodes = scenesArr.slice(0, 20).map(function (s) {
         return h("div", { key: s.id, className: "__dsi_browserRow" },
           h("div", { className: "__dsi_browserMain" },
             h("span", { className: "__dsi_browserKind" }, "🗂️" + s.title)));
       });
-
       var skills = data.skills || [];
       function deleteSkill(sk) {
         if (!window.confirm(t("browserSkillDeleteConfirm") + "\n" + sk.name)) return;
-        setBusy(true); setNotice(null); setError(null);
-        sendAction({ op: "deleteSkill", name: sk.name }).then(function () { setNotice(t("browserSkillDeleted")); }).catch(function (e) { setError(String(e && e.message || e)); }).finally(function () { setBusy(false); });
+        mutate({ op: "deleteSkill", name: sk.name }, function () { setState(function (s) { return { ...s, notice: t("browserSkillDeleted") }; }); });
       }
       var skillsNodes = skills.map(function (sk) {
         return h("div", { key: sk.name, className: "__dsi_browserRow" },
@@ -1054,18 +1435,20 @@ window.__ModuleLoader__.load({
             sk.excerpt ? h("span", { className: "__dsi_browserMeta" }, sk.excerpt) : null
           ),
           sk.synthesized ? h("span", { className: "__dsi_browserOps" },
-            h("button", { type: "button", className: "__dsi_btn", onClick: function () { deleteSkill(sk); }, disabled: busy }, t("browserSkillDelete"))
+            h("button", { type: "button", className: "__dsi_btn __dsi_btnDanger", onClick: function () { deleteSkill(sk); }, disabled: busy }, t("browserSkillDelete"))
           ) : null);
       });
 
-      // Collapsible panels (persona/memories/scenes/skills/episodes); hook state declared above early returns
       function toggle(k) {
-        setOpen(function (p) { var n = Object.assign({}, p); n[k] = !n[k]; return n; });
+        setOpen(function (p) { var n = { ...p }; n[k] = !n[k]; return n; });
       }
       function collapse(key, title, count, body) {
         var isOpen = open[key];
         return h("div", { className: "__dsi_collapse" + (isOpen ? " __dsi_collapseOpen" : "") },
-          h("div", { className: "__dsi_collapseHeader", onClick: function () { toggle(key); } },
+          h("button", {
+            type: "button", className: "__dsi_collapseHeader", "aria-expanded": isOpen,
+            onClick: function () { toggle(key); }
+          },
             h("span", { className: "__dsi_collapseChevron" }, "▶"),
             h("span", { className: "__dsi_collapseTitle" }, title),
             h("span", { className: "__dsi_collapseCount" }, count)
@@ -1073,47 +1456,43 @@ window.__ModuleLoader__.load({
           isOpen ? h("div", { className: "__dsi_collapseBody" }, body) : null
         );
       }
-
       var persona = data.persona;
-      var scenesArr = data.scenes || [];
       var personaBody = persona
         ? h("div", { className: "__dsi_persona" }, persona.content)
         : h("p", { className: "__dsi_status" }, t("browserPersonaEmpty"));
-
       var memoryBody = h("div", { className: "__dsi_collapse" },
         h("div", { className: "__dsi_row" },
-          h("input", { className: "__dsi_input", style: { maxWidth: 260 }, placeholder: t("browserSearch"), value: query, onChange: function (e) { setQuery(e.target.value); } }),
+          h("input", { className: "__dsi_input", style: { maxWidth: 260 }, placeholder: t("browserSearch"), value: state.query, onChange: function (e) { setState(function (s) { return { ...s, query: e.target.value }; }); } }),
           h("button", { type: "button", className: "__dsi_btn", onClick: refresh, disabled: busy }, t("browserRefresh"))
         ),
         listNodes.length ? listNodes : h("p", { className: "__dsi_status" }, t("browserEmpty"))
       );
-
       var scenesBody = scenesArr.length
         ? h("div", { className: "__dsi_collapse" }, scenesNodes)
         : h("p", { className: "__dsi_status" }, t("browserScenesEmpty"));
-
       var skillsBody = skills.length
-        ? (skillsNodes.length ? h("div", { className: "__dsi_collapse" }, skillsNodes) : h("p", { className: "__dsi_status" }, t("browserSkillsEmpty")))
+        ? h("div", { className: "__dsi_collapse" }, skillsNodes)
         : h("p", { className: "__dsi_status" }, t("browserSkillsEmpty"));
 
-      // ── Episodes (Phase 6): counts + recent redacted rows + inspect/purge/dry-review ──
       var epData = data.episodes || { counts: null, recent: null };
       var epCounts = epData.counts || {};
       var epTotal = ["pending", "succeeded", "failed", "ambiguous", "reviewed", "rejected"].reduce(function (acc, k) { return acc + (Number(epCounts[k]) || 0); }, 0);
       var epEnabled = Array.isArray(epData.recent);
       function viewEpisodeDetail(e) {
-        setBusy(true); setNotice(null); setError(null);
-        setClosedEpisodeDetailId(null);
-        sendAction({ op: "episodeDetail", id: e.id }).then(function () { setBusy(false); }).catch(function (e2) { setBusy(false); setError(String(e2 && e2.message || e2)); });
+        dialogFocus.open();
+        setEpisodeDetail(null);
+        setState(function (s) { return { ...s, busy: true }; });
+        Promise.resolve(api.episodeDetail(e.id)).then(function (r) {
+          setState(function (s) { return { ...s, busy: false }; });
+          if (!r.ok) { setState(function (s) { return { ...s, error: remoteMessage(r) }; }); return; }
+          setEpisodeDetail(r.value);
+        }).catch(function () { setState(function (s) { return { ...s, busy: false, error: "episode detail failed" }; }); });
       }
       function purgeEpisodes(scope) {
         if (!window.confirm(t("browserEpisodePurgeConfirm"))) return;
-        setBusy(true); setNotice(null); setError(null);
-        sendAction({ op: "purgeEpisodes", id: scope }).then(function () { setNotice(t("browserEpisodePurge") + (scope === "all" ? " (all)" : " (>30d)")); }).catch(function (e2) { setError(String(e2 && e2.message || e2)); }).finally(function () { setBusy(false); });
-      }
-      function runDryReview() {
-        setBusy(true); setNotice(null); setError(null);
-        sendAction({ op: "dryReview" }).then(function () { setNotice(t("browserEpisodeDryReview") + "…"); }).catch(function (e2) { setError(String(e2 && e2.message || e2)); }).finally(function () { setBusy(false); });
+        mutate({ op: "purgeEpisodes", id: scope }, function () {
+          setState(function (s) { return { ...s, notice: t("browserEpisodePurge") + (scope === "all" ? " (all)" : " (>30d)") }; });
+        });
       }
       var EP_STATUS_LABEL = { pending: "pending", succeeded: "succeeded", failed: "failed", ambiguous: "ambiguous", reviewed: "reviewed", rejected: "rejected" };
       var episodeRows = (epData.recent || []).map(function (e) {
@@ -1132,33 +1511,47 @@ window.__ModuleLoader__.load({
         h("div", { className: "__dsi_row" },
           h("span", { className: "__dsi_browserMeta" },
             (epCounts.reviewed || 0) + " reviewed · " + (epCounts.succeeded || 0) + " succeeded · " + (epCounts.failed || 0) + " failed · " + (epCounts.pending || 0) + " pending · " + (epCounts.ambiguous || 0) + " ambiguous · " + (epCounts.rejected || 0) + " rejected"),
-          h("button", { type: "button", className: "__dsi_btn", onClick: runDryReview, disabled: busy }, t("browserEpisodeDryReview")),
-          h("button", { type: "button", className: "__dsi_btn", onClick: function () { purgeEpisodes("30"); }, disabled: busy }, t("browserEpisodePurge")),
-          h("button", { type: "button", className: "__dsi_btn", onClick: function () { purgeEpisodes("all"); }, disabled: busy }, t("browserEpisodePurgeAll"))
+          h("button", { type: "button", className: "__dsi_btn", onClick: function () { mutate({ op: "dryReview" }, function (summary) {
+            setState(function (s) { return { ...s, episodeStatus: summary || {} }; });
+          }); }, disabled: busy || state.pendingKind === "dryReview" }, state.pendingKind === "dryReview" ? t("browserEpisodeDryReviewRun") : t("browserEpisodeDryReview")),
+          h("button", { type: "button", className: "__dsi_btn __dsi_btnDanger", onClick: function () { purgeEpisodes("30"); }, disabled: busy }, t("browserEpisodePurge")),
+          h("button", { type: "button", className: "__dsi_btn __dsi_btnDanger", onClick: function () { purgeEpisodes("all"); }, disabled: busy }, t("browserEpisodePurgeAll"))
         ),
-        episodeStatusObj ? h("p", { className: "__dsi_status" },
+        state.episodeStatus ? h("p", { className: "__dsi_status" },
           t("browserEpisodeLastReview") + " " + JSON.stringify({
-            dryRun: episodeStatusObj.dryRun === true,
-            considered: episodeStatusObj.considered,
-            reviewed: episodeStatusObj.reviewed,
-            rejected: episodeStatusObj.rejected,
-            memories: episodeStatusObj.memories,
-            dropped: episodeStatusObj.dropped,
-            errors: episodeStatusObj.errors
+            dryRun: state.episodeStatus.dryRun === true,
+            considered: state.episodeStatus.considered,
+            reviewed: state.episodeStatus.reviewed,
+            rejected: state.episodeStatus.rejected,
+            memories: state.episodeStatus.memories,
+            dropped: state.episodeStatus.dropped,
+            errors: state.episodeStatus.errors
           })) : null,
         !epEnabled ? h("p", { className: "__dsi_status" }, t("browserEpisodesDisabled")) : null,
         epEnabled && episodeRows.length ? episodeRows : (epEnabled ? h("p", { className: "__dsi_status" }, t("browserEpisodesEmpty")) : null)
       );
 
       var STATUS_LABEL = { active: "Active", decayed: "Decayed", forgotten: "Forgotten", corrected: "Corrected" };
+      function closeEpisodeDetail() {
+        closedEpisodeDetailRef.current = episodeDetail ? episodeDetail.id : null;
+        setEpisodeDetail(null);
+        dialogFocus.restore();
+      }
       function fmtTime(ts) {
         try { return new Date(ts).toLocaleString(); } catch (e) { return String(ts); }
       }
-      var modal = showDetail ? h("div", { className: "__dsi_modalBackdrop", onClick: function () { setClosedDetailId(detailObj.id); } },
-        h("div", { className: "__dsi_modal", onClick: function (e) { e.stopPropagation(); } },
+      var modal = showDetail && detailObj ? h("div", {
+        className: "__dsi_modalBackdrop", onClick: function () { closeMemoryDetail(); }
+      },
+        h("div", {
+          className: "__dsi_modal", role: "dialog", "aria-modal": true, "aria-label": t("browserDetail"),
+          ref: dialogFocus.focusNode,
+          onClick: function (e) { e.stopPropagation(); },
+          onKeyDown: function (e) { dialogFocus.trap(e); if (e.key === "Escape") { e.stopPropagation(); closeMemoryDetail(); } }
+        },
           h("div", { className: "__dsi_modalHeader" },
             h("span", { className: "__dsi_modalTitle" }, (KIND_LABEL[detailObj.kind] || detailObj.kind) + " · " + t("browserDetail")),
-            h("button", { type: "button", className: "__dsi_btn", onClick: function () { setClosedDetailId(detailObj.id); } }, t("browserDetailClose"))
+            h("button", { type: "button", className: "__dsi_btn", onClick: function () { closeMemoryDetail(); } }, t("browserDetailClose"))
           ),
           h("div", { className: "__dsi_modalBody" },
             h("div", { className: "__dsi_modalContent" }, detailObj.content),
@@ -1177,31 +1570,37 @@ window.__ModuleLoader__.load({
         )
       ) : null;
 
-      var EPISODE_STATUS_LABEL = { pending: "pending", succeeded: "succeeded", failed: "failed", ambiguous: "ambiguous", reviewed: "reviewed", rejected: "rejected" };
-      var episodeModal = showEpisodeDetail ? h("div", { className: "__dsi_modalBackdrop", onClick: function () { setClosedEpisodeDetailId(episodeDetailObj.id); } },
-        h("div", { className: "__dsi_modal", onClick: function (e) { e.stopPropagation(); } },
+      var episodeModal = episodeDetail && episodeDetail.id !== closedEpisodeDetailRef.current ? h("div", {
+        className: "__dsi_modalBackdrop", onClick: function () { closeEpisodeDetail(); }
+      },
+        h("div", {
+          className: "__dsi_modal", role: "dialog", "aria-modal": true, "aria-label": t("browserEpisodeDetailTitle"),
+          ref: dialogFocus.focusNode,
+          onClick: function (e) { e.stopPropagation(); },
+          onKeyDown: function (e) { dialogFocus.trap(e); if (e.key === "Escape") { e.stopPropagation(); closeEpisodeDetail(); } }
+        },
           h("div", { className: "__dsi_modalHeader" },
-            h("span", { className: "__dsi_modalTitle" }, "⚗️ " + t("browserEpisodeDetailTitle") + " · " + (EPISODE_STATUS_LABEL[episodeDetailObj.status] || episodeDetailObj.status)),
-            h("button", { type: "button", className: "__dsi_btn", onClick: function () { setClosedEpisodeDetailId(episodeDetailObj.id); } }, t("browserDetailClose"))
+            h("span", { className: "__dsi_modalTitle" }, "⚗️ " + t("browserEpisodeDetailTitle") + " · " + (EP_STATUS_LABEL[episodeDetail.status] || episodeDetail.status)),
+            h("button", { type: "button", className: "__dsi_btn", onClick: function () { closeEpisodeDetail(); } }, t("browserDetailClose"))
           ),
           h("div", { className: "__dsi_modalBody" },
             h("div", { className: "__dsi_modalMeta" },
-              h("b", null, t("browserMetaSession")), h("span", null, String(episodeDetailObj.sessionId || "-").slice(0, 20)),
-              h("b", null, t("browserMetaTurn")), h("span", null, String(episodeDetailObj.turn)),
-              h("b", null, t("browserMetaProject")), h("span", null, String(episodeDetailObj.projectId || "-").slice(0, 40)),
-              h("b", null, t("browserMetaStarted")), h("span", null, fmtTime(episodeDetailObj.startedAt)),
-              h("b", null, t("browserMetaEnded")), h("span", null, episodeDetailObj.endedAt ? fmtTime(episodeDetailObj.endedAt) : "-"),
-              episodeDetailObj.summary ? h("b", null, t("browserMetaSummary")) : null,
-              episodeDetailObj.summary ? h("span", null, episodeDetailObj.summary) : null,
-              episodeDetailObj.confidence != null ? h("b", null, t("browserMetaConfidence")) : null,
-              episodeDetailObj.confidence != null ? h("span", null, String(episodeDetailObj.confidence)) : null,
-              episodeDetailObj.fingerprint ? h("b", null, t("browserMetaFingerprint")) : null,
-              episodeDetailObj.fingerprint ? h("span", null, String(episodeDetailObj.fingerprint).slice(0, 16)) : null,
-              episodeDetailObj.rejectReason ? h("b", null, t("browserMetaRejectReason")) : null,
-              episodeDetailObj.rejectReason ? h("span", null, episodeDetailObj.rejectReason) : null
+              h("b", null, t("browserMetaSession")), h("span", null, String(episodeDetail.sessionId || "-").slice(0, 20)),
+              h("b", null, t("browserMetaTurn")), h("span", null, String(episodeDetail.turn)),
+              h("b", null, t("browserMetaProject")), h("span", null, String(episodeDetail.projectId || "-").slice(0, 40)),
+              h("b", null, t("browserMetaStarted")), h("span", null, fmtTime(episodeDetail.startedAt)),
+              h("b", null, t("browserMetaEnded")), h("span", null, episodeDetail.endedAt ? fmtTime(episodeDetail.endedAt) : "-"),
+              episodeDetail.summary ? h("b", null, t("browserMetaSummary")) : null,
+              episodeDetail.summary ? h("span", null, episodeDetail.summary) : null,
+              episodeDetail.confidence != null ? h("b", null, t("browserMetaConfidence")) : null,
+              episodeDetail.confidence != null ? h("span", null, String(episodeDetail.confidence)) : null,
+              episodeDetail.fingerprint ? h("b", null, t("browserMetaFingerprint")) : null,
+              episodeDetail.fingerprint ? h("span", null, String(episodeDetail.fingerprint).slice(0, 16)) : null,
+              episodeDetail.rejectReason ? h("b", null, t("browserMetaRejectReason")) : null,
+              episodeDetail.rejectReason ? h("span", null, episodeDetail.rejectReason) : null
             ),
-            (episodeDetailObj.steps || []).length === 0 ? h("p", { className: "__dsi_status" }, t("browserEpisodeNoSteps")) : null,
-            (episodeDetailObj.steps || []).map(function (s) {
+            (episodeDetail.steps || []).length === 0 ? h("p", { className: "__dsi_status" }, t("browserEpisodeNoSteps")) : null,
+            (episodeDetail.steps || []).map(function (s) {
               return h("div", { key: s.ordinal, className: "__dsi_browserRow" },
                 h("div", { className: "__dsi_browserMain" },
                   h("span", { className: "__dsi_browserKind" }, (s.isError ? "✗ " : "✓ ") + s.ordinal + ". " + s.toolName + (s.errorName ? " (" + s.errorName + ")" : "")),
@@ -1218,60 +1617,222 @@ window.__ModuleLoader__.load({
         h("p", { className: "__dsi_status" },
           t("browserSummary").replace("{n}", String(memories.length)).replace("{p}", String(data.pending || 0)).replace("{s}", String(scenesArr.length)).replace("{v}", String(persona ? persona.ver : "-")).replace("{k}", String(skills.length)).replace("{e}", String(epTotal))
         ),
-        notice ? h("p", { className: "__dsi_ok" }, notice) : null,
-        error ? h("p", { className: "__dsi_error" }, error) : null,
-        collapse("persona", t("browserPersona") + (persona ? " v" + persona.ver : ""), persona ? "" : "", personaBody),
+        state.notice ? h("p", { className: "__dsi_ok", role: "status" }, state.notice) : null,
+        state.pendingKind && state.pending !== null ? h("p", { className: "__dsi_status", role: "status" }, t("browserStaged") + " — " + state.pendingKind) : null,
+        state.error ? h("p", { className: "__dsi_error", role: "alert" }, state.error) : null,
+        collapse("persona", t("browserPersona") + (persona ? " v" + persona.ver : ""), "", personaBody),
         collapse("memories", t("browserMemories"), String(memories.length), memoryBody),
         collapse("scenes", t("browserScenes"), String(scenesArr.length), scenesBody),
         collapse("skills", t("browserSkills"), String(skills.length), skillsBody),
-        collapse("episodes", t("browserEpisodes"), String(epTotal), episodesBody),
+        collapse("episodes", t("groupEpisodesBrowser"), String(epTotal), episodesBody),
         modal,
         episodeModal
       );
     }
 
-    // ── Main settings section: one section with "Config / Memory" tabs ──────────────────
+    /** Map one RemoteResult failure onto a human message. */
+    function remoteMessage(r) {
+      if (r && !r.ok && r.error) return String(r.error.message || r.error.code || "remote failure");
+      return "remote failure";
+    }
+
+    /** Main settings section: Config / Memory tabs (draft survives navigation,
+     *  because the settings-form binding lives in apply()'s closure). */
+    /** Real cancellable read ownership, shared by the new data views. */
+    function useOwnedRead(api, kind) {
+      var owner = react.useRef({ serial: 0, controller: null, alive: true });
+      var pair = react.useState({ data: null, busy: false, error: null });
+      var state = pair[0], setState = pair[1];
+      react.useEffect(function () {
+        owner.current.alive = true;
+        return function () { owner.current.alive = false; owner.current.serial++; if (owner.current.controller) owner.current.controller.abort(); };
+      }, []);
+      var cancel = react.useCallback(function () {
+        owner.current.serial++;
+        if (owner.current.controller) owner.current.controller.abort();
+        if (owner.current.alive) setState({ data: null, busy: false, error: null });
+      }, []);
+      var refresh = react.useCallback(function (target) {
+        var current = owner.current;
+        if (!current.alive) return;
+        if (current.controller) current.controller.abort();
+        var serial = ++current.serial, controller = new AbortController(); current.controller = controller;
+        setState({ data: null, busy: true, error: null });
+        function active() { return current.alive && current.serial === serial && !controller.signal.aborted; }
+        return Promise.resolve().then(function () {
+          if (!active()) return null;
+          if (!api || typeof api[kind] !== "function") throw new Error("The native business remote is unavailable.");
+          return kind === "snapshot" ? api.snapshot(controller.signal) : api.continuityStatus(target, controller.signal);
+        }).then(function (result) {
+          if (!active()) return;
+          if (!result || !result.ok) throw new Error(remoteMessage(result));
+          setState({ data: result.value, busy: false, error: null });
+        }).catch(function (error) {
+          if (active()) setState({ data: null, busy: false, error: String(error && error.message || error) });
+        });
+      }, [api, kind]);
+      return { state: state, refresh: refresh, cancel: cancel };
+    }
+    function OverviewSection(props) {
+      var read = useOwnedRead(props.api, "snapshot"), state = read.state;
+      react.useEffect(function () { read.refresh(); }, [read.refresh]);
+      var data = state.data, counts = data && data.episodes && data.episodes.counts;
+      return h("div", { className: "__dsi_root" },
+        h("p", { className: "__dsi_status" }, "Read-only stored data. Paused data remains inspectable; these counts do not establish task success or measured improvement."),
+        h("button", { type: "button", className: "__dsi_btn", disabled: state.busy, onClick: function () { read.refresh(); } }, props.t("browserRefresh")),
+        state.busy ? h("p", { role: "status" }, "Loading…") : null,
+        state.error ? h("p", { role: "alert" }, state.error) : null,
+        data ? h("dl", null,
+          h("dt", null, "Memory rows shown (bounded)"), h("dd", null, String((data.memories || []).length)),
+          h("dt", null, "Pending extraction sessions"), h("dd", null, String(data.pending || 0)),
+          h("dt", null, "Reviewed evidence episodes"), h("dd", null, String(counts && counts.reviewed || 0)),
+          h("dt", null, "Skill files listed (not activation evidence)"), h("dd", null, String((data.skills || []).length))) : null);
+    }
+    function SessionsSection(props) {
+      var targetPair = react.useState(""), target = targetPair[0], setTarget = targetPair[1];
+      var read = useOwnedRead(props.api, "continuityStatus"), state = read.state, data = state.data;
+      var rows = data && Array.isArray(data.rows) ? data.rows : [];
+      return h("div", { className: "__dsi_root" },
+        h("label", null, "Native target session ID", h("input", { className: "__dsi_input", value: target,
+          onChange: function (event) { read.cancel(); setTarget(event.target.value); },
+          onKeyDown: function (event) { if (event.key === "Enter" && target.trim()) { event.preventDefault(); read.refresh(target); } } })),
+        h("button", { type: "button", className: "__dsi_btn", disabled: !target.trim(), onClick: function () { read.refresh(target); } }, props.t("browserRefresh")),
+        state.busy ? h("p", { role: "status" }, "Loading…") : null,
+        state.error ? h("p", { role: "alert" }, state.error) : null,
+        h("p", { className: "__dsi_status" }, data ? data.reason : "Choose a native target session to inspect same-project processing metadata."),
+        h("button", { type: "button", className: "__dsi_btn", disabled: true, title: "Authenticated Host Continue ingress is not yet integrated." }, "Continue (unavailable)"),
+        h("p", null, "Processing states are not task completion, permission, or verified external effects."),
+        data && data.availability === "ready" && !rows.length ? h("p", { role: "status" }, "No current eligible processing references.") : null,
+        rows.length ? h("table", { className: "__dsi_table" }, h("caption", null, "Same-project continuity processing (bounded)"),
+          h("thead", null, h("tr", null, ["Session", "Processing", "Boundary cut", "Attempts"].map(function (label) { return h("th", { key: label, scope: "col" }, label); }))),
+          h("tbody", null, rows.map(function (row) { return h("tr", { key: row.id },
+            h("td", null, row.sessionId), h("td", null, row.status), h("td", null, String(row.cut)), h("td", null, String(row.attempts))); }))) : null);
+    }
+
+     var navigationCounter = 0;
     function MainSection(props) {
       var t = props.t;
-      var [tab, setTab] = react.useState("config");
-      return h("div", { className: "__dsi_tabs" },
-        h("div", { className: "__dsi_tabBar" },
-          h("button", { type: "button", className: "__dsi_tab" + (tab === "config" ? " __dsi_tabActive" : ""), onClick: function () { setTab("config"); } }, t("tabConfig")),
-          h("button", { type: "button", className: "__dsi_tab" + (tab === "memories" ? " __dsi_tabActive" : ""), onClick: function () { setTab("memories"); } }, t("tabMemories"))
+      var [tab, setTab] = react.useState("overview");
+      var navigationId = react.useRef(null); if (!navigationId.current) navigationId.current = "dsi-nav-" + (++navigationCounter);
+      function navigateKey(event) {
+        var keys = ["overview", "sessions", "config", "memories"], index = keys.indexOf(tab), next;
+        if (event.key === "ArrowRight") next = (index + 1) % 4;
+        else if (event.key === "ArrowLeft") next = (index + 3) % 4;
+        else if (event.key === "Home") next = 0;
+        else if (event.key === "End") next = 3;
+        else return;
+        event.preventDefault(); setTab(keys[next]);
+        var buttons = event.currentTarget.querySelectorAll('[role="tab"]'); if (buttons[next]) buttons[next].focus();
+      }
+      return h("div", { className: "__dsi_tabs", style: { position: "relative" } },
+        h("div", { className: "__dsi_tabBar", role: "tablist", "aria-label": "Memory navigation", onKeyDown: navigateKey },
+           h("button", { type: "button", role: "tab", id: navigationId.current + "-overview", "aria-controls": navigationId.current + "-panel", tabIndex: tab === "overview" ? 0 : -1, "aria-selected": tab === "overview", className: "__dsi_tab" + (tab === "overview" ? " __dsi_tabActive" : ""), onClick: function () { setTab("overview"); } }, t("tabOverview")),
+           h("button", { type: "button", role: "tab", id: navigationId.current + "-sessions", "aria-controls": navigationId.current + "-panel", tabIndex: tab === "sessions" ? 0 : -1, "aria-selected": tab === "sessions", className: "__dsi_tab" + (tab === "sessions" ? " __dsi_tabActive" : ""), onClick: function () { setTab("sessions"); } }, t("tabSessions")),
+          h("button", { type: "button", role: "tab", id: navigationId.current + "-config", "aria-controls": navigationId.current + "-panel", tabIndex: tab === "config" ? 0 : -1, "aria-selected": tab === "config", className: "__dsi_tab" + (tab === "config" ? " __dsi_tabActive" : ""), onClick: function () { setTab("config"); } }, t("tabConfig")),
+          h("button", { type: "button", role: "tab", id: navigationId.current + "-memories", "aria-controls": navigationId.current + "-panel", tabIndex: tab === "memories" ? 0 : -1, "aria-selected": tab === "memories", className: "__dsi_tab" + (tab === "memories" ? " __dsi_tabActive" : ""), onClick: function () { setTab("memories"); } }, t("tabMemories"))
         ),
-        tab === "config" ? h(MemorySection, props) : h(BrowserSection, props)
+        h("div", { role: "tabpanel", id: navigationId.current + "-panel", "aria-labelledby": navigationId.current + "-" + tab },
+          tab === "overview" ? h(OverviewSection, Object.assign({ key: tab }, props)) : tab === "sessions" ? h(SessionsSection, Object.assign({ key: tab }, props)) : tab === "config" ? h(MemorySection, Object.assign({ key: tab }, props)) : h(BrowserSection, Object.assign({ key: tab }, props)))
       );
     }
 
-    // ── plugin ────────────────────────────────────────────────────────────
-    function apply(ctx) {
-      var t = ctx.locale.bind(NS);
-      ctx.effect(function () { return ctx.locale.register(NS, { zh: zh, en: en }); }, "dsh-self-improved: dictionaries");
-      var scope = ctx.settingsScope.bind({ namespace: "dsh-self-improved" });
-      var browserScope = ctx.settingsScope.bind({ namespace: "dsh-self-improved-browser" });
+    // ─═ [plugin] ═══════════════════════════════════════════════════════════
+    async function apply(ctx) {
+      var t = (function () { try { return ctx.locale.bind(NS); } catch (e) { return function (k) { return k; }; } })();
       ctx.effect(function () {
-        return function () {
-          scope.dispose();
-          browserScope.dispose();
-        };
-      }, "dsh-self-improved: settings scopes");
-      var api = ctx.connection.api;
-      // Single settings section with two tabs: Config / Memory
-      ctx.slots.inject("settings.section", function () {
-        return ctx.slots.register({
-          name: "settings.section",
-          id: "dsh-self-improved",
-          order: 27,
-          label: function () { return t("nav"); },
-          locale: NS
-        }, function (props) {
-          return h(MainSection, Object.assign({}, props, { scope: scope, api: api, browserScope: browserScope }));
+        try { return ctx.locale.register(NS, { zh: zh, en: en }); } catch (e) { return function () {}; }
+      }, "dsh-self-improved: dictionaries");
+
+      // Typed business remote (mount/unmount effect-owned). The MOUNT must
+      // settle before the Memory UI lane starts: rc.2 inject governance only
+      // lets a context read `remote.<namespace>` when the reading context
+      // declares it, and the entry's own inject list cannot wait for a
+      // namespace that the same entry mounts (mounted boot proved that path
+      // deadlocks every client activation with "pending (waiting for service:
+      // remote.selfImproved)"). The voice-input reference package uses the
+      // same shape: mount, then register the UI in a `ctx.inject` child
+      // context that grants the namespace key.
+      var remoteMount = mountBusinessRemote(ctx);
+      ctx.effect(function () {
+        return function () { void Promise.resolve(remoteMount.dispose()).catch(function () { /* owned by the fiber too */ }); };
+      }, "dsh-self-improved: business remote");
+      await remoteMount.settled;
+
+      // Shared entry-addressed settings-form state: created ONCE, persisted
+      // across navigation/tabs; the consuming effect only unsubscribes.
+      var formBinding = bindSettingsForm(ctx);
+      ctx.effect(function () {
+        if (!formBinding) return function () {};
+        return formBinding.unsubscribeAll;
+      }, "dsh-self-improved: settings form subscription");
+
+      var consentApp = {
+        confirmConsent: function () { return window.confirm(t("episodeEnableWarning")); }
+      };
+
+      // Follow the settings domain: render nothing while the Host does not
+      // serve this entry (adapted via configForms.whileServed contract use).
+      var configForms = (function () { try { return ctx.get("configForms"); } catch (e) { return void 0; } })();
+      var sectionDispose = null; // never double-registered while served
+      /** One served/registered cycle: the section lives in a child context
+       *  whose inject list grants the business namespace (see businessApi),
+       *  so its render closure reads typed business remotes legally. The
+       *  child fiber is disposed with this plugin fiber by the Loader. */
+      var sectionGoverned = null; // the ctx.inject fiber while the section is registered
+      var registerSection = function () {
+        if (sectionDispose || sectionGoverned) return function () { /* already registered */ };
+        var child = ctx.inject(["remote." + REMOTE_NS, "slots", "locale", "configForms"], function (childCtx) {
+          if (sectionDispose) return;
+          sectionDispose = childCtx.slots.inject("settings.section", function () {
+            return childCtx.slots.register({
+              name: "settings.section",
+              id: "dsh-self-improved",
+              order: 27,
+              label: function () { return t("nav"); },
+              locale: NS
+            }, function (props) {
+              return h(MainSection, Object.assign({}, props, { t: t, formBinding: formBinding, app: consentApp, ctx: childCtx, api: businessApi(childCtx) }));
+            });
+          }) || function () {};
         });
-      });
+        sectionGoverned = child;
+        void Promise.resolve(child).catch(function (e) {
+          // Mount failure must not kill the plugin fiber (e.g. inject service
+          // temporarily absent); a later whileServed cycle retries.
+          sectionGoverned = null;
+          console.warn("[dsh-self-improved] memory UI lane failed to start:", String(e && e.message || e));
+        });
+        return function () {
+          var d = sectionDispose;
+          sectionDispose = null;
+          var g = sectionGoverned;
+          sectionGoverned = null;
+          if (d) d();
+          if (d) { void Promise.resolve(g && g.dispose ? g.dispose() : null).catch(function () {}); }
+        };
+      };
+      if (configForms && typeof configForms.whileServed === "function") {
+        // The section follows the served settings namespace: registered once
+        // the Host serves this entry, unregistered when none serves it; the
+        // whileServed disposer itself is effect-owned below.
+        var stopFollowing = configForms.whileServed([NAMESPACE], function () {
+          return registerSection();
+        });
+        ctx.effect(function () { return stopFollowing; }, "dsh-self-improved: settings section follows the served entry");
+      } else {
+        ctx.effect(function () { return registerSection(); }, "dsh-self-improved: settings section (untracked composition)");
+      }
     }
 
     exports.apply = apply;
-    exports.inject = inject;
+    // Inject list: this entry MOUNTS the `remote.selfImproved` namespace itself
+    // (mountBusinessRemote below), so listing `remote.selfImproved` here makes
+    // the entry wait for a service it only creates after apply — a
+    // self-referential gate the client Loader never satisfies (mounted boot
+    // showed "pending (waiting for service: remote.selfImproved)" and the
+    // whole plugin UI stayed unregistered). `remote` is injected so $mount can
+    // run; the namespace is read lazily per render (businessApi).
+    exports.inject = ["slots", "locale", "connection", "remote", "configForms"];
     return module.exports;
   }
 });
