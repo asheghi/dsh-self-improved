@@ -121,6 +121,10 @@ search check.
   items): real provider first-request verification, native history/fork
   integration, mounted profile checks, client settings/Remote surface.
 
+## Coordinator verification after workflow-4 completion
+
+The coordinator strengthened the disabled-flush test to invoke the actual throwing session/source proxy while disabled, as well as the readable pending-evidence fixture. Previously the source-read counter did not instrument the disabled run. After this targeted test-only correction, `node scripts/test-v02-safety.mjs` exited 0 with all 60 assertions passing against the current built artifact. This independently verifies the worker's provenance/terminal outcomes and eliminates the source-instrumentation gap. No runtime integration gate is inferred from these unit tests.
+
 ## Constraint compliance
 
 - Reads only exported built APIs (`lib/compat-v02.js`, `lib/capture.js`,

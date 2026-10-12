@@ -1,10 +1,10 @@
 # dsh-self-improved
 
-**Give your DeepSeek Harness agent a memory: fully local.**
+**Cross-session memory with local storage and opt-in reviewed learning.**
 
 ![license](https://img.shields.io/badge/license-MIT-green) ![node](https://img.shields.io/badge/node-%E2%89%A522.16-blue)
 
-`dsh-self-improved` is a plugin for **DeepSeek Harness (DSH)**: **cross-session long-term memory** and **self-evolution** in local SQLite + JSONL storage.
+`dsh-self-improved` is a plugin for **DeepSeek Harness (DSH)**: **cross-session long-term memory** and **self-evolution** backed by local SQLite + JSONL storage. Configured model/provider calls are opt-in and consent-gated.
 
 ## Why would I need this?
 
@@ -14,7 +14,7 @@ Without it, every new DSH session starts blank:
 - **Good decisions evaporate.** The agent re-litigates settled questions and re-makes settled mistakes.
 - **No persona builds up.**
 
-With it, the agent walks in already knowing what you taught it before, and what worked can be distilled into reusable skills (opt-in).
+With it, the agent walks in already knowing what you taught it before; reviewed procedures can become inspectable inactive skill drafts (opt-in, never auto-activated).
 
 ## What you get
 
@@ -23,14 +23,14 @@ With it, the agent walks in already knowing what you taught it before, and what 
 | **Cross-session memory** | Distills facts / preferences / events into durable memories | Injected before each turn |
 | **Relevant recall** | Only memories matching the current question, scoped to project and session | Labeled block in context; generic prompts inject nothing |
 | **Evolving persona** | Strongest confirmed memories become a versioned profile | Curated baseline in the system prompt |
-| **Skill synthesis** | Successful workflows become `dsh-skill` skills | `dsi-*` in your skills root; off by default |
+| **Skill proposals** | Repeated reviewed procedures become inspectable inactive drafts | SQLite, project-scoped; opt-in, never auto-published |
 | **Self-maintenance** | Decay and growth caps, zero LLM cost | Every maintenance round |
 | **History search** | Full-text search over memories and past conversations | `memory_search` / `conversation_search` tools |
 | **Your control** | Correct or forget any memory instantly | `/memory` + Settings → Evolving Memory |
 
 ## How it works
 
-Hangs off DSH's native extension points (`session/flush`, `agent/pre-step`, `systemPrompt`, `ctx.llm`, settings namespaces, `dsh-skill`). Four-layer pipeline (L0 capture → L1 extraction → L2 consolidation → L3 persona), inspired by [TencentDB Agent Memory](https://github.com/TencentCloud/TencentDB-Agent-Memory):
+Hangs off DSH's native extension points (`session/flush`, `agent/pre-step`, `systemPrompt`, `ctx.llm`, and settings namespaces). Four-layer pipeline (L0 capture → L1 extraction → L2 consolidation → L3 persona), inspired by [TencentDB Agent Memory](https://github.com/TencentCloud/TencentDB-Agent-Memory):
 
 ```mermaid
 flowchart LR
@@ -41,7 +41,7 @@ flowchart LR
         LLM["ctx.llm<br/>(your configured model)"]
     end
 
-    subgraph P["dsh-self-improved · all local"]
+    subgraph P["dsh-self-improved · local storage"]
         CAP["L0 · Capture<br/>conversation slices → JSONL"]
         DB[("SQLite store<br/>FTS5 + sqlite-vec")]
         EXT["L1 · Extract<br/>provenance + evidence gate"]
@@ -50,10 +50,8 @@ flowchart LR
         DEC["Decay + governance<br/>(zero LLM cost)"]
         REC["Recall retrieval<br/>keyword / hybrid RRF"]
         INJ["Recall block<br/>≤4 per turn · ≤800 chars"]
-        SKILL["Skill synthesis<br/>(off by default)"]
+        SKILL["Skill draft<br/>(opt-in, inactive)"]
     end
-
-    SKILLSK["dsh-skill<br/>dsi-* skills"]
 
     SESS --> CAP --> DB
     DB -- "pump: after flush + every 15 min" --> EXT
@@ -62,7 +60,10 @@ flowchart LR
     EXT -- "verified memories" --> DB
     DB --> CONS --> PERS
     DB --> DEC
-    DB -- "nightly 22:00 / manual" --> SKILL --> SKILLSK
+    DB -- "full review + opt-in" --> SKILL
+    SKILL -- "redacted evidence prompt" --> LLM
+    LLM -- "proposal" --> SKILL
+    SKILL -- "inactive SQLite draft" --> DB
     PRE --> REC -- "scoped search" --> DB
     REC -- "ranked hits" --> INJ -- "labeled context block" --> SYS
     PERS -- "curated baseline (≤2400 chars)" --> SYS
@@ -72,7 +73,7 @@ flowchart LR
 2. **Extract**: an LLM pass distills pending slices into memories that pass the strict gate (direct-human provenance, verbatim evidence, not task-local), JSON-validated and deduplicated.
 3. **Consolidate**: the nightly review builds scenes (optional) and a versioned persona from your strongest confirmed memories.
 4. **Recall**: before each turn, keyword/hybrid retrieval (RRF, optional embeddings) renders matching memories as a labeled, fallible block; the curated profile renders in the system prompt.
-5. **Maintain**: decay retires stale memories; caps bound growth; optional skill synthesis writes `dsh-skill` entries.
+5. **Maintain**: decay retires stale memories; caps bound growth; optional reviewed procedures become inactive SQLite skill drafts (not `dsh-skill` publications).
 
 ### A turn, end to end
 
@@ -93,7 +94,7 @@ sequenceDiagram
     A->>M: request with injected context
     M-->>U: answer that "remembers you"
     Note over A,S: on session/flush: new slices captured, extraction queued
-    Note over S: nightly: consolidate persona/scenes, decay, optional skills
+    Note over S: nightly: consolidate persona/scenes, decay, optional inactive draft proposals
 ```
 
 ### When things run
@@ -102,7 +103,7 @@ sequenceDiagram
 |---|---|---|
 | Every turn (session flush) | capture slices, queue extraction | 0 |
 | Right after flush + every 15 min | extraction pump, decay, governance caps | one small call, when new content exists |
-| Nightly (default **22:00**), ~60s after boot, or `/memory evolve` | full review: drain extraction + consolidation + skills (optional) + episode review/skill synthesis (when enabled) + decay/governance | moderate |
+| Nightly (default **22:00**), ~60s after boot, or `/memory evolve` | full review: drain extraction + consolidation + optional episode review and inactive skill-draft generation + decay/governance | moderate |
 | Before each model call | recall retrieval + injection | 0 (keyword) / one embedding call (hybrid) |
 | `/memory` commands, memory browser | local store queries only | 0 |
 
@@ -116,13 +117,13 @@ Nothing is deleted silently: upgrading an existing store quarantines pre-upgrade
 
 ### Episode learning (opt-in, off by default)
 
-With `episodeLearning.enabled`, the plugin also records tool calls and results per session ("episodes"): arguments and results are redacted and bounded at capture time, paired strictly by call id, and classified deterministically (ambiguous/interrupted histories are never learned from). A separate LLM review pass (manual or nightly only) distills evidence-cited, project-scoped *operational* memories that expire (90 days) and never touch persona, baseline, or user memories; with `operationalRecallEnabled` they inject in a separately labeled, capped block. Repeated successful episodes can be synthesized into one traceable skill (≥2 supporting episodes, opt-in). Inspect, dry-review, purge, and forget live in the Memory tab and under `/memory episodes …`; purge and forget take effect immediately. Disable stops capture/review/recall and keeps stored data; episode rows auto-expire after `retentionDays`.
+With `episodeLearning.enabled`, the plugin records tool calls and results per session ("episodes"): arguments/results are redacted and bounded at capture time, paired strictly by call id, and classified deterministically (ambiguous/interrupted histories are never learned from). A separate LLM review pass (manual or nightly only) distills evidence-cited, project-scoped *operational* memories that expire (90 days) and never touch persona, baseline, or user memories; with `operationalRecallEnabled` they inject in a separately labeled, capped block. The separate `skillDraftsEnabled` option (default off) can send reviewed, redacted evidence to the configured model during full review and store project-scoped, cited skill proposals in SQLite. Drafts require independent direct sessions and remain inactive: no `dsh-skill` file is written or loaded. Inspect drafts with `/memory skill-drafts` and `/memory skill-draft <id> [--full]`; these commands require episode consent and show only the receiving session's project. Every purge invalidates dependent drafts; explicit user-triggered purge also forgets linked episode-review-derived memories (user-authored memories remain), while scheduled retention keeps its non-cascading policy. Episode controls also include dry-review, purge, and forget under `/memory episodes …`; episode rows auto-expire after `retentionDays`.
 
 ## Privacy
 
 - Store: `$DSH_HOME/memory` (configurable). The plugin itself calls no network services; model and embedding traffic follows your DSH configuration.
 - Master switch off = dormant: extraction, recall, the `/memory` command, and memory tools stop; memories are kept and everything resumes when re-enabled.
-- Episode learning is a separate opt-in layer with its own switch and consent prompt on first enable; captured tool arguments/results are redacted before persistence and reviewable in the browser inspector at any time.
+- Episode learning is a separate opt-in layer with its own switch and consent prompt on first enable; captured tool arguments/results are redacted before persistence. Enabling outcome review or inactive skill drafts sends that redacted evidence to the configured provider; drafts remain local and inactive.
 
 ## Installation
 
@@ -142,6 +143,31 @@ Install pitfalls (pnpm store and build prep, peerDependencies double instance, d
 # add "dsh-self-improved": "file:node_modules/dsh-self-improved" to package.json dependencies
 # add the cordis.patch.yml insert (see TROUBLESHOOTING.md), then restart
 ```
+
+### Build and install portability contract
+
+```bash
+pnpm build          # strict rc.2 typecheck (+ --emit-lib via scripts/typecheck-v02.mjs)
+node scripts/test-v02-package.mjs   # package-artifact gate (pack file list, offline runtime harness, prepare lifecycle)
+node scripts/test-v02-typecheck-modes.mjs   # staged-artifact mode regressions (strict vs artifact verification)
+```
+
+- Peer source resolution: repo `node_modules/@deepseek-ai` first (must match the
+  exact versions package.json pins); else the documented coordination test site
+  (read-only); `DSH_RUNTIME_RC2=<tree>` overrides explicitly and fails closed if
+  invalid; legacy rc.6/rc.8 peers are never silently used. `DSH_V02_NO_TEST_SITE=1`
+  disables the site fallback for self-sufficient builds.
+- Modes are never conflated: `build` / `typecheck:v02` / no-flags are the strict
+  rc.2 gate and fail closed (exit 2) without a TypeScript toolchain — a shipped
+  prebuilt `lib/` is never accepted as strict evidence. The only no-compiler
+  path is explicit `--allow-prebuilt` (kept on the manifest's `prepare` for the
+  consumer-install context): it verifies the shipped lib/entry points/dsh bundle
+  patch, prints an explicit "no strict compile" notice, emits nothing, and
+  refuses an explicitly invalid `DSH_RUNTIME_RC2`, an empty or
+  non-exactly-pinable @deepseek-ai peer set, and any incomplete artifact.
+- Package-gate results: [fixtures/v02-package/](./fixtures/v02-package/),
+  [fixtures/v02-typecheck-modes/](./fixtures/v02-typecheck-modes/) and
+  [MIGRATION-PACKAGE-REVIEW.md](./MIGRATION-PACKAGE-REVIEW.md).
 
 ## Operations
 
@@ -181,8 +207,8 @@ dsh-self-improved:
     time: "22:00"      # HH:MM, 24h
 ```
 
-- Conservative defaults are settings, not hardcode; all editable in the settings UI ("Evolving Memory" → Config): `extract.provenanceFilter: "strict"`, `extract.requireEvidence: true`, `recall.relevanceMargin: 0.5`, `recall.minImportance: 0`, `recall.maxInjectPerTurn: 4`, `consolidate.scenesEnabled: false`, `evolve.skillSynthesis.enabled: false`.
-- `/memory` commands are zero-LLM.
+- Conservative defaults are settings, not hardcode; editable fields appear in the settings UI ("Evolving Memory" → Config): `extract.provenanceFilter: "strict"`, `extract.requireEvidence: true`, `recall.relevanceMargin: 0.5`, `recall.minImportance: 0`, `recall.maxInjectPerTurn: 4`, `consolidate.scenesEnabled: false`, `episodeLearning.skillDraftsEnabled: false`. The legacy `evolve.skillSynthesis.enabled` field no longer publishes active skills.
+- Read-only `/memory` commands are zero-LLM; `/memory evolve` and episode review can call the configured provider when enabled.
 
 ## Repository layout
 
