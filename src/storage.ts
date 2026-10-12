@@ -2591,6 +2591,65 @@ export class MemoryStore {
     return this.runInImmediateTransaction(() => Number(this.db.prepare(sql).run(...params).changes) === 1);
   }
 
+  /**
+   * Record ONE structural evaluation and let it move the draft draft -> evaluated.
+   * The report must be the exact self-describing shape the evaluator emits and
+   * must name THIS row's anchors, so a caller cannot attach a report about a
+   * different draft or hand-write `eligibleForHumanReview`.
+   */
+  recordSkillDraftStructuralEvaluation(id: string, version: string, value: unknown): boolean {
+    const report = value as Record<string, unknown> | null;
+    if (!report || typeof report !== "object" || Array.isArray(report)) return false;
+    const keys = ["version", "mode", "draftId", "projectId", "fingerprint", "sourceEpisodeIds", "checks", "passed", "total", "eligibleForHumanReview", "staticOnly", "evaluatedAt"];
+    for (const key of keys) {
+      const descriptor = Object.getOwnPropertyDescriptor(report, key);
+      if (!descriptor || !descriptor.enumerable || !Object.hasOwn(descriptor, "value")) return false;
+    }
+    if (Reflect.ownKeys(report).length !== keys.length) return false;
+    const checks = report.checks;
+    if (!Array.isArray(checks) || checks.length === 0 || checks.length > 32) return false;
+    for (const check of checks) {
+      if (!check || typeof check !== "object") return false;
+      const passed = Object.getOwnPropertyDescriptor(check, "passed")?.value;
+      const checkId = Object.getOwnPropertyDescriptor(check, "id")?.value;
+      const reason = Object.getOwnPropertyDescriptor(check, "reason")?.value;
+      if (typeof passed !== "boolean" || typeof checkId !== "string" || checkId.length === 0 || checkId.length > 64
+        || typeof reason !== "string" || reason.length > 200) return false;
+    }
+    const passedCount = checks.filter((check) => Object.getOwnPropertyDescriptor(check, "passed")?.value === true).length;
+    if (report.mode !== "structural-review" || report.staticOnly !== true) return false;
+    if (report.version !== version || typeof version !== "string" || version.length === 0 || version.length > 100) return false;
+    if (report.draftId !== id) return false;
+    if (report.passed !== passedCount || report.total !== checks.length) return false;
+    if (report.eligibleForHumanReview !== (passedCount === checks.length)) return false;
+    if (!Number.isSafeInteger(report.evaluatedAt)) return false;
+    const serialized = JSON.stringify(report);
+    if (serialized.length > 8000) return false;
+    return this.runInImmediateTransaction(() => {
+      const draft = this.getSkillDraft(id);
+      if (!draft || draft.status !== "draft") return false;
+      if (report.projectId !== draft.projectId || report.fingerprint !== draft.fingerprint) return false;
+      const cited = report.sourceEpisodeIds;
+      if (!Array.isArray(cited) || cited.length !== draft.sourceEpisodeIds.length
+        || JSON.stringify([...cited].sort()) !== JSON.stringify([...draft.sourceEpisodeIds].sort())) return false;
+      // Recheck eligibility under the same write transaction as the metadata
+      // change, exactly like the fixture lane: an evaluation must not be
+      // attachable to support that has since stopped being usable.
+      for (const sourceId of draft.sourceEpisodeIds) {
+        const episode = this.getEpisode(sourceId);
+        if (!episode || episode.status !== "reviewed" || episode.reviewedAt == null || episode.delegated
+          || episode.rejectReason !== null || episode.projectId !== draft.projectId
+          || episode.fingerprint !== draft.fingerprint) return false;
+      }
+      const written = this.db.prepare(
+        `UPDATE skill_drafts SET evaluation_version = ?, evaluation_report = ?, updated_at = ?
+         WHERE id = ? AND status = 'draft' AND project_id = ? AND fingerprint = ? AND source_episode_ids = ?`,
+      ).run(version, serialized, Date.now(), id, draft.projectId, draft.fingerprint, JSON.stringify(draft.sourceEpisodeIds));
+      if (Number(written.changes) !== 1) return false;
+      return this.transitionSkillDraft(id, ["draft"], "evaluated", { projectId: draft.projectId });
+    });
+  }
+
   getSkillDraft(id: string, projectId?: string): SkillDraftRecord | undefined {
     const row = (projectId
       ? this.db.prepare("SELECT * FROM skill_drafts WHERE id = ? AND project_id = ?").get(id, projectId)

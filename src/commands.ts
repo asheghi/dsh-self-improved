@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { createHmac, randomBytes } from "node:crypto";
 import { defaultSkillsDir, deleteSkill } from "./evolve.js";
 import type { EpisodeStatus, MemoryStore } from "./storage.js";
+import { evaluateSkillDraftStructure } from "./skill-evaluation-structural.js";
 import type { MemoryBusinessApi } from "./business.js";
 
 export interface CommandOutcome {
@@ -303,6 +304,30 @@ export function handleMemoryCommand(
         ...(truncated ? [`[truncated at ${maxChars} chars; draft remains stored]`] : []),
       ].join("\n"));
     }
+    case "skill-evaluate": {
+      if (opts?.episodeEnabled?.() !== true) return err("Skill evaluation requires episodeLearning.enabled");
+      const projectId = opts?.skillDraftProjectId;
+      if (!projectId) return err("Skill evaluation requires an active project scope");
+      const id = args[1];
+      if (!id) return err("Usage: /memory skill-evaluate <draft-id>");
+      const report = evaluateSkillDraftStructure(store, id, { projectId });
+      if (!report) return err(`Skill draft not found: ${id}`);
+      const failed = report.checks.filter((check) => !check.passed);
+      if (!report.eligibleForHumanReview) {
+        return err([
+          `Evaluation found ${failed.length} problem(s); the draft stays unevaluated:`,
+          ...failed.map((check) => `  - ${check.id}: ${check.reason}`),
+        ].join("\n"));
+      }
+      if (!store.recordSkillDraftStructuralEvaluation(id, report.version, report)) {
+        return err("The draft changed while it was being evaluated; re-run the evaluation.");
+      }
+      return ok([
+        `Evaluated ${id} with ${report.version}: ${report.passed}/${report.total} static checks passed.`,
+        "This is a STATIC review of form and evidence, not a behavioral measurement: it cannot show the procedure works.",
+        `Approve it explicitly with: /memory skill-approve ${id}`,
+      ].join("\n"));
+    }
     case "skill-approve": {
       if (opts?.episodeEnabled?.() !== true) return err("Skill approval requires episodeLearning.enabled");
       const projectId = opts?.skillDraftProjectId;
@@ -373,7 +398,7 @@ export function handleMemoryCommand(
           "/memory episodes [status] [limit] | episode <id> | episode-purge [days|all] [--project <id>] (also forgets linked derived memories)\n" +
           "/memory episode-review [--dry]\n" +
           "/memory skill-drafts | skill-draft <id> [--full]\n" +
-          "/memory skill-approve <draft-id> | skill-activate <draft-id> | skill-rollback <name> | skill-active\n" +
+          "/memory skill-evaluate <draft-id> | skill-approve <draft-id> | skill-activate <draft-id> | skill-rollback <name> | skill-active\n" +
           "/memory status",
       );
   }
