@@ -162,36 +162,13 @@ function scaffoldProfile(profileDir, pluginDir) {
     "- id: session-telemetry-otel\n  disabled: true\n");
 }
 
-/** Loopback-only provider stub: answers every POST with a canned SSE completion
- *  and logs each request body so the pause firewall is inspectable on disk. */
-const STUB_CODE = (logPath) => `import http from "node:http";
-import { appendFileSync } from "node:fs";
-const LOG = ${JSON.stringify(logPath)};
-appendFileSync(LOG, JSON.stringify({ t: Date.now(), note: "stub booted; only real requests below" }) + "\\n");
-const frames = (text) => [
-  { type: "message_start", message: { id: "m1", type: "message", model: "stub", usage: { input_tokens: 8, output_tokens: 1 } } },
-  { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
-  { type: "content_block_delta", index: 0, delta: { type: "text_delta", text } },
-  { type: "content_block_stop", index: 0 },
-  { type: "message_delta", delta: { stop_reason: "end_turn" }, usage: { output_tokens: 4 } },
-  { type: "message_stop" },
-];
-const sse = (t) => frames(t).map((e) => "data: " + JSON.stringify(e)).join("\\n\\n") + "\\n\\n";
-const server = http.createServer((req, res) => {
-  const chunks = [];
-  req.on("data", (c) => chunks.push(c));
-  req.on("end", () => {
-    const body = Buffer.concat(chunks).toString("utf8");
-    appendFileSync(LOG, JSON.stringify({ t: Date.now(), path: req.url, apiKeyPresent: Boolean(req.headers["x-api-key"]), bodyBytes: body.length }) + "\\n");
-    res.writeHead(200, { "content-type": "text/event-stream" });
-    res.end(sse("STUB-ACK"));
-  });
-});
-server.listen(0, "127.0.0.1", () => console.log("STUB_READY port=" + server.address().port));
-`;
+/** Loopback-only provider stub (see fixtures/v02-ui/provider-stub.mjs): canned
+ *  SSE completion, request log on disk, and an extractive answer for the
+ *  continuity handoff worker so a fixture can exercise the real path. */
+const STUB_PATH = join(ROOT, "fixtures", "v02-ui", "provider-stub.mjs");
 
 async function spawnStub(logPath) {
-  const proc = spawn("node", ["--input-type=module", "-e", STUB_CODE(logPath)], { stdio: ["ignore", "pipe", "pipe"] });
+  const proc = spawn("node", [STUB_PATH, logPath], { stdio: ["ignore", "pipe", "pipe"] });
   let out = "";
   proc.stdout.on("data", (d) => { out += String(d); });
   await new Promise((resolve) => {
