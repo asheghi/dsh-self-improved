@@ -62,6 +62,12 @@ const rpc = async (endpoint, argsObject) => {
 };
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 /** Every offer currently served for a target session (bounded list). */
+const providerCalls = () => {
+  if (!runDir) return null;
+  const log = join(runDir, "provider-requests.jsonl");
+  if (!existsSync(log)) return null;
+  return readFileSync(log, "utf8").trim().split("\n").filter(Boolean).length;
+};
 const offersFor = async (targetSessionId) => {
   const inventory = await rpc("selfImproved/continuityStatus", { targetSessionId });
   const offers = inventory.result?.ok === true ? inventory.result.value?.offers : null;
@@ -185,6 +191,26 @@ try {
     : null;
   const otherText = otherNotes?.result?.ok === true ? otherNotes.result.value?.notes?.join("\n") ?? "" : "";
   check("the unrelated project's notes quote only its own session", otherText.includes(MARKER_OTHER) && !otherText.includes(MARKER), otherText.slice(0, 200));
+
+  // ── 9. INHERITED FORKS DO NOT INFLATE EVIDENCE ───────────────────────────
+  // A fork copies the parent's prefix. Its inherited human turn must never be
+  // read as a fresh live human coordinate, so the fork must not acquire its own
+  // handoff (which would duplicate the parent's work as independent evidence)
+  // while the parent stays offered.
+  const fork = await rpc("session/fork", { request: { sessionId: sourceId } });
+  const forkId = fork.result?.ok === true ? fork.result.value?.sessionId : null;
+  check("the source session can be forked", typeof forkId === "string" && forkId !== sourceId, JSON.stringify(fork).slice(0, 240));
+  const before = providerCalls();
+  await wait(8000);
+  const after = providerCalls();
+  const offersAfterFork = await offersFor(targetId);
+  check("an inherited fork is never offered as unfinished work of its own",
+    !!forkId && !offersAfterFork.some((item) => item.sessionId === forkId), JSON.stringify(offersAfterFork).slice(0, 260));
+  check("the parent session is still offered after the fork",
+    offersAfterFork.some((item) => item.sessionId === sourceId), JSON.stringify(offersAfterFork).slice(0, 200));
+  if (before !== null && after !== null) {
+    console.log(`INFO inherited fork caused ${after - before} provider call(s) in an 8s window (informational, not a gate)`);
+  }
 } catch (error) {
   failures++;
   console.log("FAIL end-to-end run threw :: " + String(error && error.message || error));
