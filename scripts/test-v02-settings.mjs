@@ -315,7 +315,7 @@ check("rc.2 remote surface: service registration, typert binding, SRC markers, c
 
   // SRC markers mirror the client contribution endpoints.
   const markers = remoteMethods(service).map((m) => m.exportName ?? m.method);
-  const expected = ["snapshot", "memoryDetail", "episodeDetail", "prepareMutation", "forget", "correct", "confirmCorrect", "deleteSkillRemoval", "purgeEpisodes", "dryReview"];
+  const expected = ["snapshot", "memoryDetail", "episodeDetail", "prepareMutation", "forget", "correct", "confirmCorrect", "deleteSkillRemoval", "purgeEpisodes", "dryReview", "continuityStatus", "prepareContinue", "continueSession"];
   assert.deepEqual([...markers].sort(), [...expected].sort(), "every business method carries its @Remote SRC marker");
 
   // Endpoint parity with the client descriptor table.

@@ -66,7 +66,7 @@ import {
 } from "./commands.js";
 import type { BrowserActionArgs } from "./commands.js";
 import type { MemoryStore } from "./storage.js";
-import type { ContinuityUiInventory } from "./continuity-inventory-ui.js";
+import type { ContinuityUiInventory, ContinuityUiOfferNotes } from "./continuity-inventory-ui.js";
 import { deleteSkill as deleteSkillByName } from "./evolve.js";
 
 /**
@@ -178,8 +178,12 @@ export interface MemoryBusinessDeps {
   episodeDryReview?: ((signal: AbortSignal | undefined) => Promise<unknown> | null) | null;
   /** Injectable challenge ledger (tests; production uses a per-process random secret). */
   ledger?: ActionChallengeLedger;
-  /** Read-only, body-free native processing inventory; never authorizes Continue. */
+  /** Read-only, body-free native processing inventory. It LISTS offers; it
+   *  never authorizes one (the operator door does, at the action). */
   continuityStatus?: (sessionId: string, signal?: AbortSignal) => Promise<ContinuityUiInventory>;
+  /** Operator-door Continue: the bounded notes of ONE currently offered
+   *  same-project handoff. Read only for an explicitly confirmed action. */
+  continuityOfferNotes?: (targetSessionId: string, jobId: string, signal?: AbortSignal) => Promise<ContinuityUiOfferNotes | null>;
   /** Shared journal mutation policy (src/index.ts wiring). Absent = the op
    *  still executes with its documented store semantics and this module emits
    *  a visible warning naming the GAP; it never silently claims the journal
@@ -280,6 +284,10 @@ function tombstoneLineageForMutation(deps: MemoryBusinessDeps, store: MemoryStor
 export interface MemoryBusinessApi {
   snapshot(caller: BusinessCaller, signal: AbortSignal | undefined): MemoryBusinessSnapshot;
   continuityStatus(caller: BusinessCaller, sessionId: string, signal?: AbortSignal): Promise<ContinuityUiInventory>;
+  /** Operator-door Continue step 1: mint the peer/args-bound one-shot confirm. */
+  prepareContinue(caller: BusinessCaller, targetSessionId: string, jobId: string, signal?: AbortSignal): { op: string; token: string; ttlMs: number };
+  /** Operator-door Continue step 2: read the bounded notes of one offered handoff. */
+  continueSession(caller: BusinessCaller, targetSessionId: string, jobId: string, authorization: MutationAuthorization, signal: AbortSignal | undefined): Promise<ContinuityUiOfferNotes | null>;
   memoryDetail(caller: BusinessCaller, id: string, signal: AbortSignal | undefined): Record<string, unknown>;
   episodeDetail(caller: BusinessCaller, id: string, signal: AbortSignal | undefined): unknown;
   /** Mutating handshake step 1: mint the one-shot, args-and-peer-bound challenge. */
@@ -369,16 +377,76 @@ export function createMemoryBusiness(deps: MemoryBusinessDeps): MemoryBusinessAp
   };
   const commandCaller = (): BusinessCaller => ({ peerId: null, source: "command" });
 
+  /**
+   * CONTINUE IS DOOR-ONLY.
+   *
+   * DSH labels a model-authored delegation prompt with the same
+   * `{kind:'user', rpcId}` source as a human prompt, so NO message marker can
+   * authorize resuming work. The browser door can: only a Gateway-dispatched
+   * remote call carries a peer, and the operator's confirmation is a second,
+   * deliberate round trip bound to that peer AND these exact arguments.
+   *
+   * In-process callers — the agent tool lane, other plugins, the /memory
+   * command lane — carry no peer and are refused here even though they are
+   * trusted code, because "trusted code" is precisely what cannot be told
+   * apart from a model on the message path.
+   */
+  const assertContinueArgs = (targetSessionId: unknown, jobId: unknown): { target: string; job: string } => {
+    if (typeof targetSessionId !== "string" || targetSessionId.length === 0 || targetSessionId.length > 512 || targetSessionId.includes("\0")) {
+      throw badRequest("target session identity is required");
+    }
+    if (typeof jobId !== "string" || jobId.length === 0 || jobId.length > 512 || jobId.includes("\0")) {
+      throw badRequest("handoff job identity is required");
+    }
+    return { target: targetSessionId, job: jobId };
+  };
+  // Reuses the shared challenge ledger's exact-args fingerprint ("id" = handoff
+  // job, "newId" = target session), so a confirmation minted for one offer can
+  // never authorize a different one.
+  const continueArgs = (target: string, job: string): BrowserActionArgs => ({ op: "continue", id: job, newId: target });
+  const requireOperatorDoor = (caller: BusinessCaller, args: BrowserActionArgs, authorization: MutationAuthorization, signal: AbortSignal | undefined): void => {
+    assertNotAborted(signal);
+    if (caller?.source !== "remote" || !caller.peerId) {
+      throw rejected("Continue is an operator action: it requires the browser remote door, not an in-process caller");
+    }
+    if (!authorization || typeof authorization.token !== "string" || authorization.token.length === 0) {
+      throw badRequest("Continue requires the one-shot token minted by prepareContinue");
+    }
+    if (!ledger.consume(args, authorization.token, caller.peerId)) {
+      throw rejected("Continue confirmation expired, was replayed, or failed the exact-args/peer binding; re-stage the action");
+    }
+  };
+
   return {
     async continuityStatus(caller, sessionId, signal) {
       assertInProcessOrPeer(caller);
       if (caller.source === "remote" && (!caller.peerId || typeof caller.peerId !== "string")) throw rejected("authenticated browser peer required");
       assertNotAborted(signal);
       if (typeof sessionId !== "string" || !sessionId || sessionId.length > 256 || sessionId.includes("\0")) throw badRequest("native session identity is required");
-      if (!deps.continuityStatus) return { availability: "unavailable", canContinue: false, reason: "Native continuity inspection is unavailable.", rows: [] };
+      if (!deps.continuityStatus) return { availability: "unavailable", canContinue: false, reason: "Native continuity inspection is unavailable.", rows: [], offers: [] };
       const value = await deps.continuityStatus(sessionId, signal);
       assertNotAborted(signal);
       return value;
+    },
+    async continueSession(caller, targetSessionId, jobId, authorization, signal) {
+      assertInProcessOrPeer(caller);
+      const { target, job } = assertContinueArgs(targetSessionId, jobId);
+      requireOperatorDoor(caller, continueArgs(target, job), authorization, signal);
+      if (!deps.continuityOfferNotes) return null;
+      const notes = await deps.continuityOfferNotes(target, job, signal);
+      assertNotAborted(signal);
+      return notes;
+    },
+    prepareContinue(caller, targetSessionId, jobId, signal) {
+      assertInProcessOrPeer(caller);
+      const { target, job } = assertContinueArgs(targetSessionId, jobId);
+      assertNotAborted(signal);
+      if (caller.source !== "remote" || !caller.peerId) {
+        throw rejected("Continue is an operator action: it requires the browser remote door, not an in-process caller");
+      }
+      const staged = ledger.prepare(continueArgs(target, job), caller.peerId);
+      log("business: staged Continue confirm for peer", staged.token.slice(0, 6));
+      return { op: "continue", token: staged.token, ttlMs: ledger.ttlMs };
     },
     snapshot(caller, signal) {
       assertInProcessOrPeer(caller);
@@ -643,6 +711,16 @@ export class MemoryBusinessService extends TypertRemoteService {
   @Remote
   async continuityStatus(targetSessionId: string, signal?: AbortSignal): Promise<ContinuityUiInventory> {
     return this.business.continuityStatus(this.caller(), targetSessionId, signal);
+  }
+
+  @Remote
+  async prepareContinue(targetSessionId: string, jobId: string, signal?: AbortSignal): Promise<{ op: string; token: string; ttlMs: number }> {
+    return this.business.prepareContinue(this.caller(), targetSessionId, jobId, signal);
+  }
+
+  @Remote
+  async continueSession(targetSessionId: string, jobId: string, authorization: MutationAuthorization, signal?: AbortSignal): Promise<ContinuityUiOfferNotes | null> {
+    return this.business.continueSession(this.caller(), targetSessionId, jobId, authorization, signal);
   }
 
   @Remote

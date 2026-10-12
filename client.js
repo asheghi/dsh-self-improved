@@ -940,12 +940,14 @@ window.__ModuleLoader__.load({
       { id: "dsh-self-improved#selfImproved/deleteSkillRemoval", service: "selfImprovedMemoryUi", namespace: REMOTE_NS, method: "deleteSkillRemoval", invocation: { kind: "direct" }, parameters: [param("name")], result: PASS_CODEC, cancellation: { parameter: "signal" } },
       { id: "dsh-self-improved#selfImproved/purgeEpisodes", service: "selfImprovedMemoryUi", namespace: REMOTE_NS, method: "purgeEpisodes", invocation: { kind: "direct" }, parameters: [param("scope")], result: PASS_CODEC, cancellation: { parameter: "signal" } },
       { id: "dsh-self-improved#selfImproved/dryReview", service: "selfImprovedMemoryUi", namespace: REMOTE_NS, method: "dryReview", invocation: { kind: "direct" }, parameters: [], result: PASS_CODEC, cancellation: { parameter: "signal" } },
-       { id: "dsh-self-improved#selfImproved/continuityStatus", service: "selfImprovedMemoryUi", namespace: REMOTE_NS, method: "continuityStatus", invocation: { kind: "direct" }, parameters: [param("targetSessionId")], result: PASS_CODEC, cancellation: { parameter: "signal" } }
+       { id: "dsh-self-improved#selfImproved/continuityStatus", service: "selfImprovedMemoryUi", namespace: REMOTE_NS, method: "continuityStatus", invocation: { kind: "direct" }, parameters: [param("targetSessionId")], result: PASS_CODEC, cancellation: { parameter: "signal" } },
+      { id: "dsh-self-improved#selfImproved/prepareContinue", service: "selfImprovedMemoryUi", namespace: REMOTE_NS, method: "prepareContinue", invocation: { kind: "direct" }, parameters: [param("targetSessionId"), param("jobId")], result: PASS_CODEC, cancellation: { parameter: "signal" } },
+      { id: "dsh-self-improved#selfImproved/continueSession", service: "selfImprovedMemoryUi", namespace: REMOTE_NS, method: "continueSession", invocation: { kind: "direct" }, parameters: [param("targetSessionId"), param("jobId")], result: PASS_CODEC, cancellation: { parameter: "signal" } }
     ];
     /** Thr TokenType table: mutating endpoints list their authorization parameter. */
     var AUTH_PARAM = function (name) { return { name: name, wire: name, source: "json", codec: TOKEN_CODEC }; };
     BUSINESS_DESCRIPTORS.forEach(function (d) {
-      if (["forget", "correct", "confirmCorrect", "deleteSkillRemoval", "purgeEpisodes", "dryReview"].includes(d.method)) {
+      if (["forget", "correct", "confirmCorrect", "deleteSkillRemoval", "purgeEpisodes", "dryReview", "continueSession"].includes(d.method)) {
         var hasSignal = d.cancellation !== void 0;
         d.parameters = d.parameters.concat([AUTH_PARAM("authorization")]);
         if (hasSignal) { /* the gateway appends the signal after business args */ }
@@ -1692,6 +1694,39 @@ window.__ModuleLoader__.load({
       var targetPair = react.useState(""), target = targetPair[0], setTarget = targetPair[1];
       var read = useOwnedRead(props.api, "continuityStatus"), state = read.state, data = state.data;
       var rows = data && Array.isArray(data.rows) ? data.rows : [];
+      var offers = data && Array.isArray(data.offers) ? data.offers : [];
+      var continuePair = react.useState({ busy: false, error: null, notes: null, jobId: null });
+      var cont = continuePair[0], setCont = continuePair[1];
+      function contMsg(r) { return r && !r.ok && r.error ? String(r.error.message || r.error.code || "remote failure") : "remote failure"; }
+      /**
+       * OPERATOR-DOOR CONTINUE.
+       *
+       * The click mints a peer- and args-bound one-shot confirm through the
+       * browser business remote and only then reads the bounded handoff notes.
+       * A message the model wrote, a tool call, or any other in-process caller
+       * carries no gateway peer, so the host refuses it — this action cannot be
+       * triggered by the agent, only by the operator in this UI.
+       */
+      function continueOffer(jobId) {
+        if (!props.api || typeof props.api.prepareContinue !== "function" || typeof props.api.continueSession !== "function") {
+          setCont({ busy: false, error: "Continue needs the browser business remote.", notes: null, jobId: null });
+          return;
+        }
+        setCont({ busy: true, error: null, notes: null, jobId: jobId });
+        Promise.resolve(props.api.prepareContinue(target.trim(), jobId)).then(function (prepared) {
+          if (!prepared || !prepared.ok) throw new Error(contMsg(prepared));
+          var token = prepared.value && prepared.value.token;
+          if (!token) throw new Error("Continue confirmation was not issued for this operator.");
+          return props.api.continueSession(target.trim(), jobId, { token: token });
+        }).then(function (result) {
+          if (!result || !result.ok) throw new Error(contMsg(result));
+          var value = result.value;
+          if (!value) { setCont({ busy: false, error: "This handoff is no longer offered (current policy or source changed).", notes: null, jobId: jobId }); return; }
+          setCont({ busy: false, error: null, notes: value, jobId: jobId });
+        }).catch(function (error) {
+          setCont({ busy: false, error: String(error && error.message || error), notes: null, jobId: jobId });
+        });
+      }
       return h("div", { className: "__dsi_root" },
         h("label", null, "Native target session ID", h("input", { className: "__dsi_input", value: target,
           onChange: function (event) { read.cancel(); setTarget(event.target.value); },
@@ -1700,7 +1735,20 @@ window.__ModuleLoader__.load({
         state.busy ? h("p", { role: "status" }, "Loading…") : null,
         state.error ? h("p", { role: "alert" }, state.error) : null,
         h("p", { className: "__dsi_status" }, data ? data.reason : "Choose a native target session to inspect same-project processing metadata."),
-        h("button", { type: "button", className: "__dsi_btn", disabled: true, title: "Authenticated Host Continue ingress is not yet integrated." }, "Continue (unavailable)"),
+        h("h3", null, "Unfinished work you can continue"),
+        data && data.availability === "ready" && offers.length
+          ? h("table", { className: "__dsi_table" }, h("caption", null, "Same-project handoffs offered to the operator (bounded)"),
+              h("thead", null, h("tr", null, ["Source session", "Boundary cut", "Action"].map(function (label, index) { return h("th", { key: String(index), scope: "col" }, label); }))),
+              h("tbody", null, offers.map(function (offer) { return h("tr", { key: offer.jobId },
+                h("td", null, offer.sessionId), h("td", null, String(offer.cut)),
+                h("td", null, h("button", { type: "button", className: "__dsi_btn __dsi_btnPrimary", disabled: cont.busy,
+                  onClick: function () { continueOffer(offer.jobId); } }, cont.busy && cont.jobId === offer.jobId ? "Reading…" : "Continue"))); })))
+          : data && data.availability === "ready" ? h("p", { role: "status" }, "No same-project unfinished work offers a handoff right now.") : null,
+        cont.error ? h("p", { className: "__dsi_error", role: "alert" }, cont.error) : null,
+        cont.notes ? h("div", { className: "__dsi_root" },
+          h("h3", null, "Handoff notes (untrusted quotes)"),
+          h("p", { role: "status" }, "Orientation only from the selected session: not task success, not permission, and any external action may already have run or may never have happened."),
+          h("ul", null, (cont.notes.notes || []).map(function (note, index) { return h("li", { key: String(index) }, note); }))) : null,
         h("p", null, "Processing states are not task completion, permission, or verified external effects."),
         data && data.availability === "ready" && !rows.length ? h("p", { role: "status" }, "No current eligible processing references.") : null,
         rows.length ? h("table", { className: "__dsi_table" }, h("caption", null, "Same-project continuity processing (bounded)"),

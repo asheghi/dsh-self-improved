@@ -56,7 +56,8 @@ import { createContinuityRegistrationController, loadContinuitySchema, CONTINUIT
 import { ContinuityStoreV02, fenceExistingContinuity } from "./continuity-store-v02.js";
 import { mountContinuityRuntime } from "./continuity-runtime-v02.js";
 import { ContinuityWorkerV02 } from "./continuity-worker-v02.js";
-import { readContinuityUiInventory } from "./continuity-inventory-ui.js";
+import { ContinuityHandoffV02 } from "./continuity-handoff-v02.js";
+import { readContinuityUiInventory, readContinuityUiOfferNotes, type ContinuityUiHandoffReader } from "./continuity-inventory-ui.js";
 import { continuityCanonicalDigest, continuityCanonicalHeader } from "./continuity-checkpoint-v02.js";
 import { claimContinuitySummaryHumanV02, continuitySummaryLedgersReadyV02,
   continuitySummaryPolicyFingerprintV02, syncContinuitySummaryPolicyV02 } from "./continuity-summary-ledger-owner.js";
@@ -575,12 +576,21 @@ export function apply(ctx: Context, rawConfig: RuntimeConfig): void {
   // Optional native capability: profiles without sessionProjections still
   // run accepted memory lanes. Projection registration is structural only;
   // the separate default-off provider worker is wired after source ownership.
-  // No Continue/task-resume action is installed by either lane.
+  // Continue is installed as an OPERATOR-DOOR action only (see business.ts):
+  // the browser remote mints the peer/args-bound confirm; no message marker,
+  // tool call or in-process caller can open a handoff.
   let syncContinuityProjection: () => void = () => {};
   let syncContinuityRuntime: () => void = () => {};
   let stopContinuityRuntime: () => void = () => {};
   let syncContinuityStorePolicy: () => void = () => {};
   let continuityStorePolicyHealthy = true;
+  /**
+   * Operator-door Continue reader for the mounted lane. Null while the lane is
+   * unmounted, disabled or unhealthy, and the business layer then serves no
+   * offers at all. Created lazily on first operator request so a disabled lane
+   * never touches the continuity tables.
+   */
+  let continuityHandoffReader: (() => ContinuityUiHandoffReader | undefined) | null = null;
   let syncContinuitySummaryPolicy: () => void = () => {};
   let stopContinuityWorker: () => void = () => {};
   let summaryPolicyHealthy = true;
@@ -789,6 +799,19 @@ export function apply(ctx: Context, rawConfig: RuntimeConfig): void {
         try {
           const lane = new ContinuityStoreV02(store, schemaZod);
           const continuityEnabled = (): boolean => continuityStorePolicyHealthy && readModule("capture") && config.continuity?.enabled === true;
+          // Operator-door Continue reader. Built on the FIRST operator request
+          // and only while the lane is enabled, so a disabled lane creates no
+          // continuity tables and holds no handoff instance at all.
+          let operatorHandoffs: ContinuityHandoffV02 | null = null;
+          const operatorHandoffReader = (): ContinuityUiHandoffReader | undefined => {
+            if (!continuityEnabled()) return undefined;
+            if (!operatorHandoffs) {
+              try { operatorHandoffs = new ContinuityHandoffV02(store, schemaZod); }
+              catch { operatorHandoffs = null; return undefined; }
+            }
+            return operatorHandoffs;
+          };
+          continuityHandoffReader = operatorHandoffReader;
           const runtime = mountContinuityRuntime(queryChild, lane, queryChild.sessionProjections, schemaZod, queryChild.sessionQuery,
             (session) => continuityEnabled() && !!session.header.cwd
               && !config.continuity?.excludedSessionIds.includes(session.id)
@@ -867,6 +890,7 @@ export function apply(ctx: Context, rawConfig: RuntimeConfig): void {
           const stopRuntime = (): void => { runtime.dispose(); workerDisposed = true; removeWorkerBoundary(); stopWorker(); };
           queryChild.effect(() => () => {
             stopRuntime();
+            if (continuityHandoffReader === operatorHandoffReader) continuityHandoffReader = null;
             if (stopContinuityWorker === stopWorker) stopContinuityWorker = () => {};
             if (syncContinuityRuntime === syncRuntime) syncContinuityRuntime = () => {};
             if (stopContinuityRuntime === stopRuntime) stopContinuityRuntime = () => {};
@@ -1407,15 +1431,21 @@ export function apply(ctx: Context, rawConfig: RuntimeConfig): void {
   try {
     // The shared business API (commands+browser use the same instance); the
     // remote surface is the ONLY config-namespace-free action channel on rc.2.
+    // ONE gate set for both operator-door continuity reads, so the inventory
+    // and the Continue action can never disagree about what is excluded.
+    const continuityUiGates = {
+      enabled: () => !shuttingDown && readModule("capture") && config.continuity?.enabled === true,
+      healthy: () => continuityStorePolicyHealthy,
+      allows: (id: string, projectId?: string) => !(config.continuity?.excludedSessionIds ?? []).includes(id)
+        && (projectId === undefined || !(config.continuity?.excludedProjectIds ?? []).includes(projectId)),
+    };
     const businessDeps = {
       store,
       enabled: () => config.enabled,
-      continuityStatus: (sessionId: string, signal?: AbortSignal) => readContinuityUiInventory(store, ctx.sessionQuery, sessionId, {
-        enabled: () => !shuttingDown && readModule("capture") && config.continuity?.enabled === true,
-        healthy: () => continuityStorePolicyHealthy,
-        allows: (id: string, projectId?: string) => !(config.continuity?.excludedSessionIds ?? []).includes(id)
-          && (projectId === undefined || !(config.continuity?.excludedProjectIds ?? []).includes(projectId)),
-      }, signal),
+      continuityStatus: (sessionId: string, signal?: AbortSignal) =>
+        readContinuityUiInventory(store, ctx.sessionQuery, sessionId, continuityUiGates, signal, Date.now(), continuityHandoffReader?.()),
+      continuityOfferNotes: (targetSessionId: string, jobId: string, signal?: AbortSignal) =>
+        readContinuityUiOfferNotes(store, ctx.sessionQuery, targetSessionId, jobId, continuityUiGates, continuityHandoffReader?.(), signal),
       skillsPrefix: () => config.evolve.skillSynthesis.prefix,
       skillsRoot: () => skillsRootLive(),
       episodeEnabled: () => episodeState.enabled,

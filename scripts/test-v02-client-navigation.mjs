@@ -35,6 +35,11 @@ await check('real generated descriptor, cancellation parameter and namespace ide
   let descriptors; const remote = { $mount: async spec => { descriptors = spec.descriptors; return () => {}; } };
   const mounting = sut.mountBusinessRemote({ get: () => remote }); assert.equal(await mounting.settled, true);
   const descriptor = descriptors.find(row => row.method === 'continuityStatus'); assert.ok(descriptor); assert.equal(descriptor.parameters[0].name, 'targetSessionId'); assert.equal(descriptor.cancellation.parameter, 'signal');
+  const prepare = descriptors.find(row => row.method === 'prepareContinue'); assert.ok(prepare);
+  assert.equal(prepare.parameters.map(p => p.name).join(','), 'targetSessionId,jobId');
+  const cont = descriptors.find(row => row.method === 'continueSession'); assert.ok(cont);
+  assert.equal(cont.parameters.map(p => p.name).join(','), 'targetSessionId,jobId,authorization');
+  assert.equal(cont.cancellation.parameter, 'signal');
   const namespace = Object.create({ snapshot() {} }); assert.equal(sut.businessApi({ get: () => namespace }), namespace); await mounting.dispose();
 });
 await check('actual four-tab state, panel IDs, roving focus and keyboard navigation', async () => {
@@ -49,12 +54,40 @@ await check('Overview actually calls authorized snapshot and renders bounded cou
   let calls = 0; const h = harness(sut.OverviewSection, props({ snapshot: async signal => { calls++; assert.ok(signal instanceof AbortSignal); return { ok: true, value: { memories: [{}, {}], pending: 3, episodes: { counts: { reviewed: 4 } }, skills: [{}] } }; } }));
   h.render(); await flush(); const tree = h.render(); assert.equal(calls, 1); assert.match(text(tree), /bounded/); assert.deepEqual(nodes(tree, n => n.type === 'dd').map(text), ['2', '3', '4', '1']); h.unmount();
 });
-await check('Sessions sends exact selected identity with signal, renders rows and never enables Continue', async () => {
-  const calls = []; const h = harness(sut.SessionsSection, props({ continuityStatus: async (id, signal) => { calls.push({ id, signal }); return { ok: true, value: { availability: 'ready', canContinue: false, reason: 'Authenticated ingress absent.', rows: [{ id: 'job', sessionId: 'source-id', cut: 8, status: 'running', attempts: 1 }] } }; } }));
+await check('Sessions sends exact selected identity with signal and renders rows without inventing an offer', async () => {
+  const calls = []; const h = harness(sut.SessionsSection, props({ continuityStatus: async (id, signal) => { calls.push({ id, signal }); return { ok: true, value: { availability: 'ready', canContinue: false, reason: 'No offer.', rows: [{ id: 'job', sessionId: 'source-id', cut: 8, status: 'running', attempts: 1 }], offers: [] } }; } }));
   let tree = h.render(); nodes(tree, n => n.type === 'input')[0].props.onChange({ target: { value: 'native-target' } }); tree = h.render();
   nodes(tree, n => n.type === 'button' && text(n) === 'browserRefresh')[0].props.onClick(); await flush(); tree = h.render();
   assert.equal(calls[0].id, 'native-target'); assert.ok(calls[0].signal instanceof AbortSignal); assert.match(text(tree), /source-id/); assert.match(text(tree), /running/);
-  assert.equal(nodes(tree, n => n.type === 'button' && text(n).startsWith('Continue'))[0].props.disabled, true); h.unmount();
+  // No offer means no Continue control at all — the UI never implies a capability it lacks.
+  assert.equal(nodes(tree, n => n.type === 'button' && text(n).startsWith('Continue')).length, 0);
+  assert.match(text(tree), /No same-project unfinished work offers a handoff/); h.unmount();
+});
+await check('Sessions Continue is an operator action: the click mints the peer-bound confirm then renders bounded notes', async () => {
+  const calls = [];
+  const api = {
+    continuityStatus: async () => ({ ok: true, value: { availability: 'ready', canContinue: true, reason: 'One offer.', rows: [], offers: [{ jobId: 'job-1', sessionId: 'source-id', cut: 8 }] } }),
+    prepareContinue: async (target, jobId) => { calls.push(['prepare', target, jobId]); return { ok: true, value: { op: 'continue', token: 'tok', ttlMs: 1000 } }; },
+    continueSession: async (target, jobId, authorization) => { calls.push(['continue', target, jobId, authorization.token]); return { ok: true, value: { jobId, sessionId: 'source-id', cut: 8, notes: ['ran the tests', 'one file left'], uncertain: true } }; },
+  };
+  const h = harness(sut.SessionsSection, props(api)); let tree = h.render();
+  nodes(tree, n => n.type === 'input')[0].props.onChange({ target: { value: 'native-target' } }); tree = h.render();
+  nodes(tree, n => n.type === 'button' && text(n) === 'browserRefresh')[0].props.onClick(); await flush(); tree = h.render();
+  const button = nodes(tree, n => n.type === 'button' && text(n) === 'Continue')[0]; assert.ok(button, 'an offer renders its own Continue control'); assert.equal(button.props.disabled, false);
+  button.props.onClick(); await flush(); tree = h.render();
+  assert.deepEqual(calls, [['prepare', 'native-target', 'job-1'], ['continue', 'native-target', 'job-1', 'tok']]);
+  assert.match(text(tree), /ran the tests/); assert.match(text(tree), /not task success/); h.unmount();
+});
+await check('Sessions Continue reports a withdrawn offer and a missing door instead of showing stale notes', async () => {
+  const offer = { ok: true, value: { availability: 'ready', canContinue: true, reason: 'One offer.', rows: [], offers: [{ jobId: 'job-1', sessionId: 'source-id', cut: 8 }] } };
+  const flow = async api => { const h = harness(sut.SessionsSection, props(api)); let tree = h.render();
+    nodes(tree, n => n.type === 'input')[0].props.onChange({ target: { value: 'target' } }); tree = h.render();
+    nodes(tree, n => n.type === 'button' && text(n) === 'browserRefresh')[0].props.onClick(); await flush(); tree = h.render();
+    nodes(tree, n => n.type === 'button' && text(n) === 'Continue')[0].props.onClick(); await flush(); tree = h.render(); return { h, text: text(tree) }; };
+  const withdrawn = await flow({ continuityStatus: async () => offer, prepareContinue: async () => ({ ok: true, value: { token: 'tok' } }), continueSession: async () => ({ ok: true, value: null }) });
+  assert.match(withdrawn.text, /no longer offered/); assert.doesNotMatch(withdrawn.text, /not task success/); withdrawn.h.unmount();
+  const noDoor = await flow({ continuityStatus: async () => offer });
+  assert.match(noDoor.text, /browser business remote/); noDoor.h.unmount();
 });
 await check('superseded and unmounted reads abort and cannot admit late result or error', async () => {
   const pending = []; const h = harness(sut.SessionsSection, props({ continuityStatus: (id, signal) => { const d = deferred(); pending.push({ ...d, id, signal }); return d.promise; } }));
