@@ -92,15 +92,22 @@ export class ContinuityWorkerV02 {
     const timer = setTimeout(abort, CALL_MS);
     let observation: SessionObservation | undefined;
     let claim: ContinuityWorkClaim | null = null;
+    // Structural failure tag only: which stage failed. It is a CONSTANT string
+    // and never the exception text, provider output or source payload, so a
+    // failure can be diagnosed from the host console without logging content.
+    let stage = "claim";
     try {
       claim = this.work.claim(projectId, this.clock(), LEASE_MS);
       if (!claim) return "idle";
       if (!this.admitted(claim, control.signal)) { control.abort(); return "refused"; }
       // Logical ID comes only from the trusted durable claim. Never invent a
       // native observation lease/cursor or use deprecated synchronous reads.
+      stage = "observe";
       observation = await this.query.observeSession(claim.sessionId as SessionId, { signal: control.signal, projectionMode: "none" });
       if (!this.admitted(claim, control.signal)) { control.abort(); return "refused"; }
+      stage = "verify-source";
       verifyContinuityWorkSource(claim, observation, this.registry, this.z);
+      stage = "excerpts";
       const excerpts = this.excerpts(claim, observation);
       const body = JSON.stringify({ partial: true, unverified: true, excerpts });
       if (body.length + SYSTEM.length > WIRE_CHARS) throw new Error("continuity provider input exceeds budget");
@@ -110,6 +117,7 @@ export class ContinuityWorkerV02 {
       const options: GenerateOptions = { provider: this.route.provider, model: this.route.model,
         system: SYSTEM, messages: [{ role: "user", content: [{ type: "text", text: body }] }],
         maxTokens: 768, temperature: 0, signal: control.signal };
+      stage = "provider-stream";
       let text = "", chunks = 0, stopped = false;
       for await (const chunk of this.llm.stream(options)) {
         if (!this.admitted(claim, control.signal)) { control.abort(); return "refused"; }
@@ -127,6 +135,7 @@ export class ContinuityWorkerV02 {
       }
       if (!this.admitted(claim, control.signal)) { control.abort(); return "refused"; }
       if (!stopped) throw new Error("continuity provider missing stop");
+      stage = "provider-output";
       const parsed = this.output.parse(JSON.parse(text));
       const seen = new Set<string>();
       const notes = parsed.excerpts.map(item => {
@@ -142,6 +151,7 @@ export class ContinuityWorkerV02 {
       // Hold the SAME SQLite writer across original verified-claim admission
       // and nested atomic handoff settlement. Separate snapshots would permit
       // a foreign writer to substitute source anchors between these operations.
+      stage = "commit";
       const committed = this.owner.runInImmediateTransaction(() => {
         if (!this.admitted(claim!, control.signal)) { control.abort(); return false; }
         return this.handoffs.commit(claim!.token, this.clock(), { notes });
@@ -153,6 +163,10 @@ export class ContinuityWorkerV02 {
       const refused = claim !== null && !this.admitted(claim, control.signal);
       control.abort();
       if (claim && !refused) this.work.fail(claim.token, this.clock());
+      // The stage name is a constant: enough to locate a silent failure from
+      // the host console (the plan requires real, actionable failure status)
+      // without ever logging session content or provider text.
+      console.warn("[dsh-self-improved] continuity handoff failed at stage:", stage, refused ? "(policy refused)" : "");
       return refused ? "refused" : "failed";
     } finally {
       try { observation?.[Symbol.dispose](); }

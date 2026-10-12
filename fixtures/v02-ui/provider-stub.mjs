@@ -32,15 +32,28 @@ const frames = (text) => [
 ];
 const sse = (t) => frames(t).map((e) => "data: " + JSON.stringify(e)).join("\n\n") + "\n\n";
 
+/** Locate the continuity worker payload in any text part of any message. */
+function excerptPayload(wire) {
+  const texts = [];
+  for (const message of Array.isArray(wire?.messages) ? wire.messages : []) {
+    const content = message?.content;
+    if (typeof content === "string") texts.push(content);
+    else if (Array.isArray(content)) for (const part of content) if (typeof part?.text === "string") texts.push(part.text);
+  }
+  for (const text of texts) {
+    try { const parsed = JSON.parse(text); if (Array.isArray(parsed?.excerpts)) return parsed; } catch { /* not the worker prompt */ }
+  }
+  return null;
+}
+
 /** Answer the continuity worker extractively, or fall back to the ack text. */
 function replyText(body) {
   try {
-    const wire = JSON.parse(body);
-    const inner = wire?.messages?.[0]?.content?.[0]?.text;
-    if (typeof inner !== "string") return "STUB-ACK";
-    const payload = JSON.parse(inner);
+    const payload = excerptPayload(JSON.parse(body));
     const first = Array.isArray(payload?.excerpts) ? payload.excerpts[0] : null;
-    if (!first || typeof first.text !== "string" || !Number.isInteger(first.seq)) return "STUB-ACK";
+    if (!payload) return "STUB-ACK";
+    if (!first) return JSON.stringify({ excerpts: [] });
+    if (typeof first.text !== "string" || !Number.isInteger(first.seq)) return "STUB-ACK";
     const quote = first.text.slice(0, Math.min(80, first.text.length));
     if (!quote.trim()) return JSON.stringify({ excerpts: [] });
     return JSON.stringify({ excerpts: [{ seq: first.seq, quote }] });

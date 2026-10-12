@@ -38,6 +38,7 @@ import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import {
   copyFileSync,
+  createWriteStream,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -159,7 +160,14 @@ function scaffoldProfile(profileDir, pluginDir) {
     "# the real settings UX mounts on the profile-patch face.\n" +
     "- insert:\n" +
     `    - id: dsh-self-improved\n      name: ${pathToFileURL(join(pluginDir, "lib", "index.js")).href}\n\n` +
-    "- id: session-telemetry-otel\n  disabled: true\n");
+    "- id: session-telemetry-otel\n  disabled: true\n" +
+    // Opt-in fixture config for the end-to-end continuity run: the lane and its
+    // body consent are ON at boot, with the aux route pointed at the loopback
+    // provider stub. Only the e2e fixture sets DSI_E2E_CONTINUITY; every other
+    // mounted gate keeps composing the row without a config block.
+    (process.env.DSI_E2E_CONTINUITY === "1"
+      ? "\n- id: dsh-self-improved\n  config:\n    extract:\n      provider: deepseek-official\n      model: deepseek-flash\n    continuity:\n      enabled: true\n      summaryEnabled: true\n"
+      : ""));
 }
 
 /** Loopback-only provider stub (see fixtures/v02-ui/provider-stub.mjs): canned
@@ -230,17 +238,24 @@ async function stageUp() {
   const env = serverEnv(home, stub.port);
   const argv = [DSH_BIN, "--profile", profileName, "--no-open", "--port", "0"];
   const proc = spawn("node", argv, { env, stdio: ["ignore", "pipe", "pipe"], detached: true });
+  // The server's own console is the ONLY place most mounted failures explain
+  // themselves (plugin warnings, refusals, provider errors). Tee both streams
+  // to <runDir>/server.log so `verify` and a human can read them, and never
+  // leave a piped stream unread (an unread pipe blocks the child).
+  const serverLog = join(runDir, "server.log");
+  const serverLogStream = createWriteStream(serverLog, { flags: "w" });
   let out = "";
   const url = await new Promise((resolve) => {
     const timer = setInterval(() => { const m = out.match(/dsh web: (http\S+)/); if (m) { clearInterval(timer); resolve(m[1]); } }, 100);
-    proc.stdout.on("data", (d) => { out += String(d); });
+    proc.stdout.on("data", (d) => { const text = String(d); out += text; serverLogStream.write(text); });
+    proc.stderr.on("data", (d) => { serverLogStream.write(String(d)); });
     setTimeout(() => { clearInterval(timer); resolve(null); }, 40000);
   });
   if (!url) throw new Error("test GUI server did not report a URL\n" + out);
   const facts = {
     runid, runDir, home, pluginDir, profileDir, profileName,
     stub: { port: stub.port, pid: stub.proc.pid, log: join(runDir, "provider-requests.jsonl") },
-    server: { pid: proc.pid },
+    server: { pid: proc.pid, log: serverLog },
     url,
     build: sha256File(join(ROOT, "lib", "index.js")),
     client: sha256File(join(ROOT, "client.js")),
