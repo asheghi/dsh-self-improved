@@ -1,0 +1,116 @@
+{
+  "scope": "Synthetic prompt-level procedural aid; not native plugin or Phase E acceptance",
+  "fixtureSha256": "421d34df19f9b63b3a268d2e283cdc28ee41af76ec19367901fa562cbfa20908",
+  "executorSessions": 2,
+  "model": "Same session-default selection requested; effective provider/model/sampling and ambient context not independently attested",
+  "tokenCost": null,
+  "monetaryCost": null,
+  "inferenceLatency": null,
+  "aggregationReport": {
+    "version": "paired-experiment-v1",
+    "baseline": "no-learning",
+    "arms": [
+      "no-learning",
+      "frozen-procedural-aid"
+    ],
+    "tasks": 4,
+    "trialsPlanned": 8,
+    "trialsRun": 8,
+    "unverifiedTrials": 0,
+    "notExecutedTrials": 0,
+    "stoppedReason": "completed",
+    "perArm": {
+      "no-learning": {
+        "ran": 4,
+        "verified": 4,
+        "passed": 4
+      },
+      "frozen-procedural-aid": {
+        "ran": 4,
+        "verified": 4,
+        "passed": 4
+      }
+    },
+    "paired": {
+      "pairs": 4,
+      "wins": 0,
+      "losses": 0,
+      "ties": 4
+    },
+    "measured": true,
+    "startedAt": 1791891822389,
+    "endedAt": 1791891822389
+  },
+  "perTask": [
+    {
+      "id": "eligible",
+      "control": false,
+      "outcomes": {
+        "no-learning": {
+          "id": "eligible",
+          "verified": true,
+          "passed": true
+        },
+        "frozen-procedural-aid": {
+          "id": "eligible",
+          "verified": true,
+          "passed": true
+        }
+      }
+    },
+    {
+      "id": "quorum",
+      "control": false,
+      "outcomes": {
+        "no-learning": {
+          "id": "quorum",
+          "verified": true,
+          "passed": true
+        },
+        "frozen-procedural-aid": {
+          "id": "quorum",
+          "verified": true,
+          "passed": true
+        }
+      }
+    },
+    {
+      "id": "unrelated-control",
+      "control": true,
+      "outcomes": {
+        "no-learning": {
+          "id": "unrelated-control",
+          "verified": true,
+          "passed": true
+        },
+        "frozen-procedural-aid": {
+          "id": "unrelated-control",
+          "verified": true,
+          "passed": true
+        }
+      }
+    },
+    {
+      "id": "current-rule-control",
+      "control": true,
+      "outcomes": {
+        "no-learning": {
+          "id": "current-rule-control",
+          "verified": true,
+          "passed": true
+        },
+        "frozen-procedural-aid": {
+          "id": "current-rule-control",
+          "verified": true,
+          "passed": true
+        }
+      }
+    }
+  ],
+  "limitations": [
+    "One trial per task; batched answers within each arm are correlated",
+    "No trained plugin draft, native activation or held-out real project executor",
+    "No token, provider-cost, task-latency or general privacy measurement",
+    "Gold authored by coordinator before run; not independently implemented reference semantics"
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "sessionId": "067514a5-b2d1-47a6-95dc-e92dbbb9768a",
+  "promptSha256": "3364165de3f39bee60ce5fd607e9e249c388b54da95bd204b89623e2e8261a33",
+  "promptTransport": "Exact text copied into standalone subagent call; prompt file has an additional terminal newline",
+  "raw": "{\"eligible\":[\"a\",\"d\"],\"quorum\":{\"roots\":[\"r1\",\"r4\"],\"qualified\":false},\"unrelated-control\":{\"rotated\":[8,2,5,3],\"checksum\":39},\"current-rule-control\":{\"m\":9,\"n\":2}}"
+}
