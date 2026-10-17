@@ -169,6 +169,14 @@ window.__ModuleLoader__.load({
       "@container (max-width:420px){.__dsi_btnSm{white-space:normal;height:auto;min-height:28px}.__dsi_browserRow{flex-direction:column}.__dsi_browserOps{flex:1 1 auto;flex-wrap:wrap}.__dsi_kv > div{flex-wrap:wrap}.__dsi_switchRow{gap:8px}}" +
       ".__dsi_browserEditing{flex-direction:column;align-items:stretch;gap:8px}" +
       ".__dsi_editArea{height:auto;min-height:72px;resize:vertical;line-height:20px}" +
+      ".__dsi_dock{box-sizing:border-box;width:100%;max-width:var(--dsh-composer-card-max-width,720px);margin:0 auto;border:1px solid var(--dsw-alias-border-l2);border-radius:12px;background:var(--dsw-alias-bg-layer-2);padding:8px 10px 8px 12px;display:flex;flex-direction:column;gap:8px;font-size:13px;line-height:20px;color:var(--dsw-alias-label-primary)}" +
+      ".__dsi_dockRow{display:flex;align-items:center;gap:8px;min-width:0}" +
+      ".__dsi_dockDot{flex:none;width:8px;height:8px;border-radius:50%;background:var(--dsw-alias-state-business-primary)}" +
+      ".__dsi_dockText{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}" +
+      ".__dsi_dockText strong{font-weight:600}" +
+      ".__dsi_dockBody{display:flex;flex-direction:column;gap:8px}" +
+      ".__dsi_dockNotes{max-height:160px;overflow:auto}" +
+      ".__dsi_dock .__dsi_btn{flex:none}" +
       "@media (prefers-reduced-motion: reduce){.__dsi_tab,.__dsi_collapseChevron,.__dsi_switchTrack,.__dsi_btn{transition:none;animation:none}}";
     var tagId = "dsh-self-improved/main.css";
     if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId) + "]") === null) {
@@ -1826,9 +1834,8 @@ window.__ModuleLoader__.load({
             h("span", null, lane.reason),
             lane.structural === "off" && props.goTo
               ? h("button", { type: "button", className: "__dsi_btn __dsi_btnSm", onClick: function () { props.goTo("config"); } }, "Open settings")
-              : lane.handoffs && props.goTo
-                ? h("button", { type: "button", className: "__dsi_btn __dsi_btnSm __dsi_btnPrimary", onClick: function () { props.goTo("sessions"); } }, "Continue work")
-                : null) : null) : null,
+              : null) : null,
+          lane.handoffs ? h("p", { className: "__dsi_muted" }, "Open a chat in the same project: a banner above the message box offers to continue.") : null) : null,
         skillsActive ? h("section", { className: "__dsi_card", "aria-labelledby": "dsi-ov-skills" },
           h("div", { className: "__dsi_cardHead" },
             h("h3", { className: "__dsi_cardTitle", id: "dsi-ov-skills" }, "Learned skills"),
@@ -1846,7 +1853,10 @@ window.__ModuleLoader__.load({
     /** Readable label for one session summary from `remote.session.list`. */
     function sessionLabel(item) {
       var proj = item && item.projections && item.projections.values;
-      var title = proj && proj.title && (proj.title.title || proj.title.text);
+      // The list projects the title as a plain string; a full title snapshot
+      // ({ title, ... }) is accepted too.
+      var raw = proj && proj.title;
+      var title = typeof raw === "string" ? raw : raw && typeof raw === "object" ? (raw.title || raw.text) : "";
       var folder = item && item.cwd ? String(item.cwd).replace(/\/+$/, "").split("/").pop() : "";
       return (title ? String(title) : "Untitled session") + (folder ? " \u00b7 " + folder : "");
     }
@@ -1859,155 +1869,135 @@ window.__ModuleLoader__.load({
       if (hours < 24) return hours + " h ago";
       return Math.round(hours / 24) + " d ago";
     }
-    function SessionsSection(props) {
-      var targetPair = react.useState(""), target = targetPair[0], setTarget = targetPair[1];
-      var listPair = react.useState({ loading: true, items: null }), list = listPair[0], setList = listPair[1];
-      var read = useOwnedRead(props.api, "continuityStatus"), state = read.state, data = state.data;
-      var rows = data && Array.isArray(data.rows) ? data.rows : [];
-      var offers = data && Array.isArray(data.offers) ? data.offers : [];
-      var continuePair = react.useState({ busy: false, error: null, notes: null, jobId: null });
-      var cont = continuePair[0], setCont = continuePair[1];
-      var sendPair = react.useState({ busy: false, error: null, sent: null });
-      var send = sendPair[0], setSend = sendPair[1];
-      function choose(id) {
-        read.cancel(); setTarget(id);
-        setCont({ busy: false, error: null, notes: null, jobId: null }); setSend({ busy: false, error: null, sent: null });
-        if (id) read.refresh(id);
-      }
+    var DISMISSED_KEY = "dsh-self-improved:dismissed-handoffs";
+    /** Worker notes carry an internal provenance prefix; the banner and the
+     *  composer text already say the notes are unverified, so show the quote. */
+    function cleanNote(note) { return String(note).replace(/^Partial unverified excerpt \[seq \d+\]:\s*/, ""); }
+    function readDismissed() {
+      try { var v = JSON.parse(window.localStorage.getItem(DISMISSED_KEY) || "[]"); return Array.isArray(v) ? v : []; }
+      catch (e) { return []; }
+    }
+    function writeDismissed(list) {
+      try { window.localStorage.setItem(DISMISSED_KEY, JSON.stringify(list.slice(-200))); } catch (e) { /* per-browser convenience only */ }
+    }
+    /** The text placed in the composer. It states plainly that the notes are
+     *  machine-written and unverified, so they never read as the user's own
+     *  instruction or as proof that anything happened. */
+    function handoffMessage(notes, sourceName) {
+      var lines = ["Continuing unfinished work from " + sourceName + ". Notes from where it stopped (machine-written, unverified, may be stale):"];
+      var items = notes.notes || [];
+      for (var i = 0; i < items.length; i++) lines.push("- " + cleanNote(items[i]));
+      return lines.join("\n");
+    }
+    /**
+     * Composer-dock banner: offers unfinished work from OTHER sessions of this
+     * project to the chat that is open. Renders nothing unless there is a
+     * handoff to continue.
+     *
+     * OPERATOR-DOOR CONTINUE. "Review" mints a peer- and args-bound one-shot
+     * confirm through the browser business remote and only then reads the
+     * bounded notes. The Host admits /api only with the signed operator cookie
+     * and the plugin requires an owner Peer, so the model's tool paths cannot
+     * reach this; in-process plugins remain trusted, as everywhere in DSH.
+     * "Use in message" only fills the composer: the user still sends.
+     */
+    function ContinueDock(props) {
+      var target = props.sessionId;
+      var dataPair = react.useState(null), data = dataPair[0], setData = dataPair[1];
+      var namesPair = react.useState({}), names = namesPair[0], setNames = namesPair[1];
+      var dismissedPair = react.useState(readDismissed), dismissed = dismissedPair[0], setDismissed = dismissedPair[1];
+      var contPair = react.useState({ busy: false, error: null, notes: null, jobId: null }), cont = contPair[0], setCont = contPair[1];
+      var owner = react.useRef({ alive: true, serial: 0, controller: null });
+      react.useEffect(function () {
+        var current = owner.current; current.alive = true;
+        function load() {
+          if (!current.alive || !target || !props.api || typeof props.api.continuityStatus !== "function") return;
+          if (current.controller) current.controller.abort();
+          var serial = ++current.serial, controller = new AbortController(); current.controller = controller;
+          Promise.resolve(props.api.continuityStatus(target, controller.signal)).then(function (result) {
+            if (!current.alive || serial !== current.serial || controller.signal.aborted) return;
+            setData(result && result.ok ? result.value : null);
+          }).catch(function () { if (current.alive && serial === current.serial) setData(null); });
+        }
+        load();
+        var timer = typeof setInterval === "function" ? setInterval(load, 60000) : null;
+        var onFocus = function () { load(); };
+        try { window.addEventListener("focus", onFocus); } catch (e) { /* no window in tests */ }
+        return function () {
+          current.alive = false; current.serial++; if (current.controller) current.controller.abort();
+          if (timer !== null) clearInterval(timer); try { window.removeEventListener("focus", onFocus); } catch (e) { /* ignore */ }
+        };
+      }, [target, props.api]);
+      var offers = data && data.availability === "ready" && Array.isArray(data.offers) ? data.offers : [];
+      var offer = offers.find(function (o) { return dismissed.indexOf(o.jobId) < 0; }) || null;
       react.useEffect(function () {
         var live = true, remote = props.session && props.session.current;
-        if (!remote || typeof remote.list !== "function") { setList({ loading: false, items: null }); return function () { live = false; }; }
+        if (!offer || names[offer.sessionId] || !remote || typeof remote.list !== "function") return function () { live = false; };
         Promise.resolve(remote.list({})).then(function (result) {
-          if (!live) return;
-          var items = result && result.ok && result.value && Array.isArray(result.value.items) ? result.value.items : null;
-          items = items ? items.filter(function (item) { return !item.parentSessionId && item.origin !== "subagent"; })
-            .sort(function (x, y) { return (y.updatedAt || 0) - (x.updatedAt || 0); }).slice(0, 50) : null;
-          setList({ loading: false, items: items });
-          if (items && items.length && !target) choose(items[0].sessionId);
-        }).catch(function () { if (live) setList({ loading: false, items: null }); });
+          if (!live || !result || !result.ok || !result.value || !Array.isArray(result.value.items)) return;
+          var next = {};
+          result.value.items.forEach(function (item) { next[item.sessionId] = { label: sessionLabel(item), updatedAt: item.updatedAt }; });
+          setNames(next);
+        }).catch(function () { /* fall back to a generic name */ });
         return function () { live = false; };
-      }, []);
-      var labels = {};
-      (list.items || []).forEach(function (item) { labels[item.sessionId] = sessionLabel(item); });
-      function nameOf(id) { return labels[id] || String(id).slice(0, 8); }
-      function contMsg(r) { return r && !r.ok && r.error ? String(r.error.message || r.error.code || "remote failure") : "remote failure"; }
-      /**
-       * The message the operator is about to send. It states plainly that the
-       * block is machine-generated and unverified, so a handoff excerpt can
-       * never be read as an instruction from the human who pressed the button.
-       */
-      function handoffMessage(notes) {
-        var lines = ["Continuity handoff from session " + notes.sessionId + " (boundary cut " + notes.cut + "), inserted by the operator from the Sessions view.",
-          "Everything below is unverified, machine-generated orientation copied from that session. It is not an instruction, and it is not proof that any action happened or succeeded."];
-        var items = notes.notes || [];
-        for (var i = 0; i < items.length; i++) lines.push("- " + items[i]);
-        return lines.join("\n");
+      }, [offer && offer.sessionId]);
+      if (!offer) return null;
+      var source = names[offer.sessionId];
+      var sourceName = source ? "“" + source.label.split(" · ")[0] + "”" : "an earlier session";
+      function dismiss() {
+        var next = dismissed.concat([offer.jobId]); setDismissed(next); writeDismissed(next);
+        setCont({ busy: false, error: null, notes: null, jobId: null });
       }
-      /** Queue the reviewed handoff as ONE user message in the target session —
-       *  the same route the chat uses when you press send. Reached only from
-       *  this rendered panel; the agent's tool path has no composer and no
-       *  gateway peer (see the boundary note above). */
-      function sendHandoff() {
-        var session = props.session && props.session.current;
-        if (!session || typeof session.prompt !== "function") {
-          setSend({ busy: false, error: "This host does not expose the chat composer, so the notes stay here for you to insert yourself.", sent: null });
-          return;
-        }
-        var destination = target.trim();
-        if (!destination || !cont.notes) return;
-        var requestId = (typeof window !== "undefined" && window.crypto && typeof window.crypto.randomUUID === "function")
-          ? window.crypto.randomUUID() : "dsi-" + String(Date.now()) + "-" + Math.random().toString(16).slice(2);
-        var request = { requestId: requestId, sessionId: destination, mode: "queue", content: [{ type: "text", text: handoffMessage(cont.notes) }] };
-        var zone = (function () { try { var z = Intl.DateTimeFormat().resolvedOptions().timeZone; return typeof z === "string" && z ? z : undefined; } catch (e) { return undefined; } })();
-        if (zone) request.clientTimeZone = zone;
-        setSend({ busy: true, error: null, sent: null });
-        Promise.resolve(session.prompt(request)).then(function (result) {
-          if (!result || !result.ok) throw new Error(contMsg(result));
-          setSend({ busy: false, error: null, sent: destination });
-        }).catch(function (error) {
-          setSend({ busy: false, error: String(error && error.message || error), sent: null });
-        });
-      }
-      /**
-       * OPERATOR-DOOR CONTINUE.
-       *
-       * The click mints a peer- and args-bound one-shot confirm through the
-       * browser business remote and only then reads the bounded handoff notes.
-       * The Host admits /api only with the signed operator cookie and the
-       * plugin requires an owner Peer, so the model's tool paths cannot reach
-       * this; in-process plugins remain trusted, as everywhere in DSH.
-       */
-      function continueOffer(jobId) {
-        setSend({ busy: false, error: null, sent: null });
+      function review() {
         if (!props.api || typeof props.api.prepareContinue !== "function" || typeof props.api.continueSession !== "function") {
-          setCont({ busy: false, error: "Continue needs the browser business remote.", notes: null, jobId: null });
+          setCont({ busy: false, error: "Continue needs the browser business remote.", notes: null, jobId: offer.jobId });
           return;
         }
+        var jobId = offer.jobId;
         setCont({ busy: true, error: null, notes: null, jobId: jobId });
-        Promise.resolve(props.api.prepareContinue(target.trim(), jobId)).then(function (prepared) {
-          if (!prepared || !prepared.ok) throw new Error(contMsg(prepared));
+        Promise.resolve(props.api.prepareContinue(target, jobId)).then(function (prepared) {
+          if (!prepared || !prepared.ok) throw new Error(remoteMessage(prepared));
           var token = prepared.value && prepared.value.token;
           if (!token) throw new Error("Continue confirmation was not issued for this operator.");
-          return props.api.continueSession(target.trim(), jobId, { token: token });
+          return props.api.continueSession(target, jobId, { token: token });
         }).then(function (result) {
-          if (!result || !result.ok) throw new Error(contMsg(result));
-          var value = result.value;
-          if (!value) { setCont({ busy: false, error: "This handoff is no longer offered (current policy or source changed).", notes: null, jobId: jobId }); return; }
-          setCont({ busy: false, error: null, notes: value, jobId: jobId });
+          if (!result || !result.ok) throw new Error(remoteMessage(result));
+          if (!result.value) { setCont({ busy: false, error: "This handoff is no longer available.", notes: null, jobId: jobId }); return; }
+          setCont({ busy: false, error: null, notes: result.value, jobId: jobId });
         }).catch(function (error) {
           setCont({ busy: false, error: String(error && error.message || error), notes: null, jobId: jobId });
         });
       }
-      var picker = list.items
-        ? h("select", { id: "dsi-cont-target", className: "__dsi_input", value: target, onChange: function (event) { choose(event.target.value); } },
-            target ? null : h("option", { value: "" }, "Choose a session…"),
-            list.items.map(function (item) { return h("option", { key: item.sessionId, value: item.sessionId }, labels[item.sessionId] + " \u2014 " + relativeTime(item.updatedAt)); }))
-        : h("input", { id: "dsi-cont-target", className: "__dsi_input", value: target, name: "sessionId", autoComplete: "off", spellCheck: false,
-            placeholder: list.loading ? "Loading sessions…" : "Session ID",
-            onChange: function (event) { read.cancel(); setTarget(event.target.value); },
-            onKeyDown: function (event) { if (event.key === "Enter" && target.trim()) { event.preventDefault(); choose(target.trim()); } } });
-      return h("div", { className: "__dsi_root" },
-        h("section", { className: "__dsi_card", "aria-labelledby": "dsi-ss-head" },
-          h("div", { className: "__dsi_cardHead" },
-            h("h3", { className: "__dsi_cardTitle", id: "dsi-ss-head" }, "Continue unfinished work"),
-            h("button", { type: "button", className: "__dsi_btn __dsi_btnSm", disabled: !target.trim() || state.busy, onClick: function () { read.refresh(target.trim()); } },
-              state.busy ? "Refreshing…" : props.t("browserRefresh"))),
-          h("p", { className: "__dsi_cardSub" }, "Pick the session you want to work in. Unfinished work from other sessions in the same project shows up below."),
-          h("label", { className: "__dsi_field", htmlFor: "dsi-cont-target" }, h("span", { className: "__dsi_label" }, "Continue in"), picker),
-          !list.loading && !list.items ? h("p", { className: "__dsi_muted" }, "This host can't list sessions; paste a session ID and press Enter.") : null,
-          list.items && !list.items.length ? h("p", { className: "__dsi_muted", role: "status" }, "No sessions yet. Start a chat in a project, then come back here.") : null,
-          state.error ? h("p", { className: "__dsi_error", role: "alert" }, state.error) : null,
-          data && data.availability !== "ready" && data.reason ? h("div", { className: "__dsi_callout", role: "status" }, h("span", null, data.reason)) : null,
-          data && data.availability === "ready" && offers.length
-            ? h("ul", { className: "__dsi_list", "aria-label": "Unfinished work" }, offers.map(function (offer) {
-                return h("li", { key: offer.jobId, className: "__dsi_listItem" },
-                  h("div", { className: "__dsi_listMain" },
-                    h("span", { className: "__dsi_listTitle" }, nameOf(offer.sessionId)),
-                    h("span", { className: "__dsi_muted" }, "Stopped after message " + offer.cut)),
-                  h("button", { type: "button", className: "__dsi_btn __dsi_btnSm __dsi_btnPrimary", disabled: cont.busy,
-                    onClick: function () { continueOffer(offer.jobId); } }, cont.busy && cont.jobId === offer.jobId ? "Reading…" : "Continue"));
-              }))
-            : data && data.availability === "ready" ? h("p", { className: "__dsi_muted", role: "status" }, "No unfinished work from other sessions in this project. Work left in this session shows up when you pick a different session to continue in.") : null,
-          cont.error ? h("p", { className: "__dsi_error", role: "alert" }, cont.error) : null),
-        cont.notes ? h("section", { className: "__dsi_card", "aria-labelledby": "dsi-ss-notes" },
-          h("div", { className: "__dsi_cardHead" },
-            h("h3", { className: "__dsi_cardTitle", id: "dsi-ss-notes" }, "Handoff notes"),
-            h("span", { className: "__dsi_pill __dsi_pillWarn" }, "Review before sending")),
-          h("p", { className: "__dsi_cardSub" }, "Machine-written summary of where " + nameOf(cont.notes.sessionId) + " stopped. It can be stale or wrong, and it doesn't prove anything actually happened."),
-          h("ul", { className: "__dsi_notes" }, (cont.notes.notes || []).map(function (note, index) { return h("li", { key: String(index) }, note); })),
+      function useInMessage() {
+        var actions = props.inputActions;
+        if (!actions || !cont.notes) return;
+        var text = handoffMessage(cont.notes, sourceName);
+        try {
+          var span = typeof actions.captureInsertion === "function" ? actions.captureInsertion() : null;
+          var inserted = span && typeof actions.insertText === "function" ? actions.insertText(text, span) : false;
+          if (!inserted && typeof actions.setDraft === "function") actions.setDraft(text);
+        } catch (e) { if (typeof actions.setDraft === "function") actions.setDraft(text); }
+        dismiss();
+      }
+      var open = cont.notes && cont.jobId === offer.jobId;
+      return h("section", { className: "__dsi_dock", "aria-label": "Unfinished work" },
+        h("div", { className: "__dsi_dockRow" },
+          h("span", { className: "__dsi_dockDot", "aria-hidden": "true" }),
+          h("span", { className: "__dsi_dockText" },
+            "Unfinished work in ", h("strong", null, sourceName),
+            source && source.updatedAt ? h("span", { className: "__dsi_muted" }, " · " + relativeTime(source.updatedAt)) : null,
+            offers.length > 1 ? h("span", { className: "__dsi_muted" }, " · +" + (offers.length - 1) + " more") : null),
+          open ? null : h("button", { type: "button", className: "__dsi_btn __dsi_btnSm __dsi_btnPrimary", disabled: cont.busy, onClick: review },
+            cont.busy && cont.jobId === offer.jobId ? "Reading…" : "Review"),
+          h("button", { type: "button", className: "__dsi_btn __dsi_btnSm __dsi_btnGhost", "aria-label": "Dismiss", title: "Dismiss", onClick: dismiss }, "✕")),
+        cont.error && cont.jobId === offer.jobId ? h("p", { className: "__dsi_error", role: "alert" }, cont.error) : null,
+        open ? h("div", { className: "__dsi_dockBody" },
+          h("ul", { className: "__dsi_notes __dsi_dockNotes" }, (cont.notes.notes || []).map(function (note, index) { return h("li", { key: String(index) }, cleanNote(note)); })),
           h("div", { className: "__dsi_toolbar" },
-            h("p", { className: "__dsi_muted" }, "Sends one message to " + nameOf(target.trim()) + ", as if you typed it."),
-            h("button", { type: "button", className: "__dsi_btn __dsi_btnPrimary", disabled: send.busy || !target.trim(), onClick: sendHandoff },
-              send.busy ? "Sending…" : "Send to session")),
-          send.error ? h("p", { className: "__dsi_error", role: "alert" }, send.error) : null,
-          send.sent ? h("p", { className: "__dsi_ok", role: "status" }, "Sent to " + nameOf(send.sent) + ".") : null) : null,
-        rows.length ? h("details", { className: "__dsi_details" },
-          h("summary", null, "Background processing (" + rows.length + ")"),
-          h("div", { className: "__dsi_detailsBody" },
-            h("table", { className: "__dsi_table" },
-              h("thead", null, h("tr", null, ["Session", "Status", "After message", "Attempts"].map(function (label) { return h("th", { key: label, scope: "col" }, label); }))),
-              h("tbody", null, rows.map(function (row) { return h("tr", { key: row.id },
-                h("td", null, nameOf(row.sessionId)), h("td", null, row.status), h("td", null, String(row.cut)), h("td", null, String(row.attempts))); }))))) : null);
+            h("span", { className: "__dsi_muted" }, "Written by the model from that session. It can be stale or wrong; edit before sending."),
+            h("span", { className: "__dsi_row" },
+              h("button", { type: "button", className: "__dsi_btn __dsi_btnSm __dsi_btnGhost", onClick: function () { setCont({ busy: false, error: null, notes: null, jobId: null }); } }, "Cancel"),
+              h("button", { type: "button", className: "__dsi_btn __dsi_btnSm __dsi_btnPrimary", disabled: !props.inputActions, onClick: useInMessage }, "Use in message")))) : null);
     }
 
      var navigationCounter = 0;
@@ -2016,11 +2006,11 @@ window.__ModuleLoader__.load({
       var [tab, setTab] = react.useState("overview");
       var navigationId = react.useRef(null); if (!navigationId.current) navigationId.current = "dsi-nav-" + (++navigationCounter);
       function navigateKey(event) {
-        var keys = ["overview", "sessions", "config", "memories"], index = keys.indexOf(tab), next;
-        if (event.key === "ArrowRight") next = (index + 1) % 4;
-        else if (event.key === "ArrowLeft") next = (index + 3) % 4;
+        var keys = ["overview", "config", "memories"], index = keys.indexOf(tab), next;
+        if (event.key === "ArrowRight") next = (index + 1) % keys.length;
+        else if (event.key === "ArrowLeft") next = (index + keys.length - 1) % keys.length;
         else if (event.key === "Home") next = 0;
-        else if (event.key === "End") next = 3;
+        else if (event.key === "End") next = keys.length - 1;
         else return;
         event.preventDefault(); setTab(keys[next]);
         var buttons = event.currentTarget.querySelectorAll('[role="tab"]'); if (buttons[next]) buttons[next].focus();
@@ -2028,12 +2018,11 @@ window.__ModuleLoader__.load({
       return h("div", { className: "__dsi_tabs", style: { position: "relative" } },
         h("div", { className: "__dsi_tabBar", role: "tablist", "aria-label": "Memory navigation", onKeyDown: navigateKey },
            h("button", { type: "button", role: "tab", id: navigationId.current + "-overview", "aria-controls": navigationId.current + "-panel", tabIndex: tab === "overview" ? 0 : -1, "aria-selected": tab === "overview", className: "__dsi_tab" + (tab === "overview" ? " __dsi_tabActive" : ""), onClick: function () { setTab("overview"); } }, t("tabOverview")),
-           h("button", { type: "button", role: "tab", id: navigationId.current + "-sessions", "aria-controls": navigationId.current + "-panel", tabIndex: tab === "sessions" ? 0 : -1, "aria-selected": tab === "sessions", className: "__dsi_tab" + (tab === "sessions" ? " __dsi_tabActive" : ""), onClick: function () { setTab("sessions"); } }, t("tabSessions")),
           h("button", { type: "button", role: "tab", id: navigationId.current + "-config", "aria-controls": navigationId.current + "-panel", tabIndex: tab === "config" ? 0 : -1, "aria-selected": tab === "config", className: "__dsi_tab" + (tab === "config" ? " __dsi_tabActive" : ""), onClick: function () { setTab("config"); } }, t("tabConfig")),
           h("button", { type: "button", role: "tab", id: navigationId.current + "-memories", "aria-controls": navigationId.current + "-panel", tabIndex: tab === "memories" ? 0 : -1, "aria-selected": tab === "memories", className: "__dsi_tab" + (tab === "memories" ? " __dsi_tabActive" : ""), onClick: function () { setTab("memories"); } }, t("tabMemories"))
         ),
         h("div", { role: "tabpanel", id: navigationId.current + "-panel", "aria-labelledby": navigationId.current + "-" + tab },
-          tab === "overview" ? h(OverviewSection, Object.assign({ key: tab, goTo: setTab }, props)) : tab === "sessions" ? h(SessionsSection, Object.assign({ key: tab }, props)) : tab === "config" ? h(MemorySection, Object.assign({ key: tab }, props)) : h(BrowserSection, Object.assign({ key: tab }, props)))
+          tab === "overview" ? h(OverviewSection, Object.assign({ key: tab, goTo: setTab }, props)) : tab === "config" ? h(MemorySection, Object.assign({ key: tab }, props)) : h(BrowserSection, Object.assign({ key: tab }, props)))
       );
     }
 
@@ -2098,6 +2087,15 @@ window.__ModuleLoader__.load({
         if (sectionDispose || sectionGoverned) return function () { /* already registered */ };
         var child = ctx.inject(["remote." + REMOTE_NS, "slots", "locale", "configForms"], function (childCtx) {
           if (sectionDispose) return;
+          // Continue banner above the composer of every open chat; renders
+          // nothing unless another session of the project left work to continue.
+          var dockApi = businessApi(childCtx);
+          var disposeDock = childCtx.slots.inject("conversation.input.dock", function () {
+            return childCtx.slots.register({ name: "conversation.input.dock", id: "dsh-self-improved-continue", order: 20 }, function (props) {
+              return h(ContinueDock, Object.assign({}, props, { api: dockApi, session: sessionRemote }));
+            });
+          }) || function () {};
+          childCtx.effect(function () { return disposeDock; }, "dsh-self-improved: continue banner");
           sectionDispose = childCtx.slots.inject("settings.section", function () {
             return childCtx.slots.register({
               name: "settings.section",

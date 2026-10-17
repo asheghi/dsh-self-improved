@@ -1,6 +1,6 @@
 {
   "name": "@asheghi/dsh-self-improved",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Long-term memory and session continuity for DeepSeek Harness 0.2.1+: captures conversations, extracts reviewed memories, recalls them before each reply, and offers to continue unfinished work. Local storage; model calls are opt-in.",
   "author": "Bahman Asheghi <asheghi.bm@gmail.com>",
   "repository": {

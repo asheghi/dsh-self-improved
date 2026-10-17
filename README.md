@@ -16,7 +16,7 @@ dsh plugin --profile web add @asheghi/dsh-self-improved
 
 Then restart DSH (`dsh web`). Use your own profile name instead of `web` if you run a different one (`tui`, `desktop`, …). Installing registers the plugin with the profile automatically; there is no config file to edit.
 
-Open **Settings → Evolving Memory**. Memory capture, extraction and recall are on by default. Session continuity and learning from tool use are off until you turn them on there.
+Open **Settings → Evolving Memory**. Memory capture, extraction and recall are on by default. Session continuity and learning from tool use are off until you turn them on there. With continuity on, stopping partway through a task makes a banner appear above the message box of your other chats in that project; it fills the message box for you to review and send, and never sends anything itself.
 
 | Task | Command |
 |---|---|
@@ -45,12 +45,13 @@ With it, the agent walks in already knowing what you taught it before; reviewed 
 | Capability | What it does | Where it shows up |
 |---|---|---|
 | **Cross-session memory** | Distills facts / preferences / events into durable memories | Injected before each turn |
+| **Session continuity** (opt-in) | Notices work you stopped partway and offers it to your next chat in the same project | A banner above the message box: Review, then *Use in message* |
 | **Relevant recall** | Only memories matching the current question, scoped to project and session | Labeled block in context; generic prompts inject nothing |
 | **Evolving persona** | Strongest confirmed memories become a versioned profile | Curated baseline in the system prompt |
 | **Skill proposals** | Repeated reviewed procedures become inspectable inactive drafts | SQLite, project-scoped; opt-in, never auto-published |
 | **Self-maintenance** | Decay and growth caps, zero LLM cost | Every maintenance round |
 | **History search** | Full-text search over memories and past conversations | `memory_search` / `conversation_search` tools |
-| **Your control** | Correct or forget any memory instantly | `/memory` + Settings → Evolving Memory |
+| **Your control** | Edit or forget any memory instantly | `/memory` + Settings → Evolving Memory |
 
 ## How it works
 

@@ -21,7 +21,7 @@ assert.equal(source.split('exports.apply = apply;').length, 2);
 const sandbox = { AbortController, window: { __ModuleLoader__: { load: value => { sandbox.declaration = value; } } } };
 vm.createContext(sandbox);
 // Test-only access to actual private components/hooks. The shipped client is unchanged by this instrumentation.
-vm.runInContext(source.replace('exports.apply = apply;', 'exports.__test = {MainSection, OverviewSection, SessionsSection, mountBusinessRemote, businessApi}; exports.apply = apply;'), sandbox);
+vm.runInContext(source.replace('exports.apply = apply;', 'exports.__test = {MainSection, OverviewSection, ContinueDock, mountBusinessRemote, businessApi}; exports.apply = apply;'), sandbox);
 const sut = sandbox.declaration.factory(name => { assert.equal(name, 'react'); return react; }).__test;
 const walk = node => !node || typeof node !== 'object' ? [] : [node, ...(node.children || []).flatMap(walk)];
 const text = node => typeof node === 'string' || typeof node === 'number' ? String(node) : node && typeof node === 'object' ? (node.children || []).map(text).join(' ') : '';
@@ -53,13 +53,13 @@ await check('shipped UI honours the interface-guideline rules the audit found mi
   assert.doesNotMatch(source, /transition:\s*all/, 'transition: all is an anti-pattern');
   assert.doesNotMatch(source, /outline:\s*none/, 'focus must never be removed without a replacement');
 });
-await check('actual four-tab state, panel IDs, roving focus and keyboard navigation', async () => {
-  const h = harness(sut.MainSection, props({})); let tree = h.render(); const tabs = nodes(tree, n => n.props.role === 'tab'); assert.equal(tabs.length, 4);
+await check('actual three-tab state, panel IDs, roving focus and keyboard navigation', async () => {
+  const h = harness(sut.MainSection, props({})); let tree = h.render(); const tabs = nodes(tree, n => n.props.role === 'tab'); assert.equal(tabs.length, 3);
   assert.equal(tabs.filter(n => n.props.tabIndex === 0).length, 1); const panel = nodes(tree, n => n.props.role === 'tabpanel')[0]; assert.equal(panel.props.id, tabs[0].props['aria-controls']);
   tabs[1].props.onClick(); tree = h.render(); assert.equal(nodes(tree, n => n.props.role === 'tab')[1].props['aria-selected'], true);
   let focused = -1, prevented = false; const bar = nodes(tree, n => n.props.role === 'tablist')[0];
   bar.props.onKeyDown({ key: 'End', preventDefault() { prevented = true; }, currentTarget: { querySelectorAll: () => tabs.map((_, i) => ({ focus() { focused = i; } })) } });
-  assert.equal(focused, 3); assert.equal(prevented, true); tree = h.render(); assert.equal(nodes(tree, n => n.props.role === 'tab')[3].props['aria-selected'], true); h.unmount();
+  assert.equal(focused, 2); assert.equal(prevented, true); tree = h.render(); assert.equal(nodes(tree, n => n.props.role === 'tab')[2].props['aria-selected'], true); h.unmount();
 });
 await check('Overview actually calls authorized snapshot and renders its counts', async () => {
   let calls = 0; const h = harness(sut.OverviewSection, props({ snapshot: async signal => { calls++; assert.ok(signal instanceof AbortSignal); return { ok: true, value: { memories: [{}, {}], pending: 3, episodes: { counts: { reviewed: 4 } }, skills: [{}] } }; } }));
@@ -95,96 +95,67 @@ await check('Overview renders no continuity section when the host serves no lane
   h.render(); await flush(); const tree = h.render();
   assert.doesNotMatch(text(tree), /Session continuity/); h.unmount();
 });
-await check('Sessions sends exact selected identity with signal and renders rows without inventing an offer', async () => {
-  const calls = []; const h = harness(sut.SessionsSection, props({ continuityStatus: async (id, signal) => { calls.push({ id, signal }); return { ok: true, value: { availability: 'ready', canContinue: false, reason: 'No offer.', rows: [{ id: 'job', sessionId: 'source-id', cut: 8, status: 'running', attempts: 1 }], offers: [] } }; } }));
-  let tree = h.render(); nodes(tree, n => n.type === 'input')[0].props.onChange({ target: { value: 'native-target' } }); tree = h.render();
-  nodes(tree, n => n.type === 'button' && text(n) === 'browserRefresh')[0].props.onClick(); await flush(); tree = h.render();
-  assert.equal(calls[0].id, 'native-target'); assert.ok(calls[0].signal instanceof AbortSignal); assert.match(text(tree), /source-i/); assert.match(text(tree), /running/);
-  // No offer means no Continue control at all — the UI never implies a capability it lacks.
-  assert.equal(nodes(tree, n => n.type === 'button' && text(n).startsWith('Continue')).length, 0);
-  assert.match(text(tree), /No unfinished work from other sessions in this project/); h.unmount();
+const offerValue = { ok: true, value: { availability: 'ready', canContinue: true, reason: 'One offer.', rows: [], offers: [{ jobId: 'job-1', sessionId: 'source-id', cut: 8 }] } };
+const dockProps = (api, extra) => Object.assign({ api, t: key => key, sessionId: 'native-target' }, extra);
+const mountDock = async p => { const h = harness(sut.ContinueDock, p); h.render(); await flush(); return { h, tree: h.render() }; };
+const click = async (h, label) => { nodes(h.render(), n => n.type === 'button' && text(n) === label)[0].props.onClick(); await flush(); return h.render(); };
+await check('Continue banner reads only for the open chat and renders nothing without an offer', async () => {
+  const calls = []; const { h, tree } = await mountDock(dockProps({ continuityStatus: async (id, signal) => { calls.push({ id, signal }); return { ok: true, value: { availability: 'ready', canContinue: false, reason: 'No offer.', rows: [{ id: 'job', sessionId: 'source-id', cut: 8, status: 'running', attempts: 1 }], offers: [] } }; } }));
+  assert.equal(calls[0].id, 'native-target'); assert.ok(calls[0].signal instanceof AbortSignal);
+  assert.equal(tree, null, 'no offer means no banner at all'); h.unmount();
 });
-await check('Sessions Continue is an operator action: the click mints the peer-bound confirm then renders bounded notes', async () => {
+await check('Review is an operator action: the click mints the peer-bound confirm then renders bounded notes', async () => {
   const calls = [];
   const api = {
-    continuityStatus: async () => ({ ok: true, value: { availability: 'ready', canContinue: true, reason: 'One offer.', rows: [], offers: [{ jobId: 'job-1', sessionId: 'source-id', cut: 8 }] } }),
+    continuityStatus: async () => offerValue,
     prepareContinue: async (target, jobId) => { calls.push(['prepare', target, jobId]); return { ok: true, value: { op: 'continue', token: 'tok', ttlMs: 1000 } }; },
     continueSession: async (target, jobId, authorization) => { calls.push(['continue', target, jobId, authorization.token]); return { ok: true, value: { jobId, sessionId: 'source-id', cut: 8, notes: ['ran the tests', 'one file left'], uncertain: true } }; },
   };
-  const h = harness(sut.SessionsSection, props(api)); let tree = h.render();
-  nodes(tree, n => n.type === 'input')[0].props.onChange({ target: { value: 'native-target' } }); tree = h.render();
-  nodes(tree, n => n.type === 'button' && text(n) === 'browserRefresh')[0].props.onClick(); await flush(); tree = h.render();
-  const button = nodes(tree, n => n.type === 'button' && text(n) === 'Continue')[0]; assert.ok(button, 'an offer renders its own Continue control'); assert.equal(button.props.disabled, false);
-  button.props.onClick(); await flush(); tree = h.render();
+  const { h, tree } = await mountDock(dockProps(api)); assert.match(text(tree), /Unfinished work in/); assert.equal(calls.length, 0, 'nothing is read before the click');
+  const after = await click(h, 'Review');
   assert.deepEqual(calls, [['prepare', 'native-target', 'job-1'], ['continue', 'native-target', 'job-1', 'tok']]);
-  assert.match(text(tree), /ran the tests/); assert.match(text(tree), /doesn't prove anything actually happened/); h.unmount();
+  assert.match(text(after), /ran the tests/); assert.match(text(after), /can be stale or wrong/); h.unmount();
 });
-await check('Sessions Continue reports a withdrawn offer and a missing door instead of showing stale notes', async () => {
-  const offer = { ok: true, value: { availability: 'ready', canContinue: true, reason: 'One offer.', rows: [], offers: [{ jobId: 'job-1', sessionId: 'source-id', cut: 8 }] } };
-  const flow = async api => { const h = harness(sut.SessionsSection, props(api)); let tree = h.render();
-    nodes(tree, n => n.type === 'input')[0].props.onChange({ target: { value: 'target' } }); tree = h.render();
-    nodes(tree, n => n.type === 'button' && text(n) === 'browserRefresh')[0].props.onClick(); await flush(); tree = h.render();
-    nodes(tree, n => n.type === 'button' && text(n) === 'Continue')[0].props.onClick(); await flush(); tree = h.render(); return { h, text: text(tree) }; };
-  const withdrawn = await flow({ continuityStatus: async () => offer, prepareContinue: async () => ({ ok: true, value: { token: 'tok' } }), continueSession: async () => ({ ok: true, value: null }) });
-  assert.match(withdrawn.text, /no longer offered/); assert.doesNotMatch(withdrawn.text, /doesn't prove anything actually happened/); withdrawn.h.unmount();
-  const noDoor = await flow({ continuityStatus: async () => offer });
-  assert.match(noDoor.text, /browser business remote/); noDoor.h.unmount();
+await check('Review reports a withdrawn offer and a missing door instead of showing stale notes', async () => {
+  const withdrawn = await mountDock(dockProps({ continuityStatus: async () => offerValue, prepareContinue: async () => ({ ok: true, value: { token: 'tok' } }), continueSession: async () => ({ ok: true, value: null }) }));
+  const t1 = text(await click(withdrawn.h, 'Review')); assert.match(t1, /no longer available/); assert.doesNotMatch(t1, /can be stale or wrong/); withdrawn.h.unmount();
+  const noDoor = await mountDock(dockProps({ continuityStatus: async () => offerValue }));
+  assert.match(text(await click(noDoor.h, 'Review')), /browser business remote/); noDoor.h.unmount();
 });
-await check('Sessions sends the reviewed handoff through the chat composer behind an honest frame', async () => {
-  const sent = [];
-  const api = {
-    continuityStatus: async () => ({ ok: true, value: { availability: 'ready', canContinue: true, reason: 'One offer.', rows: [], offers: [{ jobId: 'job-1', sessionId: 'source-id', cut: 8 }] } }),
-    prepareContinue: async () => ({ ok: true, value: { token: 'tok' } }),
-    continueSession: async () => ({ ok: true, value: { jobId: 'job-1', sessionId: 'source-id', cut: 8, notes: ['ran the tests', 'one file left'], uncertain: true } }),
-  };
-  const session = { current: { prompt: request => { sent.push(request); return Promise.resolve({ ok: true, value: { accepted: true } }); } } };
-  const h = harness(sut.SessionsSection, propsWith(api, { session: session })); let tree = h.render();
-  nodes(tree, n => n.type === 'input')[0].props.onChange({ target: { value: 'native-target' } }); tree = h.render();
-  nodes(tree, n => n.type === 'button' && text(n) === 'browserRefresh')[0].props.onClick(); await flush(); tree = h.render();
-  nodes(tree, n => n.type === 'button' && text(n) === 'Continue')[0].props.onClick(); await flush(); tree = h.render();
-  const sendButton = nodes(tree, n => n.type === 'button' && text(n) === 'Send to session')[0];
-  assert.ok(sendButton, 'the reviewed handoff offers an explicit send step');
-  assert.equal(sent.length, 0, 'nothing is sent before the operator asks for it');
-  sendButton.props.onClick(); await flush(); tree = h.render();
-  assert.equal(sent.length, 1);
-  assert.equal(sent[0].sessionId, 'native-target'); assert.equal(sent[0].mode, 'queue');
-  assert.equal(typeof sent[0].requestId, 'string'); assert.ok(sent[0].requestId.length > 0);
-  assert.equal(sent[0].content.length, 1); assert.equal(sent[0].content[0].type, 'text');
-  const body = sent[0].content[0].text;
-  assert.match(body, /Continuity handoff from session source-id/);
-  assert.match(body, /not an instruction/);
-  assert.match(body, /- ran the tests/);
-  assert.match(text(tree), /Sent to native-t/);
-  h.unmount();
+await check('Use in message fills the composer behind an honest frame and never sends', async () => {
+  const inserted = [], prompts = [];
+  const api = { continuityStatus: async () => offerValue, prepareContinue: async () => ({ ok: true, value: { token: 'tok' } }),
+    continueSession: async () => ({ ok: true, value: { jobId: 'job-1', sessionId: 'source-id', cut: 8, notes: ['ran the tests', 'one file left'], uncertain: true } }) };
+  const inputActions = { captureInsertion: () => ({ rev: 1 }), insertText: (value, span) => { inserted.push({ value, span }); return true; }, setDraft: () => { throw new Error('must not replace an existing draft'); } };
+  const session = { current: { prompt: request => { prompts.push(request); return Promise.resolve({ ok: true }); } } };
+  const { h } = await mountDock(dockProps(api, { inputActions, session }));
+  await click(h, 'Review'); const after = await click(h, 'Use in message');
+  assert.equal(prompts.length, 0, 'the banner never sends; the user does');
+  assert.equal(inserted.length, 1); assert.deepEqual(inserted[0].span, { rev: 1 });
+  assert.match(inserted[0].value, /machine-written, unverified/); assert.match(inserted[0].value, /- ran the tests/);
+  assert.equal(after, null, 'a used handoff leaves the banner'); h.unmount();
 });
-await check('Sessions refuses to pretend when the host has no chat composer', async () => {
-  let reads = 0;
-  const api = {
-    continuityStatus: async () => ({ ok: true, value: { availability: 'ready', canContinue: true, reason: 'One offer.', rows: [], offers: [{ jobId: 'job-1', sessionId: 'source-id', cut: 8 }] } }),
-    prepareContinue: async () => ({ ok: true, value: { token: 'tok' } }),
-    continueSession: async () => { reads++; return { ok: true, value: { jobId: 'job-1', sessionId: 'source-id', cut: 8, notes: ['ran the tests'], uncertain: true } }; },
-  };
-  const h = harness(sut.SessionsSection, propsWith(api, { session: { current: undefined } })); let tree = h.render();
-  nodes(tree, n => n.type === 'input')[0].props.onChange({ target: { value: 'native-target' } }); tree = h.render();
-  nodes(tree, n => n.type === 'button' && text(n) === 'browserRefresh')[0].props.onClick(); await flush(); tree = h.render();
-  nodes(tree, n => n.type === 'button' && text(n) === 'Continue')[0].props.onClick(); await flush(); tree = h.render();
-  nodes(tree, n => n.type === 'button' && text(n) === 'Send to session')[0].props.onClick(); await flush(); tree = h.render();
-  assert.match(text(tree), /does not expose the chat composer/);
-  assert.equal(reads, 1, 'the door read still happened; only the send step refused');
-  h.unmount();
+await check('without composer actions the banner cannot claim to insert anything', async () => {
+  const api = { continuityStatus: async () => offerValue, prepareContinue: async () => ({ ok: true, value: { token: 'tok' } }),
+    continueSession: async () => ({ ok: true, value: { jobId: 'job-1', sessionId: 'source-id', cut: 8, notes: ['ran the tests'], uncertain: true } }) };
+  const { h } = await mountDock(dockProps(api)); const after = await click(h, 'Review');
+  assert.equal(nodes(after, n => n.type === 'button' && text(n) === 'Use in message')[0].props.disabled, true); h.unmount();
+});
+await check('Dismiss hides the offer without any remote call', async () => {
+  let prepared = 0; const { h } = await mountDock(dockProps({ continuityStatus: async () => offerValue, prepareContinue: async () => { prepared++; return { ok: false }; } }));
+  const after = nodes(h.render(), n => n.type === 'button' && n.props['aria-label'] === 'Dismiss')[0]; after.props.onClick(); await flush();
+  assert.equal(h.render(), null); assert.equal(prepared, 0); h.unmount();
 });
 await check('superseded and unmounted reads abort and cannot admit late result or error', async () => {
-  const pending = []; const h = harness(sut.SessionsSection, props({ continuityStatus: (id, signal) => { const d = deferred(); pending.push({ ...d, id, signal }); return d.promise; } }));
-  let tree = h.render(); nodes(tree, n => n.type === 'input')[0].props.onChange({ target: { value: 'first' } }); tree = h.render(); nodes(tree, n => n.type === 'button' && text(n) === 'browserRefresh')[0].props.onClick(); await flush();
-  tree = h.render(); nodes(tree, n => n.type === 'input')[0].props.onChange({ target: { value: 'second' } }); assert.equal(pending[0].signal.aborted, true);
-  tree = h.render(); nodes(tree, n => n.type === 'button' && text(n) === 'browserRefresh')[0].props.onClick(); await flush();
-  pending[0].resolve({ ok: true, value: { reason: 'STALE-RESULT', rows: [] } }); await flush(); assert.doesNotMatch(text(h.render()), /STALE-RESULT/);
-  h.unmount(); const writes = h.writes; assert.equal(pending[1].signal.aborted, true); pending[1].resolve({ ok: false, error: { message: 'late failure' } }); await flush(); assert.equal(h.writes, writes);
+  const pending = []; const p = dockProps({ continuityStatus: (id, signal) => { const d = deferred(); pending.push({ ...d, id, signal }); return d.promise; } }, { sessionId: 'first' });
+  const h = harness(sut.ContinueDock, p); h.render(); await flush();
+  p.sessionId = 'second'; h.render(); await flush(); assert.equal(pending[0].signal.aborted, true); assert.equal(pending[1].id, 'second');
+  pending[0].resolve(offerValue); await flush(); assert.equal(h.render(), null, 'a stale offer for the previous chat never shows');
+  h.unmount(); const writes = h.writes; assert.equal(pending[1].signal.aborted, true); pending[1].resolve(offerValue); await flush(); assert.equal(h.writes, writes);
 });
-await check('remote errors, unavailable capability and genuinely empty inventory are explicit', async () => {
+await check('remote errors and empty inventory render nothing above the composer', async () => {
   for (const value of [{ ok: false, error: { message: 'observable error' } }, { ok: true, value: { availability: 'ready', reason: 'No dispatch capability', rows: [], canContinue: false } }]) {
-    const h = harness(sut.SessionsSection, props({ continuityStatus: async () => value })); let tree = h.render(); nodes(tree, n => n.type === 'input')[0].props.onChange({ target: { value: 'target' } }); tree = h.render(); nodes(tree, n => n.type === 'button' && text(n) === 'browserRefresh')[0].props.onClick(); await flush(); tree = h.render();
-    if (!value.ok) assert.equal(nodes(tree, n => n.props.role === 'alert').length, 1); else assert.match(text(tree), /No unfinished work/); h.unmount();
+    const { h, tree } = await mountDock(dockProps({ continuityStatus: async () => value })); assert.equal(tree, null); h.unmount();
   }
 });
 console.log(`${passes} executed client component/remote ownership gates PASS; VM React harness, not mounted browser acceptance`);

@@ -60,7 +60,7 @@ if (!cookie && token) {
     if (body.includes("dsh-self-improved")) { served = body; break; }
   }
   check("served client bundle carries the operator-door Continue UI",
-    !!served && served.includes("prepareContinue") && served.includes("Send to session"),
+    !!served && served.includes("prepareContinue") && served.includes("Use in message"),
     served ? "bundle found without the door UI" : "plugin client bundle not found in the index");
 }
 

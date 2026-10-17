@@ -9,7 +9,7 @@ Plan status, kept out of [README.md](./README.md) on purpose.
 - additive migration for existing stores; legacy rows quarantined until human-confirmed
 - skill synthesis opt-in (`evolve.skillSynthesis.enabled`)
 - episode learning Phases 1–6 (capture/redaction, schema v2 assembly, outcome review, isolated operational recall, episode-to-skill synthesis, `/memory episodes` dry-review/purge/forget and `/memory skill-drafts`) behind `episodeLearning.*` — disabled by default
-- v0.2 port: strict typecheck, journal/import, continuity lane, durable skill activation (manual only). Runs on stock DSH 0.2.1 with continuity auth built on the Host's Peer/principal model; no runtime patch. Redesigned settings page (Overview, Sessions, Settings, Memory). Packaged as `@asheghi/dsh-self-improved`. Status: [migration/README.md](./migration/README.md)
+- v0.2 port: strict typecheck, journal/import, continuity lane, durable skill activation (manual only). Runs on stock DSH 0.2.1 with continuity auth built on the Host's Peer/principal model; no runtime patch. Redesigned settings page (Overview, Settings, Memory); Continue is a banner above the message box (0.2.2). Packaged as `@asheghi/dsh-self-improved`. Status: [migration/README.md](./migration/README.md)
 
 ## Next
 
