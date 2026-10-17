@@ -27,7 +27,7 @@ const ws=(await ready(chromium,/DevTools listening on (ws:\/\/\S+)/))[1];
 const battery=start(process.execPath,['scripts/test-v02-browser.mjs',join(runDir,'facts.json'),ws],process.env);
 battery.stdout.pipe(process.stdout);battery.stderr.pipe(process.stderr);
 exit=await new Promise((res,rej)=>{battery.once('exit',code=>res(code??1));battery.once('error',rej)});
-}catch(e){console.error(e.stack);writeFileSync(join(root,'MIGRATION-BROWSER-ENVIRONMENT.json'),JSON.stringify({actualBrowser:false,failure:String(e.stack),runDir,owned},null,2)+'\n')}
+}catch(e){console.error(e.stack);writeFileSync(join(root,'migration','MIGRATION-BROWSER-ENVIRONMENT.json'),JSON.stringify({actualBrowser:false,failure:String(e.stack),runDir,owned},null,2)+'\n')}
 finally{stop();await Promise.all([...children].map(p=>new Promise(r=>{p.once('exit',r);setTimeout(()=>{p.kill('SIGKILL');r()},5000).unref()})));const resolved=realpathSync(owned),guarded=realpathSync(temp);if(!resolved.startsWith(guarded+'/browser-')||resolved===guarded||!existsSync(join(resolved,'.browser-owner')))throw Error('Cleanup ownership guard failed');rmSync(resolved,{recursive:true,force:true});const shortResolved=realpathSync(shortTmp);if(!shortResolved.startsWith(realpathSync(root)+'/.bt-')||shortResolved!==shortTmp||!existsSync(join(shortResolved,'.browser-owner')))throw Error('Short temp cleanup guard failed');rmSync(shortResolved,{recursive:true,force:true});}
 // Fixture data stays for reproducible evidence; down can remove it after this job stops.
 console.log('Browser fixture retained: '+runDir);process.exitCode=exit||0;

@@ -37,16 +37,16 @@ export DSH_RUNTIME_RC2=/home/bahman/github/dsh-v0.2
 ## Steps
 
 ### Part 1 — commit host-auth work + fix finalization doc
-- [ ] 1.1 Run `git status --short` and record the counts in the log.
-- [ ] 1.2 Edit `MIGRATION-FINALIZATION.md` (still at root at this point):
+- [x] 1.1 Run `git status --short` and record the counts in the log.
+- [x] 1.2 Edit `MIGRATION-FINALIZATION.md` (still at root at this point):
   - line ~10: "seven attempted amendments" → "nine attempted runs (v1–v9)" (keep the rest of the sentence).
   - line ~36: "R. 2025-06 explicit directive from the user" → "Recorded 2026-10-15 by explicit user directive" ; and "the seven-attempt chain above" → "the nine-run chain above".
   - line ~10: "carter calls/usage" → "provider calls/usage".
   - `grep -n "seven" MIGRATION-FINALIZATION.md` afterwards; only the unrelated "all seven variants" (main-worker variants) may remain.
-- [ ] 1.3 Run typecheck. Must pass.
-- [ ] 1.4 Run the core test list. All must exit 0. If any fails: STOP, set status `blocked`, log the failing suite and last 20 lines of output.
-- [ ] 1.5 `git add` all modified tracked files, all untracked `scripts/*.mjs`/`scripts/*.json`, `src/continuity-host-auth-v02.ts`, the untracked `MIGRATION-*.md`/`.json` files, and `fixtures/migration-acceptance/run-*/`. Check `git status --short` shows nothing untracked left except `plans/` (add `plans/finalize-v02-cleanup.md` too).
-- [ ] 1.6 Commit: `feat(continuity): require Host-authenticated admission for capture and Continue` with a short body (3–6 lines): fails closed without the Host receipt verifier; adds auth/browser/learned-procedure harness scripts; preserves acceptance run fixtures; fixes finalization doc run count and date. No attribution trailer.
+- [x] 1.3 Run typecheck. Must pass.
+- [x] 1.4 Run the core test list. All must exit 0. If any fails: STOP, set status `blocked`, log the failing suite and last 20 lines of output.
+- [x] 1.5 `git add` all modified tracked files, all untracked `scripts/*.mjs`/`scripts/*.json`, `src/continuity-host-auth-v02.ts`, the untracked `MIGRATION-*.md`/`.json` files, and `fixtures/migration-acceptance/run-*/`. Check `git status --short` shows nothing untracked left except `plans/` (add `plans/finalize-v02-cleanup.md` too).
+- [x] 1.6 Commit: `feat(continuity): require Host-authenticated admission for capture and Continue` with a short body (3–6 lines): fails closed without the Host receipt verifier; adds auth/browser/learned-procedure harness scripts; preserves acceptance run fixtures; fixes finalization doc run count and date. No attribution trailer.
 
 ### Part 3 — consolidate docs, roadmap, draft PR
 - [ ] 3.1 `mkdir migration` and `git mv` every root `MIGRATION-*` file (both `.md` and `.json`) and every `TAKEOVER-*.md` into `migration/`. Verify `ls MIGRATION-* TAKEOVER-* 2>/dev/null` prints nothing.
@@ -83,3 +83,12 @@ export DSH_RUNTIME_RC2=/home/bahman/github/dsh-v0.2
 ## Progress log
 - 2026-10-17 — plan created
 - 2026-10-17 12:17 — execution started
+- 2026-10-17 12:18 — 1.1 status: 23 tracked modified, 55 untracked (plus plans/), 0 staged before start
+- 2026-10-17 12:18 — 1.2 finalization doc fixed (seven→nine runs v1–v9, date 2026-10-15, carter→provider)
+- 2026-10-17 12:18 — 1.3 typecheck PASSED; 1.4 core suites all exit 0 (test:all not run here; core list per plan)
+- 2026-10-17 12:18 — 1.5/1.6 committed 035b979 feat(continuity): require Host-authenticated admission for capture and Continue (78 files; no forbidden paths; secret-pattern scan clean)
+- 2026-10-17 12:20 — 3.1 moved 74 MIGRATION-*/TAKEOVER-* files to migration/ with git mv; 3.2 rewrote 384 root-relative links in 45 moved docs to ../ (link checker: 0 broken); fixed README links and Docs list
+- 2026-10-17 12:20 — 3.3 updated run-v02-browser.mjs (env json) and test-v02-browser.mjs (default report) to migration/ paths
+- 2026-10-17 12:20 — 3.4/3.5 wrote migration/README.md; added link line in README Docs section
+- 2026-10-17 12:20 — 3.6 rewrote ROADMAP.md (18 lines)
+- 2026-10-17 12:20 — 3.7 typecheck PASSED; 16 core suites exit 0. test-v02-package.mjs: STRICT 58 PASS / 1 FAIL. The failing check is C6 (undocumented machine-default site reference): new scripts test-learned-procedure-executor.mjs and test-learned-procedure-go.mjs contain /home/bahman/github/dsh-v0.2 and are not in the documented list. Not a moved-path issue; per plan logged and continued. Not fixed here (would require script/doc edit outside plan scope). Its regenerated fixtures/v02-package/last-suite-pin.json was reverted (not committed).

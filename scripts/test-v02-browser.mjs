@@ -9,7 +9,7 @@ const root=resolve(new URL('..',import.meta.url).pathname);
 const facts=JSON.parse(readFileSync(process.argv[2],'utf8'));
 const origin=new URL(facts.url);
 if(origin.hostname!=='127.0.0.1'||origin.port==='3082'||!resolve(facts.runDir).startsWith(root+'/fixtures/v02-ui/temp/'))throw Error('Refusing nonisolated fixture');
-const report=resolve(process.argv[4]||'MIGRATION-BROWSER-REPORT.json');
+const report=resolve(process.argv[4]||'migration/MIGRATION-BROWSER-REPORT.json');
 if(!report.startsWith(root+'/'))throw Error('Report must stay in workspace');
 const ws=new WebSocket(process.argv[3]); await new Promise((r,j)=>{ws.onopen=r;ws.onerror=j});
 let seq=0;const pending=new Map(),events=[],targets=[],results=[];

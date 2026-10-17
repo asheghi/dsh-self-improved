@@ -127,7 +127,7 @@ With `episodeLearning.enabled`, the plugin records tool calls and results per se
 
 ## Installation
 
-**Live migration remains gated.** The private candidate's scoped unary authentication/continuity and browser checks pass, but real learned-procedure evaluation and approved runtime/profile cutover are not complete. No installed runtime or production profile has been migrated by this work. Follow the [reversible live-enablement runbook](./MIGRATION-LIVE-ENABLEMENT.md) and [current execution checkpoint](./MIGRATION-FINALIZATION.md), including coherent verified backups and exact approvals, rather than installing directly from this section.
+**Live migration remains gated.** The private candidate's scoped unary authentication/continuity and browser checks pass, but real learned-procedure evaluation and approved runtime/profile cutover are not complete. No installed runtime or production profile has been migrated by this work. Follow the [reversible live-enablement runbook](./migration/MIGRATION-LIVE-ENABLEMENT.md) and [current execution checkpoint](./migration/MIGRATION-FINALIZATION.md), including coherent verified backups and exact approvals, rather than installing directly from this section.
 
 The npm/marketplace name `dsh-self-improved` resolves to a different project, not this one. Install pitfalls (pnpm store and build prep, peerDependencies double instance, duplicate loader entry id): [TROUBLESHOOTING.md](./TROUBLESHOOTING.md).
 
@@ -158,7 +158,7 @@ node scripts/test-v02-typecheck-modes.mjs   # staged-artifact mode regressions (
   non-exactly-pinable @deepseek-ai peer set, and any incomplete artifact.
 - Package-gate results: [fixtures/v02-package/](./fixtures/v02-package/),
   [fixtures/v02-typecheck-modes/](./fixtures/v02-typecheck-modes/) and
-  [MIGRATION-PACKAGE-REVIEW.md](./MIGRATION-PACKAGE-REVIEW.md).
+  [MIGRATION-PACKAGE-REVIEW.md](./migration/MIGRATION-PACKAGE-REVIEW.md).
 
 ## Operations
 
@@ -223,6 +223,7 @@ Tests: `pnpm run test:all`; runners in `scripts/test-*.mjs`.
 - `README.md`: this file
 - `ROADMAP.md`: milestones and plan history
 - `TROUBLESHOOTING.md`: install pitfalls and fixes
+- `migration/README.md`: v0.2 migration status and per-phase evidence records
 - `docs/` (design docs, testing guide, DSH research): local only, excluded via `.gitignore`
 
 ## License
