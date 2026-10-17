@@ -67,7 +67,7 @@ window.__ModuleLoader__.load({
       ".__dsi_btn:hover:not(:disabled){border-color:var(--dsw-alias-state-business-primary)}" +
       ".__dsi_btn:focus-visible{border-color:var(--dsw-alias-state-business-primary);outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:1px}" +
       ".__dsi_btn:disabled{opacity:.5;cursor:default}" +
-      ".__dsi_btnPrimary{border-color:var(--dsw-alias-state-business-primary);background:var(--dsw-alias-state-business-primary);color:var(--dsw-alias-label-on-accent)}" +
+      ".__dsi_btnPrimary{border-color:var(--dsw-alias-state-business-primary);background:var(--dsw-alias-state-business-primary);color:var(--dsw-alias-label-on-accent,#fff)}" +
       ".__dsi_btnDanger{border-color:var(--dsw-alias-state-error-primary);color:var(--dsw-alias-state-error-primary)}" +
       ".__dsi_status{font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary)}" +
       ".__dsi_ok{font-size:12px;line-height:18px;color:var(--dsw-alias-state-success-primary)}" +
@@ -77,9 +77,10 @@ window.__ModuleLoader__.load({
       ".__dsi_browserRow{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;border:1px solid var(--dsw-alias-border-l2);border-radius:12px;padding:8px 10px;background:var(--dsw-alias-bg-layer-2)}" +
       ".__dsi_browserMain{display:flex;flex-direction:column;gap:2px;min-width:0}" +
       ".__dsi_browserKind{font-size:11px;font-weight:600;color:var(--dsw-alias-state-business-primary)}" +
-      ".__dsi_browserContent{font-size:13px;line-height:20px;color:var(--dsw-alias-label-primary);word-break:break-all}" +
+      ".__dsi_browserContent{font-size:13px;line-height:20px;color:var(--dsw-alias-label-primary);overflow-wrap:anywhere}" +
       ".__dsi_browserMeta{font-size:11px;color:var(--dsw-alias-label-tertiary)}" +
       ".__dsi_browserOps{flex:none;display:flex;gap:6px}" +
+      ".__dsi_browserOps .__dsi_btn{height:28px;padding:0 10px;font-size:13px;line-height:26px;border-radius:8px}" +
       ".__dsi_tabs{display:flex;flex-direction:column;gap:10px}" +
       ".__dsi_tabBar{display:flex;gap:4px;border-bottom:1px solid var(--dsw-alias-border-l2);padding-bottom:8px}" +
       ".__dsi_tab{height:32px;border:1px solid transparent;background:transparent;color:var(--dsw-alias-label-secondary);border-radius:8px;padding:0 14px;font:inherit;font-size:14px;line-height:32px;cursor:pointer}" +
@@ -94,7 +95,7 @@ window.__ModuleLoader__.load({
       ".__dsi_switchTrack{position:absolute;inset:0;background:var(--dsw-alias-bg-layer-3);border:1px solid var(--dsw-alias-border-l2);border-radius:10px;transition:background .15s,border-color .15s}" +
       ".__dsi_switch input:checked + .__dsi_switchTrack{background:var(--dsw-alias-state-business-primary);border-color:var(--dsw-alias-state-business-primary)}" +
       ".__dsi_switchThumb{position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:var(--dsw-alias-label-tertiary);transition:transform .15s,background .15s}" +
-      ".__dsi_switch input:checked ~ .__dsi_switchThumb{transform:translateX(16px);background:var(--dsw-alias-label-on-accent)}" +
+      ".__dsi_switch input:checked ~ .__dsi_switchThumb{transform:translateX(16px);background:var(--dsw-alias-label-on-accent,#fff)}" +
       // Collapsible panel (button semantics: keyboard toggles)
       ".__dsi_collapse{display:flex;flex-direction:column;gap:8px}" +
       ".__dsi_collapseHeader{display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;border:1px solid var(--dsw-alias-border-l2);border-radius:12px;padding:8px 12px;background:var(--dsw-alias-bg-layer-2);font:inherit;text-align:left;width:100%}" +
@@ -112,13 +113,58 @@ window.__ModuleLoader__.load({
       ".__dsi_modalHeader{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 18px;border-bottom:1px solid var(--dsw-alias-border-l2)}" +
       ".__dsi_modalTitle{font-size:15px;font-weight:600;color:var(--dsw-alias-label-primary)}" +
       ".__dsi_modalBody{padding:16px 18px;overflow:auto;display:flex;flex-direction:column;gap:12px}" +
-      ".__dsi_modalContent{white-space:pre-wrap;word-break:break-all;font-size:14px;line-height:22px;color:var(--dsw-alias-label-primary);border:1px solid var(--dsw-alias-border-l2);border-radius:12px;padding:12px 14px;background:var(--dsw-alias-bg-layer-2)}" +
+      ".__dsi_modalContent{white-space:pre-wrap;overflow-wrap:anywhere;font-size:14px;line-height:22px;color:var(--dsw-alias-label-primary);border:1px solid var(--dsw-alias-border-l2);border-radius:12px;padding:12px 14px;background:var(--dsw-alias-bg-layer-2)}" +
       ".__dsi_modalMeta{display:grid;grid-template-columns:auto 1fr;gap:6px 16px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary)}" +
       ".__dsi_modalMeta b{font-weight:600;color:var(--dsw-alias-label-primary)}" +
       ".__dsi_table{width:100%;border-collapse:collapse;font-size:13px;font-variant-numeric:tabular-nums}" +
       ".__dsi_table caption{text-align:left;padding:0 0 6px;color:var(--dsw-alias-label-secondary);font-size:12px}" +
       ".__dsi_table th,.__dsi_table td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--dsw-alias-border-l2);overflow-wrap:anywhere}" +
       ".__dsi_table th{color:var(--dsw-alias-label-secondary);font-weight:600}" +
+      // ── Overview / dashboard primitives
+      ".__dsi_root > .__dsi_btn{align-self:flex-start}" +
+      ".__dsi_toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}" +
+      ".__dsi_toolbar p{margin:0}" +
+      ".__dsi_btnSm{height:28px;padding:0 10px;font-size:13px;line-height:26px;border-radius:8px;white-space:nowrap}" +
+      ".__dsi_btnGhost{background:transparent}" +
+      ".__dsi_card{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-2);border-radius:14px;padding:14px 16px;display:flex;flex-direction:column;gap:12px}" +
+      ".__dsi_cardHead{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}" +
+      ".__dsi_cardTitle{margin:0;font-size:15px;font-weight:600;line-height:22px;color:var(--dsw-alias-label-primary)}" +
+      ".__dsi_cardSub{margin:0;font-size:13px;line-height:20px;color:var(--dsw-alias-label-secondary)}" +
+      ".__dsi_stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(118px,100%),1fr));gap:10px}" +
+      ".__dsi_stat{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-2);border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:2px}" +
+      ".__dsi_statValue{font-size:24px;font-weight:600;line-height:30px;color:var(--dsw-alias-label-primary);font-variant-numeric:tabular-nums}" +
+      ".__dsi_statLabel{font-size:13px;line-height:18px;color:var(--dsw-alias-label-secondary)}" +
+      ".__dsi_pill{display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 10px;border-radius:11px;font-size:12px;font-weight:600;border:1px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-label-secondary);background:var(--dsw-alias-bg-layer-3)}" +
+      ".__dsi_pill::before{content:'';width:6px;height:6px;border-radius:50%;background:currentColor}" +
+      ".__dsi_pillOn{color:var(--dsw-alias-state-success-primary);border-color:var(--dsw-alias-state-success-primary)}" +
+      ".__dsi_pillWarn{color:var(--dsw-alias-state-warning-primary,var(--dsw-alias-state-error-primary));border-color:currentColor}" +
+      ".__dsi_kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(180px,100%),1fr));gap:8px 16px;margin:0}" +
+      ".__dsi_kv > div{display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px solid var(--dsw-alias-border-l2)}" +
+      ".__dsi_kv dt{font-size:13px;color:var(--dsw-alias-label-secondary)}" +
+      ".__dsi_kv dd{margin:0;font-size:13px;font-weight:600;color:var(--dsw-alias-label-primary);font-variant-numeric:tabular-nums}" +
+      ".__dsi_callout{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;border-radius:10px;padding:10px 12px;background:var(--dsw-alias-bg-layer-3);font-size:13px;line-height:20px;color:var(--dsw-alias-label-secondary)}" +
+      ".__dsi_muted{margin:0;font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary)}" +
+      ".__dsi_list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}" +
+      ".__dsi_listItem{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;border:1px solid var(--dsw-alias-border-l2);border-radius:10px;padding:10px 12px;background:var(--dsw-alias-bg-layer-3)}" +
+      ".__dsi_listMain{display:flex;flex-direction:column;gap:2px;min-width:0}" +
+      ".__dsi_listTitle{font-size:14px;font-weight:500;color:var(--dsw-alias-label-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}" +
+      ".__dsi_notes{margin:0;padding:10px 12px 10px 28px;border-radius:10px;background:var(--dsw-alias-bg-layer-3);font-size:13px;line-height:20px;color:var(--dsw-alias-label-primary)}" +
+      // ── Settings layout
+      ".__dsi_section{display:flex;flex-direction:column;gap:12px}" +
+      ".__dsi_sectionTitle{margin:6px 0 0;font-size:15px;font-weight:600;line-height:22px;color:var(--dsw-alias-label-primary)}" +
+      ".__dsi_switchRow{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}" +
+      ".__dsi_switchText{display:flex;flex-direction:column;gap:2px;min-width:0}" +
+      ".__dsi_switchRow .__dsi_switch{margin-top:2px}" +
+      ".__dsi_details{border:1px solid var(--dsw-alias-border-l2);border-radius:12px;background:var(--dsw-alias-bg-layer-2)}" +
+      ".__dsi_details > summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:8px;padding:10px 14px;font-size:14px;font-weight:600;color:var(--dsw-alias-label-primary)}" +
+      ".__dsi_details > summary::-webkit-details-marker{display:none}" +
+      ".__dsi_details > summary::before{content:'▸';font-size:11px;color:var(--dsw-alias-label-tertiary);transition:transform .15s}" +
+      ".__dsi_details[open] > summary::before{transform:rotate(90deg)}" +
+      ".__dsi_details > summary:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:2px;border-radius:12px}" +
+      ".__dsi_detailsBody{padding:4px 14px 14px;display:flex;flex-direction:column;gap:12px}" +
+      ".__dsi_saveBar{position:sticky;bottom:0;z-index:2;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:10px 12px;margin-top:4px;border:1px solid var(--dsw-alias-border-l2);border-radius:12px;background:var(--dsw-alias-bg-layer-1);box-shadow:0 -6px 18px rgba(0,0,0,.18)}" +
+      ".__dsi_textarea{min-height:64px;height:auto;resize:vertical;line-height:20px;font-family:var(--dsw-font-mono,ui-monospace,monospace);font-size:12px}" +
+      "@container (max-width:420px){.__dsi_btnSm{white-space:normal;height:auto;min-height:28px}.__dsi_browserRow{flex-direction:column}.__dsi_browserOps{flex:1 1 auto;flex-wrap:wrap}.__dsi_kv > div{flex-wrap:wrap}.__dsi_switchRow{gap:8px}}" +
       "@media (prefers-reduced-motion: reduce){.__dsi_tab,.__dsi_collapseChevron,.__dsi_switchTrack,.__dsi_btn{transition:none;animation:none}}";
     var tagId = "dsh-self-improved/main.css";
     if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId) + "]") === null) {
@@ -135,12 +181,21 @@ window.__ModuleLoader__.load({
     /** Business remote namespace (both the host service and these descriptors). */
     var REMOTE_NS = "selfImproved";
     var zh = {
+      sectionGeneral: "General",
+      sectionContinuity: "Session continuity",
+      sectionContinuitySub: "Notice when you stop partway through a task, and offer to pick it up from another session in the same project.",
+      sectionEpisodes: "Learning from tool use",
+      sectionAdvanced: "Advanced tuning",
+      sectionAdvancedSub: "The defaults work well. Change these only if you know what you want.",
+      overriddenHint: "Set in your configuration, not the default",
+      allSaved: "All changes saved",
+      discard: "Discard",
       nav: "进化记忆",
       tabOverview: "Overview",
       tabSessions: "Sessions",
       tabConfig: "Settings",
       tabMemories: "Memory",
-      intro: "Long-term memory & self-evolution: captures conversations, extracts memories, injects recall before turns, and consolidates/forgets/evolves over time.",
+      intro: "Remembers what you teach it across sessions, recalls relevant memories before each reply, and tidies itself up over time. Everything is stored on this machine.",
       helpTitle: "About this plugin",
       help: [
         "dsh-self-improved adds cross-session long-term memory and self-evolution to DSH. Data is stored locally by default ($DSH_HOME/memory); LLM-backed features send their required prompt content to the configured provider.",
@@ -169,24 +224,24 @@ window.__ModuleLoader__.load({
         "• Disabling the master switch stops background work; stored memories are kept and everything resumes when re-enabled — the Memory tab stays accessible for inspection while paused",
         "• Uninstalling the plugin does not delete local memory data"
       ].join("\n"),
-      groupMaster: "Master",
-      fContinuityEnabled: "Continuity checkpoint capture (local structural metadata only)",
-      fContinuitySummary: "Send minimized excerpts for partial handoffs (separate opt-in)",
-      fContinuitySummaryHint: "Default off. Sends bounded own user-text excerpts to the Extraction model/provider, or host default. Best-effort redaction can miss sensitive or copied prose. Requires checkpoint capture and Capture. Handoffs are partial and unverified; tasks and approvals never resume automatically. Off stops processing but keeps saved handoffs for inspection.",
-      fContinuitySessions: "Excluded native session IDs (JSON string array)",
-      fContinuityProjects: "Excluded opaque project IDs (JSON string array)",
-      groupModules: "Modules",
+      groupMaster: "Diagnostics",
+      fContinuityEnabled: "Track unfinished work",
+      fContinuitySummary: "Write handoff summaries with the model",
+      fContinuitySummaryHint: "Sends short excerpts of your own messages to the extraction model to write handoff notes. Redaction is best-effort, so sensitive text can slip through. Off by default.",
+      fContinuitySessions: "Never track these sessions",
+      fContinuityProjects: "Never track these projects",
+      groupModules: "More features",
       groupStorage: "Storage",
-      groupExtract: "Extraction (L1)",
-      groupRecall: "Recall / Embedding",
-      groupConsolidate: "Consolidation (L2/L3)",
-      groupEvolve: "Self-evolution",
-      groupHousekeeping: "Growth governance",
-      groupReview: "Nightly review (daily full evolution)",
+      groupExtract: "Memory extraction",
+      groupRecall: "Recall",
+      groupConsolidate: "Persona and scenes",
+      groupEvolve: "Forgetting and skills",
+      groupHousekeeping: "Size limits",
+      groupReview: "Nightly review",
       save: "Save",
-      resetScoped: "Restore inherited defaults",
-      resetConfirm: "Restore this group to the inherited (composition) defaults? Only this group's overrides are cleared.",
-      saved: "Saved — applied without restart",
+      resetScoped: "Reset to defaults",
+      resetConfirm: "Reset this group to its default values? Only this group changes.",
+      saved: "Saved. Changes apply right away.",
       saving: "Saving…",
       error: "Save failed",
       conflict: "These settings changed elsewhere since you started editing. Your edits are kept below; review them and save again to rebase.",
@@ -194,80 +249,80 @@ window.__ModuleLoader__.load({
       conflictDiscard: "Discard my edits",
       conflictDiscardConfirm: "Discard your unsaved edits? This restores the host section in the form.",
       dirtyBadge: "unsaved",
-      dirtySummary: "{n} field(s) with unsaved edits",
+      dirtySummary: "{n} unsaved change(s)",
       restartNote: "restart required",
-      unavailable: "Settings for this plugin are not available from this host (dsh-self-improved not mounted?)",
-      overridden: "overridden",
+      unavailable: "Settings aren't available: the dsh-self-improved plugin isn't running on this host.",
+      overridden: "custom",
       secretSet: "key stored",
       secretUnset: "no key",
-      secretHint: "Leave blank to keep the stored key. The key never re-appears here.",
+      secretHint: "Leave empty to keep the stored key.",
       loading: "Loading…",
-      fEnabled: "Enable plugin (master switch)",
-      fDebug: "Debug logs",
-      fCapture: "Capture conversations (L0)",
-      fExtract: "Extract memories (L1)",
-      fConsolidate: "Consolidate scenes/persona (L2/L3)",
-      fEvolve: "Self-evolve (decay/skills)",
-      fRecall: "Auto recall injection",
-      fTools: "Memory tools (memory_search etc.)",
-      fStorageRoot: "Memory dir (blank = $DSH_HOME/memory)",
-      fSearchLimit: "Default tool result limit",
-      fProvider: "Extraction provider (blank = default model)",
-      fModel: "Extraction model (blank = default model)",
-      fInterval: "Poll interval (minutes)",
-      fBatchChars: "Max input chars per batch",
+      fEnabled: "Enable Evolving Memory",
+      fDebug: "Verbose debug logs",
+      fCapture: "Save conversations for memory",
+      fExtract: "Learn memories from conversations",
+      fConsolidate: "Build persona and scenes",
+      fEvolve: "Forget stale memories",
+      fRecall: "Recall memories before each reply",
+      fTools: "Give the agent memory search tools",
+      fStorageRoot: "Memory folder (empty = $DSH_HOME/memory)",
+      fSearchLimit: "Search results per tool call",
+      fProvider: "Extraction provider (empty = default)",
+      fModel: "Extraction model (empty = default)",
+      fInterval: "Check for new conversations every (minutes)",
+      fBatchChars: "Max characters per extraction batch",
       fMaxTokens: "Max output tokens",
       fTimeoutMs: "Extraction timeout (ms)",
-      fDedup: "Dedup (token overlap)",
-      fMinImportance: "Drop memories under importance",
+      fDedup: "Skip near-duplicate memories",
+      fMinImportance: "Ignore memories below importance",
       fFallback: "Fallback to summary on bad JSON",
-      fFlushDrain: "Drain extraction before headless exit",
+      fFlushDrain: "Finish extraction before headless runs exit",
       fProvenance: "Extraction provenance filter",
       fProvenanceHint: "strict (recommended) = only memories confirmed as human-authored/curated enter the long-term store. off disables the filter (not recommended).",
-      fRequireEvidence: "Require extraction evidence",
+      fRequireEvidence: "Require a quote from the conversation",
       fRequireEvidenceHint: "When on, memories the extraction model produced without quoting evidence from the conversation are rejected — the conservative default.",
-      fStrategy: "Recall strategy",
-      fStrategyHint: "keyword = pure keyword (default, no embedding calls); hybrid = keyword + vector fusion (requires an embedding endpoint below; auto-falls back to keyword if unset).",
+      fStrategy: "Recall method",
+      fStrategyHint: "keyword: fast, no extra calls (default). hybrid: keyword plus embeddings; needs an embedding endpoint below and falls back to keyword without one.",
       fMaxResults: "Max recall results",
-      fScoreThreshold: "Score threshold (0 = off)",
-      fRelevanceMargin: "Relevance margin (0–1)",
-      fRelevanceMarginHint: "How strict the injection gate is: 0.5 (default) injects only clearly relevant memories; lower values inject more noise — keep it high for conservative behavior.",
-      fRecallMinImportance: "Min importance to inject (0 = off)",
-      fRecallMinImportanceHint: "Memories below this importance are never injected; 0 = no filter.",
-      fMaxInjectPerTurn: "Max memories injected per turn",
-      fMaxInjectPerTurnHint: "Hard cap on injected memory blocks per turn (default 4) to keep prompts clean; 0 = unlimited (not recommended).",
+      fScoreThreshold: "Minimum match score (0 = off)",
+      fRelevanceMargin: "Relevance strictness (0–1)",
+      fRelevanceMarginHint: "Higher is stricter. 0.5 (default) only injects clearly relevant memories.",
+      fRecallMinImportance: "Minimum importance to recall (0 = any)",
+      fRecallMinImportanceHint: "",
+      fMaxInjectPerTurn: "Max memories per reply",
+      fMaxInjectPerTurnHint: "Default 4. 0 means no limit, which can crowd the prompt.",
       fRecallTimeout: "Recall timeout (ms)",
-      fEmbBase: "Embedding Base URL (blank = keyword only)",
-      fEmbKey: "Embedding API Key (write-only)",
+      fEmbBase: "Embedding endpoint URL (empty = keyword only)",
+      fEmbKey: "Embedding API key",
       fEmbModel: "Embedding model",
-      fEmbDims: "Vector dimensions",
+      fEmbDims: "Embedding dimensions",
       fEmbTimeout: "Embedding timeout (ms)",
-      fSceneMax: "Memories for scene grouping",
-      fScenesEnabled: "Scene grouping (L2 scenes)",
-      fScenesEnabledHint: "Default off: recall uses the curated baseline + contextual search; enabling generates scene blocks at the nightly review.",
-      fPersonaMax: "Memories for persona",
+      fSceneMax: "Memories considered for scenes",
+      fScenesEnabled: "Group memories into scenes",
+      fScenesEnabledHint: "Off by default. When on, the nightly review also builds scene summaries.",
+      fPersonaMax: "Memories considered for persona",
       fSceneBatch: "Max memories per scene",
-      fDecay: "Forgetting decay",
-      fDecayAge: "Min age (days)",
-      fDecayThreshold: "Decay score threshold",
-      fDecayRetention: "Forgotten retention (days, 0=keep)",
-      fDecayMaxActive: "Max active memories (0=unlimited)",
-      fSkill: "Skill synthesis (→ dsh-skill)",
-      fSkillMin: "Skill min importance",
-      fSkillRoot: "Skills root (blank = $DSH_HOME/skills)",
-      fSkillPrefix: "Synthesized skill name prefix (e.g. dsi-; blank = none)",
-      fSkillMax: "Max synthesized skills (0=unlimited)",
+      fDecay: "Forget unused memories over time",
+      fDecayAge: "Only forget memories older than (days)",
+      fDecayThreshold: "Forgetting threshold",
+      fDecayRetention: "Keep forgotten memories for (days, 0 = forever)",
+      fDecayMaxActive: "Max active memories (0 = no limit)",
+      fSkill: "Write skills from repeated procedures",
+      fSkillMin: "Minimum importance for a skill",
+      fSkillRoot: "Skills folder (empty = $DSH_HOME/skills)",
+      fSkillPrefix: "Skill name prefix",
+      fSkillMax: "Max skills (0 = no limit)",
       fHkPersona: "Persona versions to keep",
       fHkScenes: "Max scenes",
-      fHkSceneRatio: "Scene GC: source-memory active ratio threshold (0-1)",
-      fHkConvDays: "Conversation slice retention days (0=keep all)",
-      fRecallInjectChars: "Max injected block chars",
-      fReviewEnabled: "Enable nightly review (one full evolution per day)",
+      fHkSceneRatio: "Remove scenes below active-memory ratio (0–1)",
+      fHkConvDays: "Keep saved conversations for (days, 0 = forever)",
+      fRecallInjectChars: "Max recalled text per reply (characters)",
+      fReviewEnabled: "Run a full review every night",
       fReviewTime: "Review time (HH:MM, 24h)",
       /* episode learning */
-      groupEpisodes: "Episode learning (tool outcomes, disabled by default)",
-      fEpEnabled: "Enable episode learning",
-      fEpEnabledHint: "Captures every tool call + result (arguments/results redacted at capture, bounded) into the local episode store. If LLM outcome review is enabled, redacted evidence is sent to the configured provider. Purge anytime from the Memory tab.",
+      groupEpisodes: "Learning from tool use",
+      fEpEnabled: "Record tool calls and their outcomes",
+      fEpEnabledHint: "Saves each tool call and result on this machine, with arguments and output redacted. If outcome review is on, that redacted record is sent to your configured provider to learn from. You can purge it any time from the Memory tab.",
       fEpCaptureArgs: "Capture tool arguments",
       fEpExcerpt: "Result excerpt chars (max)",
       fEpRetention: "Episode record retention days",
@@ -286,7 +341,7 @@ window.__ModuleLoader__.load({
       /* memory browser */
       browserSearch: "Filter",
       browserRefresh: "Refresh",
-      browserSummary: "{n} active memories · {p} pending · {s} scenes · persona v{v} · {k} skills · {e} episodes",
+      browserSummary: "{n} memories · {p} waiting to process · {s} scenes · {k} skills · {e} tool episodes",
       browserEmpty: "(no active memories)",
       browserPersona: "Persona",
       browserPersonaEmpty: "(no persona yet — self-evolution synthesizes it as memories accumulate)",
@@ -340,12 +395,21 @@ window.__ModuleLoader__.load({
       browserMetaEnded: "Ended"
     };
     var en = {
-      nav: "进化记忆",
+      sectionGeneral: "General",
+      sectionContinuity: "Session continuity",
+      sectionContinuitySub: "Notice when you stop partway through a task, and offer to pick it up from another session in the same project.",
+      sectionEpisodes: "Learning from tool use",
+      sectionAdvanced: "Advanced tuning",
+      sectionAdvancedSub: "The defaults work well. Change these only if you know what you want.",
+      overriddenHint: "Set in your configuration, not the default",
+      allSaved: "All changes saved",
+      discard: "Discard",
+      nav: "Evolving Memory",
       tabOverview: "Overview",
       tabSessions: "Sessions",
       tabConfig: "Settings",
       tabMemories: "Memory",
-      intro: "Long-term memory & self-evolution: captures conversations, extracts memories, injects recall before turns, and consolidates/forgets/evolves over time.",
+      intro: "Remembers what you teach it across sessions, recalls relevant memories before each reply, and tidies itself up over time. Everything is stored on this machine.",
       helpTitle: "About this plugin",
       help: [
         "dsh-self-improved adds cross-session long-term memory and self-evolution to DSH. Data is stored locally by default ($DSH_HOME/memory); LLM-backed features send their required prompt content to the configured provider.",
@@ -374,24 +438,24 @@ window.__ModuleLoader__.load({
         "• Disabling the master switch stops background work; stored memories are kept and everything resumes when re-enabled — the Memory tab stays accessible for inspection while paused",
         "• Uninstalling the plugin does not delete local memory data"
       ].join("\n"),
-      groupMaster: "Master",
-      fContinuityEnabled: "Continuity checkpoint capture (local structural metadata only)",
-      fContinuitySummary: "Send minimized excerpts for partial handoffs (separate opt-in)",
-      fContinuitySummaryHint: "Default off. Sends bounded own user-text excerpts to the Extraction model/provider, or host default. Best-effort redaction can miss sensitive or copied prose. Requires checkpoint capture and Capture. Handoffs are partial and unverified; tasks and approvals never resume automatically. Off stops processing but keeps saved handoffs for inspection.",
-      fContinuitySessions: "Excluded native session IDs (JSON string array)",
-      fContinuityProjects: "Excluded opaque project IDs (JSON string array)",
-      groupModules: "Modules",
+      groupMaster: "Diagnostics",
+      fContinuityEnabled: "Track unfinished work",
+      fContinuitySummary: "Write handoff summaries with the model",
+      fContinuitySummaryHint: "Sends short excerpts of your own messages to the extraction model to write handoff notes. Redaction is best-effort, so sensitive text can slip through. Off by default.",
+      fContinuitySessions: "Never track these sessions",
+      fContinuityProjects: "Never track these projects",
+      groupModules: "More features",
       groupStorage: "Storage",
-      groupExtract: "Extraction (L1)",
-      groupRecall: "Recall / Embedding",
-      groupConsolidate: "Consolidation (L2/L3)",
-      groupEvolve: "Self-evolution",
-      groupHousekeeping: "Growth governance",
-      groupReview: "Nightly review (daily full evolution)",
+      groupExtract: "Memory extraction",
+      groupRecall: "Recall",
+      groupConsolidate: "Persona and scenes",
+      groupEvolve: "Forgetting and skills",
+      groupHousekeeping: "Size limits",
+      groupReview: "Nightly review",
       save: "Save",
-      resetScoped: "Restore inherited defaults",
-      resetConfirm: "Restore this group to the inherited (composition) defaults? Only this group's overrides are cleared.",
-      saved: "Saved — applied without restart",
+      resetScoped: "Reset to defaults",
+      resetConfirm: "Reset this group to its default values? Only this group changes.",
+      saved: "Saved. Changes apply right away.",
       saving: "Saving…",
       error: "Save failed",
       conflict: "These settings changed elsewhere since you started editing. Your edits are kept below; review them and save again to rebase.",
@@ -399,79 +463,79 @@ window.__ModuleLoader__.load({
       conflictDiscard: "Discard my edits",
       conflictDiscardConfirm: "Discard your unsaved edits? This restores the host section in the form.",
       dirtyBadge: "unsaved",
-      dirtySummary: "{n} field(s) with unsaved edits",
+      dirtySummary: "{n} unsaved change(s)",
       restartNote: "restart required",
-      unavailable: "Settings for this plugin are not available from this host (dsh-self-improved not mounted?)",
-      overridden: "overridden",
+      unavailable: "Settings aren't available: the dsh-self-improved plugin isn't running on this host.",
+      overridden: "custom",
       secretSet: "key stored",
       secretUnset: "no key",
-      secretHint: "Leave blank to keep the stored key. The key never re-appears here.",
+      secretHint: "Leave empty to keep the stored key.",
       loading: "Loading…",
-      fEnabled: "Enable plugin (master switch)",
-      fDebug: "Debug logs",
-      fCapture: "Capture conversations (L0)",
-      fExtract: "Extract memories (L1)",
-      fConsolidate: "Consolidate scenes/persona (L2/L3)",
-      fEvolve: "Self-evolve (decay/skills)",
-      fRecall: "Auto recall injection",
-      fTools: "Memory tools (memory_search etc.)",
-      fStorageRoot: "Memory dir (blank = $DSH_HOME/memory)",
-      fSearchLimit: "Default tool result limit",
-      fProvider: "Extraction provider (blank = default model)",
-      fModel: "Extraction model (blank = default model)",
-      fInterval: "Poll interval (minutes)",
-      fBatchChars: "Max input chars per batch",
+      fEnabled: "Enable Evolving Memory",
+      fDebug: "Verbose debug logs",
+      fCapture: "Save conversations for memory",
+      fExtract: "Learn memories from conversations",
+      fConsolidate: "Build persona and scenes",
+      fEvolve: "Forget stale memories",
+      fRecall: "Recall memories before each reply",
+      fTools: "Give the agent memory search tools",
+      fStorageRoot: "Memory folder (empty = $DSH_HOME/memory)",
+      fSearchLimit: "Search results per tool call",
+      fProvider: "Extraction provider (empty = default)",
+      fModel: "Extraction model (empty = default)",
+      fInterval: "Check for new conversations every (minutes)",
+      fBatchChars: "Max characters per extraction batch",
       fMaxTokens: "Max output tokens",
       fTimeoutMs: "Extraction timeout (ms)",
-      fDedup: "Dedup (token overlap)",
-      fMinImportance: "Drop memories under importance",
+      fDedup: "Skip near-duplicate memories",
+      fMinImportance: "Ignore memories below importance",
       fFallback: "Fallback to summary on bad JSON",
-      fFlushDrain: "Drain extraction before headless exit",
+      fFlushDrain: "Finish extraction before headless runs exit",
       fProvenance: "Extraction provenance filter",
       fProvenanceHint: "strict (recommended) = only memories confirmed as human-authored/curated enter the long-term store. off disables the filter (not recommended).",
-      fRequireEvidence: "Require extraction evidence",
+      fRequireEvidence: "Require a quote from the conversation",
       fRequireEvidenceHint: "When on, memories the extraction model produced without quoting evidence from the conversation are rejected — the conservative default.",
-      fStrategy: "Recall strategy",
-      fStrategyHint: "keyword = pure keyword (default, no embedding calls); hybrid = keyword + vector fusion (requires an embedding endpoint below; auto-falls back to keyword if unset).",
+      fStrategy: "Recall method",
+      fStrategyHint: "keyword: fast, no extra calls (default). hybrid: keyword plus embeddings; needs an embedding endpoint below and falls back to keyword without one.",
       fMaxResults: "Max recall results",
-      fScoreThreshold: "Score threshold (0 = off)",
-      fRelevanceMargin: "Relevance margin (0–1)",
-      fRelevanceMarginHint: "How strict the injection gate is: 0.5 (default) injects only clearly relevant memories; lower values inject more noise — keep it high for conservative behavior.",
-      fRecallMinImportance: "Min importance to inject (0 = off)",
-      fRecallMinImportanceHint: "Memories below this importance are never injected; 0 = no filter.",
-      fMaxInjectPerTurn: "Max memories injected per turn",
-      fMaxInjectPerTurnHint: "Hard cap on injected memory blocks per turn (default 4) to keep prompts clean; 0 = unlimited (not recommended).",
+      fScoreThreshold: "Minimum match score (0 = off)",
+      fRelevanceMargin: "Relevance strictness (0–1)",
+      fRelevanceMarginHint: "Higher is stricter. 0.5 (default) only injects clearly relevant memories.",
+      fRecallMinImportance: "Minimum importance to recall (0 = any)",
+      fRecallMinImportanceHint: "",
+      fMaxInjectPerTurn: "Max memories per reply",
+      fMaxInjectPerTurnHint: "Default 4. 0 means no limit, which can crowd the prompt.",
       fRecallTimeout: "Recall timeout (ms)",
-      fEmbBase: "Embedding Base URL (blank = keyword only)",
-      fEmbKey: "Embedding API Key (write-only)",
+      fEmbBase: "Embedding endpoint URL (empty = keyword only)",
+      fEmbKey: "Embedding API key",
       fEmbModel: "Embedding model",
-      fEmbDims: "Vector dimensions",
+      fEmbDims: "Embedding dimensions",
       fEmbTimeout: "Embedding timeout (ms)",
-      fSceneMax: "Memories for scene grouping",
-      fScenesEnabled: "Scene grouping (L2 scenes)",
-      fScenesEnabledHint: "Default off: recall uses the curated baseline + contextual search; enabling generates scene blocks at the nightly review.",
-      fPersonaMax: "Memories for persona",
+      fSceneMax: "Memories considered for scenes",
+      fScenesEnabled: "Group memories into scenes",
+      fScenesEnabledHint: "Off by default. When on, the nightly review also builds scene summaries.",
+      fPersonaMax: "Memories considered for persona",
       fSceneBatch: "Max memories per scene",
-      fDecay: "Forgetting decay",
-      fDecayAge: "Min age (days)",
-      fDecayThreshold: "Decay score threshold",
-      fDecayRetention: "Forgotten retention (days, 0=keep)",
-      fDecayMaxActive: "Max active memories (0=unlimited)",
-      fSkill: "Skill synthesis (→ dsh-skill)",
-      fSkillMin: "Skill min importance",
-      fSkillRoot: "Skills root (blank = $DSH_HOME/skills)",
-      fSkillPrefix: "Synthesized skill name prefix (e.g. dsi-; blank = none)",
-      fSkillMax: "Max synthesized skills (0=unlimited)",
+      fDecay: "Forget unused memories over time",
+      fDecayAge: "Only forget memories older than (days)",
+      fDecayThreshold: "Forgetting threshold",
+      fDecayRetention: "Keep forgotten memories for (days, 0 = forever)",
+      fDecayMaxActive: "Max active memories (0 = no limit)",
+      fSkill: "Write skills from repeated procedures",
+      fSkillMin: "Minimum importance for a skill",
+      fSkillRoot: "Skills folder (empty = $DSH_HOME/skills)",
+      fSkillPrefix: "Skill name prefix",
+      fSkillMax: "Max skills (0 = no limit)",
       fHkPersona: "Persona versions to keep",
       fHkScenes: "Max scenes",
-      fHkSceneRatio: "Scene GC: source-memory active ratio threshold (0-1)",
-      fHkConvDays: "Conversation slice retention days (0=keep all)",
-      fRecallInjectChars: "Max injected block chars",
-      fReviewEnabled: "Enable nightly review (one full evolution per day)",
+      fHkSceneRatio: "Remove scenes below active-memory ratio (0–1)",
+      fHkConvDays: "Keep saved conversations for (days, 0 = forever)",
+      fRecallInjectChars: "Max recalled text per reply (characters)",
+      fReviewEnabled: "Run a full review every night",
       fReviewTime: "Review time (HH:MM, 24h)",
-      groupEpisodes: "Episode learning (tool outcomes, disabled by default)",
-      fEpEnabled: "Enable episode learning",
-      fEpEnabledHint: "Captures every tool call + result (arguments/results redacted at capture, bounded) into the local episode store. If LLM outcome review is enabled, redacted evidence is sent to the configured provider. Purge anytime from the Memory tab.",
+      groupEpisodes: "Learning from tool use",
+      fEpEnabled: "Record tool calls and their outcomes",
+      fEpEnabledHint: "Saves each tool call and result on this machine, with arguments and output redacted. If outcome review is on, that redacted record is sent to your configured provider to learn from. You can purge it any time from the Memory tab.",
       fEpCaptureArgs: "Capture tool arguments",
       fEpExcerpt: "Result excerpt chars (max)",
       fEpRetention: "Episode record retention days",
@@ -489,7 +553,7 @@ window.__ModuleLoader__.load({
       episodeEnableWarning: "Episode learning stores every tool call and result (redacted and bounded) locally. If LLM outcome review is enabled, redacted episode evidence is sent to your configured LLM provider. Purge stored episodes from the Memory tab. Enable capture now?",
       browserSearch: "Filter",
       browserRefresh: "Refresh",
-      browserSummary: "{n} active memories · {p} pending · {s} scenes · persona v{v} · {k} skills · {e} episodes",
+      browserSummary: "{n} memories · {p} waiting to process · {s} scenes · {k} skills · {e} tool episodes",
       browserEmpty: "(no active memories)",
       browserPersona: "Persona",
       browserPersonaEmpty: "(no persona yet — self-evolution synthesizes it as memories accumulate)",
@@ -1084,7 +1148,9 @@ window.__ModuleLoader__.load({
       var secretPaths = formBinding.secretPaths();
       var secretsByPath = {};
       secretPaths.forEach(function (s) { secretsByPath[s.path.join(".")] = s.set; });
-      var writable = snapshot.writable !== false && snapshot.mode === "host";
+      // rc.2 snapshots carried mode:"host"; 0.2.1 dropped the field and every
+      // form is Host-backed, so only an explicit non-host mode is read-only.
+      var writable = snapshot.writable !== false && (snapshot.mode === void 0 || snapshot.mode === "host");
       var busy = Boolean(state.busy);
 
       function draftOf(f) {
@@ -1162,81 +1228,87 @@ window.__ModuleLoader__.load({
         return masterOn && Boolean(draftKey(sw));
       }
 
-      var nodes = [];
-      var lastGroup = null;
-      var groups = [];
-      FIELDS.forEach(function (f) { if (groupVisible(f.group) && groups.indexOf(f.group) < 0) groups.push(f.group); });
-      var GROUP_ORDER = ["groupMaster", "groupModules", "groupStorage", "groupExtract", "groupRecall", "groupConsolidate", "groupEvolve", "groupHousekeeping", "groupReview", "groupEpisodes"];
-      GROUP_ORDER.forEach(function (group) {
-        if (groups.indexOf(group) < 0) return;
-        nodes.push(h("div", {
-          key: "g" + group, className: "__dsi_group", style: { display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8 }
-        },
-          h("span", null, t(group)),
-          group !== "groupMaster" && group !== "groupModules"
-            ? h("button", {
-                type: "button", className: "__dsi_btn", style: { height: 24, padding: "0 8px", fontSize: 12 },
-                onClick: function () { onResetGroup(group); }, disabled: busy || !writable
-              }, t("resetScoped"))
-            : null
-        ));
-        FIELDS.forEach(function (f) {
-          if (f.group !== group) return;
-          // Inventory-kept but policy-hidden fields (migration-only bypass,
-          // retired unsafe defaults) render nowhere in the ordinary form.
-          if (f.uiClass === "migration-only" || f.uiClass === "retired") return;
-          var overridden = getPath(user, f.path) !== void 0;
-          var dirty = formBinding.isDirty(f.key);
-          var badges = [
-            dirty ? h("span", { key: "d", className: "__dsi_dirty" }, t("dirtyBadge")) : null,
-            overridden && !dirty ? h("span", { key: "o", className: "__dsi_override" }, t("overridden")) : null,
-            f.initOnly ? h("span", { key: "r", className: "__dsi_restart" }, t("restartNote")) : null
-          ];
-          if (f.type === "checkbox") {
-            nodes.push(h("div", { key: f.key, className: "__dsi_field" },
-              h("label", { className: "__dsi_row" },
-                h("input", {
-                  type: "checkbox", className: "__dsi_check", ariaLabel: t(f.label),
-                  checked: Boolean(draftOf(f)), disabled: busy || !writable,
-                  onChange: function (e) { setField(f, e.target.checked); }
-                }),
-                h("span", { className: "__dsi_label" }, t(f.label)),
-                badges
-              ),
-              f.hint ? h("span", { className: "__dsi_hint" }, t(f.hint)) : null
-            ));
-            return;
-          }
-          var input;
-          if (f.type === "select") {
-            input = h("select", {
-              className: "__dsi_input", value: draftOf(f), disabled: busy || !writable,
-              onChange: function (e) { setField(f, e.target.value); }
-            }, f.options.map(function (opt) { return h("option", { key: opt, value: opt }, opt); }));
-          } else {
-            var isSecret = f.secret;
-            var secretSet = secretsByPath[f.key];
-            input = h("input", {
-              className: "__dsi_input",
-              type: isSecret ? "password" : f.type === "number" ? "number" : "text",
-              value: draftOf(f),
-              disabled: busy || !writable || f.initOnly,
-              id: "dsi-" + f.key,
-              placeholder: isSecret ? (secretSet ? "••••••••" : t("secretHint")) : "",
-              onChange: function (e) { setField(f, e.target.value); }
-            });
-          }
-          nodes.push(h("div", { key: f.key, className: "__dsi_field" },
-            h("label", { className: "__dsi_label", htmlFor: "dsi-" + f.key },
-              t(f.label),
-              badges
-            ),
-            input,
-            isSecret ? h("span", { className: "__dsi_hint" }, t("secretHint") + " " + (secretSet ? "(" + t("secretSet") + ")" : "(" + t("secretUnset") + ")")) : null,
-            f.hint ? h("span", { className: "__dsi_hint" }, t(f.hint)) : null
-          ));
-        });
+      function badgesOf(f) {
+        var overridden = getPath(user, f.path) !== void 0;
+        var dirty = formBinding.isDirty(f.key);
+        return [
+          dirty ? h("span", { key: "d", className: "__dsi_dirty" }, t("dirtyBadge")) : null,
+          overridden && !dirty ? h("span", { key: "o", className: "__dsi_override", title: t("overriddenHint") }, t("overridden")) : null,
+          f.initOnly ? h("span", { key: "r", className: "__dsi_restart" }, t("restartNote")) : null
+        ];
+      }
+      function renderField(f) {
+        if (f.uiClass === "migration-only" || f.uiClass === "retired") return null;
+        var badges = badgesOf(f);
+        if (f.type === "checkbox") {
+          return h("div", { key: f.key, className: "__dsi_switchRow" },
+            h("div", { className: "__dsi_switchText" },
+              h("label", { className: "__dsi_label", htmlFor: "dsi-" + f.key }, t(f.label), badges),
+              f.hint ? h("span", { className: "__dsi_hint" }, t(f.hint)) : null),
+            h("label", { className: "__dsi_switch" },
+              h("input", { type: "checkbox", role: "switch", id: "dsi-" + f.key, "aria-label": t(f.label), checked: Boolean(draftOf(f)), disabled: busy || !writable,
+                onChange: function (e) { setField(f, e.target.checked); } }),
+              h("span", { className: "__dsi_switchTrack", "aria-hidden": "true" }),
+              h("span", { className: "__dsi_switchThumb", "aria-hidden": "true" })));
+        }
+        var input;
+        if (f.type === "string-list") {
+          input = h(StringListInput, { key: "in", id: "dsi-" + f.key, json: draftOf(f), disabled: busy || !writable, onChange: function (json) { setField(f, json); } });
+        } else if (f.type === "select") {
+          input = h("select", {
+            className: "__dsi_input", id: "dsi-" + f.key, value: draftOf(f), disabled: busy || !writable,
+            onChange: function (e) { setField(f, e.target.value); }
+          }, f.options.map(function (opt) { return h("option", { key: opt, value: opt }, opt); }));
+        } else {
+          var isSecret = f.secret;
+          var secretSet = secretsByPath[f.key];
+          input = h("input", {
+            className: "__dsi_input",
+            type: isSecret ? "password" : f.type === "number" ? "number" : "text",
+            value: draftOf(f),
+            disabled: busy || !writable || f.initOnly,
+            id: "dsi-" + f.key,
+            placeholder: isSecret ? (secretSet ? "••••••••" : t("secretHint")) : "",
+            onChange: function (e) { setField(f, e.target.value); }
+          });
+        }
+        return h("div", { key: f.key, className: "__dsi_field" },
+          h("label", { className: "__dsi_label", htmlFor: "dsi-" + f.key }, t(f.label), badges),
+          input,
+          f.secret ? h("span", { className: "__dsi_hint" }, secretsByPath[f.key] ? t("secretSet") : t("secretUnset")) : null,
+          f.hint ? h("span", { className: "__dsi_hint" }, t(f.hint)) : null);
+      }
+      function fieldsWhere(pred) { return FIELDS.filter(pred).map(renderField).filter(Boolean); }
+      var byKey = function (key) { return FIELDS.find(function (f) { return f.key === key; }); };
+      var essentials = [
+        { id: "general", title: t("sectionGeneral"), keys: ["enabled", "modules.capture", "modules.extract", "modules.recall", "modules.tools"] },
+        { id: "continuity", title: t("sectionContinuity"), sub: t("sectionContinuitySub"), keys: ["continuity.enabled", "continuity.summaryEnabled", "continuity.excludedSessionIds", "continuity.excludedProjectIds"] },
+        { id: "episodes", title: t("sectionEpisodes"), keys: ["episodeLearning.enabled"] }
+      ];
+      var essentialKeys = [];
+      essentials.forEach(function (sec) { essentialKeys = essentialKeys.concat(sec.keys); });
+      var nodes = essentials.map(function (sec) {
+        var fields = sec.keys.map(byKey).filter(Boolean).filter(function (f) { return sec.id === "general" || masterOn || f.key === "enabled"; }).map(renderField).filter(Boolean);
+        if (!fields.length) return null;
+        return h("section", { key: sec.id, className: "__dsi_card", "aria-labelledby": "dsi-sec-" + sec.id },
+          h("h3", { className: "__dsi_cardTitle", id: "dsi-sec-" + sec.id }, sec.title),
+          sec.sub ? h("p", { className: "__dsi_cardSub" }, sec.sub) : null,
+          fields);
       });
+      var GROUP_ORDER = ["groupMaster", "groupModules", "groupStorage", "groupExtract", "groupRecall", "groupConsolidate", "groupEvolve", "groupHousekeeping", "groupReview", "groupEpisodes"];
+      var advanced = GROUP_ORDER.map(function (group) {
+        if (!groupVisible(group)) return null;
+        var fields = fieldsWhere(function (f) { return f.group === group && essentialKeys.indexOf(f.key) < 0; });
+        if (!fields.length) return null;
+        var dirtyHere = FIELDS.some(function (f) { return f.group === group && formBinding.isDirty(f.key); });
+        return h("details", { key: group, className: "__dsi_details", open: dirtyHere || undefined },
+          h("summary", null, t(group), dirtyHere ? h("span", { className: "__dsi_dirty" }, t("dirtyBadge")) : null),
+          h("div", { className: "__dsi_detailsBody" },
+            fields,
+            group !== "groupMaster" && group !== "groupModules"
+              ? h("div", null, h("button", { type: "button", className: "__dsi_btn __dsi_btnSm __dsi_btnGhost", onClick: function () { onResetGroup(group); }, disabled: busy || !writable }, t("resetScoped")))
+              : null));
+      }).filter(Boolean);
 
       var dirtyCount = formBinding.dirtyCount();
       var conflict = state.conflict;
@@ -1244,7 +1316,7 @@ window.__ModuleLoader__.load({
         h("div", { className: "__dsi_header" },
           h("p", { className: "__dsi_intro" }, t("intro")),
           h("button", {
-            type: "button", className: "__dsi_helpBtn", title: t("helpTitle"), "aria-label": t("helpTitle"),
+            type: "button", className: "__dsi_helpBtn", title: t("helpTitle"), "aria-label": t("helpTitle"), "aria-expanded": Boolean(state.helpOpen),
             onClick: function () { state.helpOpen = !state.helpOpen; setTick(function (x) { return x + 1; }); }
           }, "?")
         ),
@@ -1266,17 +1338,43 @@ window.__ModuleLoader__.load({
             }, t("conflictDiscard"))
           )
         ) : null,
-        dirtyCount > 0 ? h("p", { className: "__dsi_status", "aria-live": "polite", role: "status" },
-          t("dirtySummary").replace("{n}", String(dirtyCount))
-        ) : null,
         nodes,
-        h("div", { className: "__dsi_actions" },
-          h("button", { type: "button", className: "__dsi_btn __dsi_btnPrimary", onClick: onSave, disabled: busy || !writable || dirtyCount === 0 }, t("save")),
-          state.lastNotice ? h("span", { className: "__dsi_ok", role: "status" }, state.lastNotice) : null,
-          busy ? h("span", { className: "__dsi_status" }, t("saving")) : null,
-          state.lastError ? h("span", { className: "__dsi_error", role: "alert" }, t("error") + ": " + state.lastError) : null
-        )
+        masterOn && advanced.length ? h("section", { className: "__dsi_section", "aria-labelledby": "dsi-sec-advanced" },
+          h("h3", { className: "__dsi_sectionTitle", id: "dsi-sec-advanced" }, t("sectionAdvanced")),
+          h("p", { className: "__dsi_muted" }, t("sectionAdvancedSub")),
+          advanced) : null,
+        h("div", { className: "__dsi_saveBar" },
+          h("span", { className: dirtyCount > 0 ? "__dsi_status" : "__dsi_muted", role: "status", "aria-live": "polite" },
+            busy ? t("saving")
+              : state.lastError ? h("span", { className: "__dsi_error" }, t("error") + ": " + state.lastError)
+              : dirtyCount > 0 ? t("dirtySummary").replace("{n}", String(dirtyCount))
+              : state.lastNotice ? h("span", { className: "__dsi_ok" }, state.lastNotice) : t("allSaved")),
+          h("div", { className: "__dsi_row" },
+            dirtyCount > 0 ? h("button", { type: "button", className: "__dsi_btn __dsi_btnSm __dsi_btnGhost", disabled: busy,
+              onClick: function () { formBinding.discardDirty(); setTick(function (x) { return x + 1; }); } }, t("discard")) : null,
+            h("button", { type: "button", className: "__dsi_btn __dsi_btnSm __dsi_btnPrimary", onClick: onSave, disabled: busy || !writable || dirtyCount === 0 }, t("save"))))
       );
+    }
+
+    /** One-entry-per-line editor for a JSON string-array field. Keeps its own
+     *  text so blank lines survive typing; the form receives the JSON array. */
+    function StringListInput(props) {
+      var toText = function (json) { try { var v = JSON.parse(json); return Array.isArray(v) ? v.join("\n") : ""; } catch (e) { return ""; } };
+      var pair = react.useState(function () { return toText(props.json); }), text = pair[0], setText = pair[1];
+      var last = react.useRef(props.json);
+      react.useEffect(function () {
+        if (props.json === last.current) return;
+        last.current = props.json;
+        var fromForm = toText(props.json), mine = JSON.stringify(text.split("\n").map(function (x) { return x.trim(); }).filter(Boolean));
+        if (props.json !== mine) setText(fromForm);
+      }, [props.json]);
+      return h("textarea", { id: props.id, className: "__dsi_input __dsi_textarea", rows: 3, value: text, disabled: props.disabled, spellCheck: false,
+        placeholder: "One ID per line",
+        onChange: function (e) {
+          var next = e.target.value; setText(next);
+          var json = JSON.stringify(next.split("\n").map(function (x) { return x.trim(); }).filter(Boolean));
+          last.current = json; props.onChange(json);
+        } });
     }
 
     /** Memory browser (Memory tab) — typed business-remote consumer. */
@@ -1417,7 +1515,7 @@ window.__ModuleLoader__.load({
           h("div", { className: "__dsi_browserMain" },
             h("span", { className: "__dsi_browserKind" }, KIND_LABEL[m.kind] || m.kind),
             h("span", { className: "__dsi_browserContent" }, m.content),
-            h("span", { className: "__dsi_browserMeta" }, "★" + m.importance + " · hits " + m.accessCount + " · " + m.id.slice(0, 8))
+            h("span", { className: "__dsi_browserMeta", title: "Memory " + m.id }, "Importance " + m.importance + " · recalled " + m.accessCount + (m.accessCount === 1 ? " time" : " times"))
           ),
           h("span", { className: "__dsi_browserOps" },
             h("button", { type: "button", className: "__dsi_btn", onClick: function () { viewDetail(m); }, disabled: busy }, t("browserDetail")),
@@ -1690,44 +1788,77 @@ window.__ModuleLoader__.load({
       react.useEffect(function () { read.refresh(); }, [read.refresh]);
       var data = state.data, counts = data && data.episodes && data.episodes.counts;
       var lane = data && data.continuity ? data.continuity : null;
-      /** Factual lane state: on/off facts, bounded counts, and the first reason
-       *  nothing can be continued. Never a "healthy" badge — an off switch, a
-       *  missing route and a failed worker all read differently. */
-      function laneLine(label, value) { return [h("dt", { key: label }, label), h("dd", { key: label + "-v" }, String(value))]; }
+      function stat(label, value, hint) {
+        return h("div", { key: label, className: "__dsi_stat", title: hint || undefined },
+          h("span", { className: "__dsi_statValue" }, String(value)),
+          h("span", { className: "__dsi_statLabel" }, label));
+      }
+      function kv(label, value) { return h("div", { key: label }, h("dt", null, label), h("dd", null, String(value))); }
+      var laneStatus = !lane ? null : lane.structural === "on" ? (lane.failed ? ["Needs attention", "__dsi_pillWarn"] : ["On", "__dsi_pillOn"])
+        : lane.structural === "off" ? ["Off", ""] : ["Unavailable", "__dsi_pillWarn"];
+      var skillsActive = data && data.learnedSkills && data.learnedSkills.available ? (data.learnedSkills.active || []) : null;
       return h("div", { className: "__dsi_root" },
-        h("p", { className: "__dsi_status" }, "Read-only stored data. Paused data remains inspectable; these counts do not establish task success or measured improvement."),
-        h("button", { type: "button", className: "__dsi_btn", disabled: state.busy, onClick: function () { read.refresh(); } }, props.t("browserRefresh")),
-        state.busy ? h("p", { role: "status" }, "Loading…") : null,
-        state.error ? h("p", { role: "alert" }, state.error) : null,
-        data ? h("dl", null,
-          h("dt", null, "Memory rows shown (bounded)"), h("dd", null, String((data.memories || []).length)),
-          h("dt", null, "Pending extraction sessions"), h("dd", null, String(data.pending || 0)),
-          h("dt", null, "Reviewed evidence episodes"), h("dd", null, String(counts && counts.reviewed || 0)),
-          h("dt", null, "Skill files listed (not activation evidence)"), h("dd", null, String((data.skills || []).length))) : null,
-        lane ? h("section", null,
-          h("h3", null, "Session continuity"),
-          h("dl", null,
-            laneLine("Structural capture", lane.structural === "on" ? "on" : lane.structural === "off" ? "off" : "unavailable"),
-            laneLine("Handoff summaries (uses the model)", lane.body === "on" ? "on" : "off"),
-            laneLine("Model route resolves", lane.route ? "yes" : "no"),
-            laneLine("Unfinished work captured", lane.pending || 0),
-            laneLine("Handoffs ready to continue", lane.handoffs || 0),
-            laneLine("Processing attempts failed", lane.failed || 0),
-            laneLine("Latest boundary cut", lane.lastCut === null || lane.lastCut === undefined ? "none" : String(lane.lastCut))),
-          lane.reason ? h("p", { className: "__dsi_status", role: "status" }, lane.reason) : null,
-          h("p", null, "Continuing is an operator action in the Sessions tab. Processing counts are not task success, and a handoff is unverified orientation only.")) : null,
-        data && data.learnedSkills && data.learnedSkills.available ? h("section", null,
-          h("h3", null, "Learned skills (active)"),
-          (data.learnedSkills.active || []).length
-            ? h("ul", null, (data.learnedSkills.active || []).map(function (skill) {
-                return h("li", { key: skill.name },
-                  skill.name + " \u00b7 evaluation " + (skill.evaluationVersion || "none recorded \u2014 activated on human review alone"));
+        h("div", { className: "__dsi_toolbar" },
+          h("p", { className: "__dsi_cardSub" }, "What the plugin has stored and what it is doing right now."),
+          h("button", { type: "button", className: "__dsi_btn __dsi_btnSm", disabled: state.busy, onClick: function () { read.refresh(); } },
+            state.busy ? "Refreshing…" : props.t("browserRefresh"))),
+        state.error ? h("p", { className: "__dsi_error", role: "alert" }, state.error) : null,
+        !data && state.busy ? h("p", { className: "__dsi_muted", role: "status" }, "Loading…") : null,
+        data ? h("div", { className: "__dsi_stats" },
+          stat("Memories", (data.memories || []).length, "Active long-term memories (the list is capped)"),
+          stat("Waiting to process", data.pending || 0, "Conversation sessions not yet turned into memories"),
+          stat("Tool episodes reviewed", counts && counts.reviewed || 0),
+          stat("Skills", (data.skills || []).length)) : null,
+        lane ? h("section", { className: "__dsi_card", "aria-labelledby": "dsi-ov-cont" },
+          h("div", { className: "__dsi_cardHead" },
+            h("h3", { className: "__dsi_cardTitle", id: "dsi-ov-cont" }, "Session continuity"),
+            h("span", { className: "__dsi_pill " + laneStatus[1] }, laneStatus[0])),
+          h("p", { className: "__dsi_cardSub" }, "Picks up unfinished work from an earlier session in the same project."),
+          lane.structural === "on" ? h("dl", { className: "__dsi_kv" },
+            kv("Unfinished tasks", lane.pending || 0),
+            kv("Ready to continue", lane.handoffs || 0),
+            kv("Handoff summaries", lane.body === "on" ? (lane.route ? "On" : "On · no model") : "Off"),
+            kv("Failed attempts", lane.failed || 0)) : null,
+          lane.reason ? h("div", { className: "__dsi_callout", role: "status" },
+            h("span", null, lane.reason),
+            lane.structural === "off" && props.goTo
+              ? h("button", { type: "button", className: "__dsi_btn __dsi_btnSm", onClick: function () { props.goTo("config"); } }, "Open settings")
+              : lane.handoffs && props.goTo
+                ? h("button", { type: "button", className: "__dsi_btn __dsi_btnSm __dsi_btnPrimary", onClick: function () { props.goTo("sessions"); } }, "Continue work")
+                : null) : null) : null,
+        skillsActive ? h("section", { className: "__dsi_card", "aria-labelledby": "dsi-ov-skills" },
+          h("div", { className: "__dsi_cardHead" },
+            h("h3", { className: "__dsi_cardTitle", id: "dsi-ov-skills" }, "Learned skills"),
+            h("span", { className: "__dsi_pill" + (skillsActive.length ? " __dsi_pillOn" : "") }, skillsActive.length + " active")),
+          skillsActive.length
+            ? h("ul", { className: "__dsi_list" }, skillsActive.map(function (skill) {
+                return h("li", { key: skill.name, className: "__dsi_listItem" },
+                  h("div", { className: "__dsi_listMain" },
+                    h("span", { className: "__dsi_listTitle" }, skill.name),
+                    h("span", { className: "__dsi_muted" }, skill.evaluationVersion ? "Evaluation " + skill.evaluationVersion : "Activated after your review (not evaluated)")));
               }))
-            : h("p", { role: "status" }, "No learned skill is active."),
-          h("p", null, "User-invocable only: the model's catalog does not see these. Approve, activate and roll back with /memory skill-approve | skill-activate | skill-rollback.")) : null);
+            : h("p", { className: "__dsi_cardSub" }, "No learned skill is active."),
+          h("p", { className: "__dsi_muted" }, "Only you can invoke these; the model doesn't see them. Manage them with /memory skill-approve, skill-activate and skill-rollback.")) : null);
+    }
+    /** Readable label for one session summary from `remote.session.list`. */
+    function sessionLabel(item) {
+      var proj = item && item.projections && item.projections.values;
+      var title = proj && proj.title && (proj.title.title || proj.title.text);
+      var folder = item && item.cwd ? String(item.cwd).replace(/\/+$/, "").split("/").pop() : "";
+      return (title ? String(title) : "Untitled session") + (folder ? " \u00b7 " + folder : "");
+    }
+    function relativeTime(ts) {
+      if (!ts) return "";
+      var minutes = Math.round((Date.now() - ts) / 60000);
+      if (minutes < 1) return "just now";
+      if (minutes < 60) return minutes + " min ago";
+      var hours = Math.round(minutes / 60);
+      if (hours < 24) return hours + " h ago";
+      return Math.round(hours / 24) + " d ago";
     }
     function SessionsSection(props) {
       var targetPair = react.useState(""), target = targetPair[0], setTarget = targetPair[1];
+      var listPair = react.useState({ loading: true, items: null }), list = listPair[0], setList = listPair[1];
       var read = useOwnedRead(props.api, "continuityStatus"), state = read.state, data = state.data;
       var rows = data && Array.isArray(data.rows) ? data.rows : [];
       var offers = data && Array.isArray(data.offers) ? data.offers : [];
@@ -1735,6 +1866,27 @@ window.__ModuleLoader__.load({
       var cont = continuePair[0], setCont = continuePair[1];
       var sendPair = react.useState({ busy: false, error: null, sent: null });
       var send = sendPair[0], setSend = sendPair[1];
+      function choose(id) {
+        read.cancel(); setTarget(id);
+        setCont({ busy: false, error: null, notes: null, jobId: null }); setSend({ busy: false, error: null, sent: null });
+        if (id) read.refresh(id);
+      }
+      react.useEffect(function () {
+        var live = true, remote = props.session && props.session.current;
+        if (!remote || typeof remote.list !== "function") { setList({ loading: false, items: null }); return function () { live = false; }; }
+        Promise.resolve(remote.list({})).then(function (result) {
+          if (!live) return;
+          var items = result && result.ok && result.value && Array.isArray(result.value.items) ? result.value.items : null;
+          items = items ? items.filter(function (item) { return !item.parentSessionId && item.origin !== "subagent"; })
+            .sort(function (x, y) { return (y.updatedAt || 0) - (x.updatedAt || 0); }).slice(0, 50) : null;
+          setList({ loading: false, items: items });
+          if (items && items.length && !target) choose(items[0].sessionId);
+        }).catch(function () { if (live) setList({ loading: false, items: null }); });
+        return function () { live = false; };
+      }, []);
+      var labels = {};
+      (list.items || []).forEach(function (item) { labels[item.sessionId] = sessionLabel(item); });
+      function nameOf(id) { return labels[id] || String(id).slice(0, 8); }
       function contMsg(r) { return r && !r.ok && r.error ? String(r.error.message || r.error.code || "remote failure") : "remote failure"; }
       /**
        * The message the operator is about to send. It states plainly that the
@@ -1778,11 +1930,9 @@ window.__ModuleLoader__.load({
        *
        * The click mints a peer- and args-bound one-shot confirm through the
        * browser business remote and only then reads the bounded handoff notes.
-       * A message the model wrote, a tool call, or any other in-process caller
-       * carries no gateway peer, so the host refuses it: the agent's ordinary
-       * paths cannot reach this. Measured limit — this runtime admits every
-       * loopback /api request as the operator peer, so a process with shell
-       * access could; that residual risk is disclosed, not hidden.
+       * The Host admits /api only with the signed operator cookie and the
+       * plugin requires an owner Peer, so the model's tool paths cannot reach
+       * this; in-process plugins remain trusted, as everywhere in DSH.
        */
       function continueOffer(jobId) {
         setSend({ busy: false, error: null, sent: null });
@@ -1805,40 +1955,56 @@ window.__ModuleLoader__.load({
           setCont({ busy: false, error: String(error && error.message || error), notes: null, jobId: jobId });
         });
       }
+      var picker = list.items
+        ? h("select", { id: "dsi-cont-target", className: "__dsi_input", value: target, onChange: function (event) { choose(event.target.value); } },
+            target ? null : h("option", { value: "" }, "Choose a session…"),
+            list.items.map(function (item) { return h("option", { key: item.sessionId, value: item.sessionId }, labels[item.sessionId] + " \u2014 " + relativeTime(item.updatedAt)); }))
+        : h("input", { id: "dsi-cont-target", className: "__dsi_input", value: target, name: "sessionId", autoComplete: "off", spellCheck: false,
+            placeholder: list.loading ? "Loading sessions…" : "Session ID",
+            onChange: function (event) { read.cancel(); setTarget(event.target.value); },
+            onKeyDown: function (event) { if (event.key === "Enter" && target.trim()) { event.preventDefault(); choose(target.trim()); } } });
       return h("div", { className: "__dsi_root" },
-        h("label", null, "Native target session ID", h("input", { className: "__dsi_input", value: target,
-          name: "sessionId", autoComplete: "off", spellCheck: false,
-          onChange: function (event) { read.cancel(); setTarget(event.target.value); },
-          onKeyDown: function (event) { if (event.key === "Enter" && target.trim()) { event.preventDefault(); read.refresh(target); } } })),
-        h("button", { type: "button", className: "__dsi_btn", disabled: !target.trim(), onClick: function () { read.refresh(target); } }, props.t("browserRefresh")),
-        state.busy ? h("p", { role: "status" }, "Loading…") : null,
-        state.error ? h("p", { role: "alert" }, state.error) : null,
-        h("p", { className: "__dsi_status" }, data ? data.reason : "Choose a native target session to inspect same-project processing metadata."),
-        h("h3", null, "Unfinished work you can continue"),
-        data && data.availability === "ready" && offers.length
-          ? h("table", { className: "__dsi_table" }, h("caption", null, "Same-project handoffs offered to the operator (bounded)"),
-              h("thead", null, h("tr", null, ["Source session", "Boundary cut", "Action"].map(function (label, index) { return h("th", { key: String(index), scope: "col" }, label); }))),
-              h("tbody", null, offers.map(function (offer) { return h("tr", { key: offer.jobId },
-                h("td", null, offer.sessionId), h("td", null, String(offer.cut)),
-                h("td", null, h("button", { type: "button", className: "__dsi_btn __dsi_btnPrimary", disabled: cont.busy,
-                  onClick: function () { continueOffer(offer.jobId); } }, cont.busy && cont.jobId === offer.jobId ? "Reading…" : "Continue"))); })))
-          : data && data.availability === "ready" ? h("p", { role: "status" }, "No same-project unfinished work offers a handoff right now.") : null,
-        cont.error ? h("p", { className: "__dsi_error", role: "alert" }, cont.error) : null,
-        cont.notes ? h("div", { className: "__dsi_root" },
-          h("h3", null, "Handoff notes (untrusted quotes)"),
-          h("p", { role: "status" }, "Orientation only from the selected session: not task success, not permission, and any external action may already have run or may never have happened."),
-          h("ul", null, (cont.notes.notes || []).map(function (note, index) { return h("li", { key: String(index) }, note); })),
-          h("button", { type: "button", className: "__dsi_btn __dsi_btnPrimary", disabled: send.busy || !target.trim(), onClick: sendHandoff },
-            send.busy ? "Sending…" : "Send these notes to this session"),
-          h("p", null, "This queues one message in the session above, exactly as if you typed it. Read the notes first: they can be stale, wrong, or contain text you would not send."),
+        h("section", { className: "__dsi_card", "aria-labelledby": "dsi-ss-head" },
+          h("div", { className: "__dsi_cardHead" },
+            h("h3", { className: "__dsi_cardTitle", id: "dsi-ss-head" }, "Continue unfinished work"),
+            h("button", { type: "button", className: "__dsi_btn __dsi_btnSm", disabled: !target.trim() || state.busy, onClick: function () { read.refresh(target.trim()); } },
+              state.busy ? "Refreshing…" : props.t("browserRefresh"))),
+          h("p", { className: "__dsi_cardSub" }, "Pick the session you want to work in. Unfinished work from other sessions in the same project shows up below."),
+          h("label", { className: "__dsi_field", htmlFor: "dsi-cont-target" }, h("span", { className: "__dsi_label" }, "Continue in"), picker),
+          !list.loading && !list.items ? h("p", { className: "__dsi_muted" }, "This host can't list sessions; paste a session ID and press Enter.") : null,
+          list.items && !list.items.length ? h("p", { className: "__dsi_muted", role: "status" }, "No sessions yet. Start a chat in a project, then come back here.") : null,
+          state.error ? h("p", { className: "__dsi_error", role: "alert" }, state.error) : null,
+          data && data.availability !== "ready" && data.reason ? h("div", { className: "__dsi_callout", role: "status" }, h("span", null, data.reason)) : null,
+          data && data.availability === "ready" && offers.length
+            ? h("ul", { className: "__dsi_list", "aria-label": "Unfinished work" }, offers.map(function (offer) {
+                return h("li", { key: offer.jobId, className: "__dsi_listItem" },
+                  h("div", { className: "__dsi_listMain" },
+                    h("span", { className: "__dsi_listTitle" }, nameOf(offer.sessionId)),
+                    h("span", { className: "__dsi_muted" }, "Stopped after message " + offer.cut)),
+                  h("button", { type: "button", className: "__dsi_btn __dsi_btnSm __dsi_btnPrimary", disabled: cont.busy,
+                    onClick: function () { continueOffer(offer.jobId); } }, cont.busy && cont.jobId === offer.jobId ? "Reading…" : "Continue"));
+              }))
+            : data && data.availability === "ready" ? h("p", { className: "__dsi_muted", role: "status" }, "No unfinished work from other sessions in this project. Work left in this session shows up when you pick a different session to continue in.") : null,
+          cont.error ? h("p", { className: "__dsi_error", role: "alert" }, cont.error) : null),
+        cont.notes ? h("section", { className: "__dsi_card", "aria-labelledby": "dsi-ss-notes" },
+          h("div", { className: "__dsi_cardHead" },
+            h("h3", { className: "__dsi_cardTitle", id: "dsi-ss-notes" }, "Handoff notes"),
+            h("span", { className: "__dsi_pill __dsi_pillWarn" }, "Review before sending")),
+          h("p", { className: "__dsi_cardSub" }, "Machine-written summary of where " + nameOf(cont.notes.sessionId) + " stopped. It can be stale or wrong, and it doesn't prove anything actually happened."),
+          h("ul", { className: "__dsi_notes" }, (cont.notes.notes || []).map(function (note, index) { return h("li", { key: String(index) }, note); })),
+          h("div", { className: "__dsi_toolbar" },
+            h("p", { className: "__dsi_muted" }, "Sends one message to " + nameOf(target.trim()) + ", as if you typed it."),
+            h("button", { type: "button", className: "__dsi_btn __dsi_btnPrimary", disabled: send.busy || !target.trim(), onClick: sendHandoff },
+              send.busy ? "Sending…" : "Send to session")),
           send.error ? h("p", { className: "__dsi_error", role: "alert" }, send.error) : null,
-          send.sent ? h("p", { role: "status" }, "Queued in " + send.sent + ".") : null) : null,
-        h("p", null, "Processing states are not task completion, permission, or verified external effects."),
-        data && data.availability === "ready" && !rows.length ? h("p", { role: "status" }, "No current eligible processing references.") : null,
-        rows.length ? h("table", { className: "__dsi_table" }, h("caption", null, "Same-project continuity processing (bounded)"),
-          h("thead", null, h("tr", null, ["Session", "Processing", "Boundary cut", "Attempts"].map(function (label) { return h("th", { key: label, scope: "col" }, label); }))),
-          h("tbody", null, rows.map(function (row) { return h("tr", { key: row.id },
-            h("td", null, row.sessionId), h("td", null, row.status), h("td", null, String(row.cut)), h("td", null, String(row.attempts))); }))) : null);
+          send.sent ? h("p", { className: "__dsi_ok", role: "status" }, "Sent to " + nameOf(send.sent) + ".") : null) : null,
+        rows.length ? h("details", { className: "__dsi_details" },
+          h("summary", null, "Background processing (" + rows.length + ")"),
+          h("div", { className: "__dsi_detailsBody" },
+            h("table", { className: "__dsi_table" },
+              h("thead", null, h("tr", null, ["Session", "Status", "After message", "Attempts"].map(function (label) { return h("th", { key: label, scope: "col" }, label); }))),
+              h("tbody", null, rows.map(function (row) { return h("tr", { key: row.id },
+                h("td", null, nameOf(row.sessionId)), h("td", null, row.status), h("td", null, String(row.cut)), h("td", null, String(row.attempts))); }))))) : null);
     }
 
      var navigationCounter = 0;
@@ -1864,7 +2030,7 @@ window.__ModuleLoader__.load({
           h("button", { type: "button", role: "tab", id: navigationId.current + "-memories", "aria-controls": navigationId.current + "-panel", tabIndex: tab === "memories" ? 0 : -1, "aria-selected": tab === "memories", className: "__dsi_tab" + (tab === "memories" ? " __dsi_tabActive" : ""), onClick: function () { setTab("memories"); } }, t("tabMemories"))
         ),
         h("div", { role: "tabpanel", id: navigationId.current + "-panel", "aria-labelledby": navigationId.current + "-" + tab },
-          tab === "overview" ? h(OverviewSection, Object.assign({ key: tab }, props)) : tab === "sessions" ? h(SessionsSection, Object.assign({ key: tab }, props)) : tab === "config" ? h(MemorySection, Object.assign({ key: tab }, props)) : h(BrowserSection, Object.assign({ key: tab }, props)))
+          tab === "overview" ? h(OverviewSection, Object.assign({ key: tab, goTo: setTab }, props)) : tab === "sessions" ? h(SessionsSection, Object.assign({ key: tab }, props)) : tab === "config" ? h(MemorySection, Object.assign({ key: tab }, props)) : h(BrowserSection, Object.assign({ key: tab }, props)))
       );
     }
 

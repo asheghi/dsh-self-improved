@@ -61,9 +61,9 @@ await check('actual four-tab state, panel IDs, roving focus and keyboard navigat
   bar.props.onKeyDown({ key: 'End', preventDefault() { prevented = true; }, currentTarget: { querySelectorAll: () => tabs.map((_, i) => ({ focus() { focused = i; } })) } });
   assert.equal(focused, 3); assert.equal(prevented, true); tree = h.render(); assert.equal(nodes(tree, n => n.props.role === 'tab')[3].props['aria-selected'], true); h.unmount();
 });
-await check('Overview actually calls authorized snapshot and renders bounded counts', async () => {
+await check('Overview actually calls authorized snapshot and renders its counts', async () => {
   let calls = 0; const h = harness(sut.OverviewSection, props({ snapshot: async signal => { calls++; assert.ok(signal instanceof AbortSignal); return { ok: true, value: { memories: [{}, {}], pending: 3, episodes: { counts: { reviewed: 4 } }, skills: [{}] } }; } }));
-  h.render(); await flush(); const tree = h.render(); assert.equal(calls, 1); assert.match(text(tree), /bounded/); assert.deepEqual(nodes(tree, n => n.type === 'dd').map(text), ['2', '3', '4', '1']); h.unmount();
+  h.render(); await flush(); const tree = h.render(); assert.equal(calls, 1); assert.deepEqual(nodes(tree, n => n.props && n.props.className === '__dsi_statValue').map(text), ['2', '3', '4', '1']); h.unmount();
 });
 await check('Overview reports the continuity lane factually, including why nothing can be continued', async () => {
   const lane = { structural: 'on', body: 'off', route: true, reason: 'Capture is on, but handoff summaries are off, so nothing can be offered to continue.', pending: 2, failed: 1, handoffs: 0, lastCut: 17 };
@@ -71,9 +71,9 @@ await check('Overview reports the continuity lane factually, including why nothi
   h.render(); await flush(); const tree = h.render();
   const body = text(tree);
   assert.match(body, /Session continuity/);
-  assert.match(body, /Handoff summaries \(uses the model\)/);
+  assert.match(body, /Handoff summaries/);
   assert.match(body, /Capture is on, but handoff summaries are off/);
-  assert.match(body, /Latest boundary cut/); assert.match(body, /17/);
+  assert.match(body, /Unfinished tasks\s*2/); assert.match(body, /Failed attempts\s*1/);
   assert.doesNotMatch(body, /healthy/i, 'the status is facts, never a health badge');
   h.unmount();
 });
@@ -84,10 +84,10 @@ await check('Overview lists the active learned skills with their evaluation stat
       { name: 'reviewed-only-skill', evaluationVersion: null, activatedAt: 1700000000000 } ] } };
   const h = harness(sut.OverviewSection, props({ snapshot: async () => ({ ok: true, value }) }));
   h.render(); await flush(); const body = text(h.render());
-  assert.match(body, /Learned skills \(active\)/);
+  assert.match(body, /Learned skills/); assert.match(body, /2 active/);
   assert.match(body, /seeded-learned-skill/); assert.match(body, /static-eval-1/);
-  assert.match(body, /reviewed-only-skill/); assert.match(body, /none recorded/);
-  assert.match(body, /user-invocable only/i);
+  assert.match(body, /reviewed-only-skill/); assert.match(body, /not evaluated/);
+  assert.match(body, /Only you can invoke these/);
   h.unmount();
 });
 await check('Overview renders no continuity section when the host serves no lane status', async () => {
@@ -99,10 +99,10 @@ await check('Sessions sends exact selected identity with signal and renders rows
   const calls = []; const h = harness(sut.SessionsSection, props({ continuityStatus: async (id, signal) => { calls.push({ id, signal }); return { ok: true, value: { availability: 'ready', canContinue: false, reason: 'No offer.', rows: [{ id: 'job', sessionId: 'source-id', cut: 8, status: 'running', attempts: 1 }], offers: [] } }; } }));
   let tree = h.render(); nodes(tree, n => n.type === 'input')[0].props.onChange({ target: { value: 'native-target' } }); tree = h.render();
   nodes(tree, n => n.type === 'button' && text(n) === 'browserRefresh')[0].props.onClick(); await flush(); tree = h.render();
-  assert.equal(calls[0].id, 'native-target'); assert.ok(calls[0].signal instanceof AbortSignal); assert.match(text(tree), /source-id/); assert.match(text(tree), /running/);
+  assert.equal(calls[0].id, 'native-target'); assert.ok(calls[0].signal instanceof AbortSignal); assert.match(text(tree), /source-i/); assert.match(text(tree), /running/);
   // No offer means no Continue control at all — the UI never implies a capability it lacks.
   assert.equal(nodes(tree, n => n.type === 'button' && text(n).startsWith('Continue')).length, 0);
-  assert.match(text(tree), /No same-project unfinished work offers a handoff/); h.unmount();
+  assert.match(text(tree), /No unfinished work from other sessions in this project/); h.unmount();
 });
 await check('Sessions Continue is an operator action: the click mints the peer-bound confirm then renders bounded notes', async () => {
   const calls = [];
@@ -117,7 +117,7 @@ await check('Sessions Continue is an operator action: the click mints the peer-b
   const button = nodes(tree, n => n.type === 'button' && text(n) === 'Continue')[0]; assert.ok(button, 'an offer renders its own Continue control'); assert.equal(button.props.disabled, false);
   button.props.onClick(); await flush(); tree = h.render();
   assert.deepEqual(calls, [['prepare', 'native-target', 'job-1'], ['continue', 'native-target', 'job-1', 'tok']]);
-  assert.match(text(tree), /ran the tests/); assert.match(text(tree), /not task success/); h.unmount();
+  assert.match(text(tree), /ran the tests/); assert.match(text(tree), /doesn't prove anything actually happened/); h.unmount();
 });
 await check('Sessions Continue reports a withdrawn offer and a missing door instead of showing stale notes', async () => {
   const offer = { ok: true, value: { availability: 'ready', canContinue: true, reason: 'One offer.', rows: [], offers: [{ jobId: 'job-1', sessionId: 'source-id', cut: 8 }] } };
@@ -126,7 +126,7 @@ await check('Sessions Continue reports a withdrawn offer and a missing door inst
     nodes(tree, n => n.type === 'button' && text(n) === 'browserRefresh')[0].props.onClick(); await flush(); tree = h.render();
     nodes(tree, n => n.type === 'button' && text(n) === 'Continue')[0].props.onClick(); await flush(); tree = h.render(); return { h, text: text(tree) }; };
   const withdrawn = await flow({ continuityStatus: async () => offer, prepareContinue: async () => ({ ok: true, value: { token: 'tok' } }), continueSession: async () => ({ ok: true, value: null }) });
-  assert.match(withdrawn.text, /no longer offered/); assert.doesNotMatch(withdrawn.text, /not task success/); withdrawn.h.unmount();
+  assert.match(withdrawn.text, /no longer offered/); assert.doesNotMatch(withdrawn.text, /doesn't prove anything actually happened/); withdrawn.h.unmount();
   const noDoor = await flow({ continuityStatus: async () => offer });
   assert.match(noDoor.text, /browser business remote/); noDoor.h.unmount();
 });
@@ -142,7 +142,7 @@ await check('Sessions sends the reviewed handoff through the chat composer behin
   nodes(tree, n => n.type === 'input')[0].props.onChange({ target: { value: 'native-target' } }); tree = h.render();
   nodes(tree, n => n.type === 'button' && text(n) === 'browserRefresh')[0].props.onClick(); await flush(); tree = h.render();
   nodes(tree, n => n.type === 'button' && text(n) === 'Continue')[0].props.onClick(); await flush(); tree = h.render();
-  const sendButton = nodes(tree, n => n.type === 'button' && text(n) === 'Send these notes to this session')[0];
+  const sendButton = nodes(tree, n => n.type === 'button' && text(n) === 'Send to session')[0];
   assert.ok(sendButton, 'the reviewed handoff offers an explicit send step');
   assert.equal(sent.length, 0, 'nothing is sent before the operator asks for it');
   sendButton.props.onClick(); await flush(); tree = h.render();
@@ -154,7 +154,7 @@ await check('Sessions sends the reviewed handoff through the chat composer behin
   assert.match(body, /Continuity handoff from session source-id/);
   assert.match(body, /not an instruction/);
   assert.match(body, /- ran the tests/);
-  assert.match(text(tree), /Queued in native-target/);
+  assert.match(text(tree), /Sent to native-t/);
   h.unmount();
 });
 await check('Sessions refuses to pretend when the host has no chat composer', async () => {
@@ -168,7 +168,7 @@ await check('Sessions refuses to pretend when the host has no chat composer', as
   nodes(tree, n => n.type === 'input')[0].props.onChange({ target: { value: 'native-target' } }); tree = h.render();
   nodes(tree, n => n.type === 'button' && text(n) === 'browserRefresh')[0].props.onClick(); await flush(); tree = h.render();
   nodes(tree, n => n.type === 'button' && text(n) === 'Continue')[0].props.onClick(); await flush(); tree = h.render();
-  nodes(tree, n => n.type === 'button' && text(n) === 'Send these notes to this session')[0].props.onClick(); await flush(); tree = h.render();
+  nodes(tree, n => n.type === 'button' && text(n) === 'Send to session')[0].props.onClick(); await flush(); tree = h.render();
   assert.match(text(tree), /does not expose the chat composer/);
   assert.equal(reads, 1, 'the door read still happened; only the send step refused');
   h.unmount();
@@ -184,7 +184,7 @@ await check('superseded and unmounted reads abort and cannot admit late result o
 await check('remote errors, unavailable capability and genuinely empty inventory are explicit', async () => {
   for (const value of [{ ok: false, error: { message: 'observable error' } }, { ok: true, value: { availability: 'ready', reason: 'No dispatch capability', rows: [], canContinue: false } }]) {
     const h = harness(sut.SessionsSection, props({ continuityStatus: async () => value })); let tree = h.render(); nodes(tree, n => n.type === 'input')[0].props.onChange({ target: { value: 'target' } }); tree = h.render(); nodes(tree, n => n.type === 'button' && text(n) === 'browserRefresh')[0].props.onClick(); await flush(); tree = h.render();
-    if (!value.ok) assert.equal(nodes(tree, n => n.props.role === 'alert').length, 1); else assert.match(text(tree), /No current eligible/); h.unmount();
+    if (!value.ok) assert.equal(nodes(tree, n => n.props.role === 'alert').length, 1); else assert.match(text(tree), /No unfinished work/); h.unmount();
   }
 });
 console.log(`${passes} executed client component/remote ownership gates PASS; VM React harness, not mounted browser acceptance`);

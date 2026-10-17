@@ -98,7 +98,7 @@ assert.match(src, /var formBinding = bindSettingsForm\(ctx\);/, "settings-form b
 // The panel is the INTENDED four-tab composition (Overview/Sessions/Settings/
 // Memory); the earlier two-tab literal is superseded, and the section wiring
 // must still be keyed by the active tab.
-assert.match(src, /tab === "overview" \? h\(OverviewSection, Object\.assign\(\{ key: tab \}, props\)\) : tab === "sessions" \? h\(SessionsSection, Object\.assign\(\{ key: tab \}, props\)\) : tab === "config" \? h\(MemorySection, Object\.assign\(\{ key: tab \}, props\)\) : h\(BrowserSection, Object\.assign\(\{ key: tab \}, props\)\)/,
+assert.match(src, /tab === "overview" \? h\(OverviewSection, Object\.assign\(\{ key: tab(?:, goTo: setTab)? \}, props\)\) : tab === "sessions" \? h\(SessionsSection, Object\.assign\(\{ key: tab \}, props\)\) : tab === "config" \? h\(MemorySection, Object\.assign\(\{ key: tab \}, props\)\) : h\(BrowserSection, Object\.assign\(\{ key: tab \}, props\)\)/,
   "tab switching mounts the SAME shared binding (no per-tab state loss)");
 
 // ── 6. Typed business remote is wired (no Config-as-RPC rows) ──────────────
@@ -130,7 +130,7 @@ assert.match(src, /groupEpisodes: "enabled"/, "groupEpisodes visible while episo
 assert.match(src, /confirmConsent.*episodeEnableWarning|episodeEnableWarning.*confirmConsent|resetConfirm/, "episode first-enable consent confirmed at the save boundary");
 assert.match(src, /collapse\("episodes"/, "episodes panel rendered");
 assert.match(src, /episodeModal/, "episode detail modal rendered");
-assert.equal([...src.matchAll(/browserSummary: "\{n\} active memories[^\n]*\{e\} episodes"/g)].length, 2, "browserSummary shows the episode count in both dictionaries");
+assert.equal([...src.matchAll(/browserSummary: "\{n\} memories[^\n]*\{e\} tool episodes"/g)].length, 2, "browserSummary shows the episode count in both dictionaries");
 
 // ── 8. Accessibility gates carried by source (mounted browser checks remain open) ─
 assert.match(src, /__dsi_switch input:focus-visible \+ \.__dsi_switchTrack/, "slide switch has a visible keyboard focus treatment");
