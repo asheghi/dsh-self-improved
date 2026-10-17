@@ -1,7 +1,16 @@
 {
-  "name": "dsh-self-improved",
-  "version": "0.1.2",
-  "description": "DeepSeek Harness long-term memory and self-evolution plugin: conversation capture, memory extraction, scene/persona consolidation, recall, and opt-in inactive skill drafts.",
+  "name": "@asheghi/dsh-self-improved",
+  "version": "0.2.1",
+  "description": "Long-term memory and session continuity for DeepSeek Harness 0.2.1+: captures conversations, extracts reviewed memories, recalls them before each reply, and offers to continue unfinished work. Local storage; model calls are opt-in.",
+  "author": "Bahman Asheghi <asheghi.bm@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/asheghi/dsh-self-improved.git"
+  },
+  "homepage": "https://github.com/asheghi/dsh-self-improved#readme",
+  "bugs": {
+    "url": "https://github.com/asheghi/dsh-self-improved/issues"
+  },
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
@@ -24,13 +33,12 @@
   "files": [
     "lib",
     "src",
-    "scripts",
+    "scripts/typecheck-v02.mjs",
     "tsconfig.json",
     "client.js",
     "cordis.patch.yml",
     "LICENSE",
     "README.md",
-    "ROADMAP.md",
     "TROUBLESHOOTING.md"
   ],
   "license": "MIT",
@@ -40,9 +48,9 @@
     "zod": "4.4.3"
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "4.0.5",
-    "@deepseek-ai/cordis-plugin-loader": "1.0.6",
-    "@deepseek-ai/cosmokit": "1.8.6",
+    "@deepseek-ai/cordis": "^4.0.5",
+    "@deepseek-ai/cordis-plugin-loader": "^1.0.6",
+    "@deepseek-ai/cosmokit": "^1.8.6",
     "@deepseek-ai/dsh-agent": "^0.2.1-rc.2",
     "@deepseek-ai/dsh-agent-default-model": "^0.2.1-rc.2",
     "@deepseek-ai/dsh-home-paths": "^0.2.1-rc.2",
@@ -56,8 +64,8 @@
     "@deepseek-ai/dsh-storage-domain": "^0.2.1-rc.2",
     "@deepseek-ai/dsh-system-prompt": "^0.2.1-rc.2",
     "@deepseek-ai/dsh-tools": "^0.2.1-rc.2",
-    "@deepseek-ai/dsh-typert-protocol": "0.2.1-rc.2",
-    "@deepseek-ai/schemastery": "3.18.5"
+    "@deepseek-ai/dsh-typert-protocol": "^0.2.1-rc.2",
+    "@deepseek-ai/schemastery": "^3.18.5"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
@@ -70,7 +78,8 @@
     "test:phase-a": "node scripts/test-phase-a.mjs",
     "test:all": "node scripts/test-phase-a.mjs && node scripts/test-storage.mjs && node scripts/test-redact.mjs && node scripts/test-episodes.mjs && node scripts/test-episode-review.mjs && node scripts/test-episode-rollout.mjs && node scripts/test-extract.mjs && node scripts/test-recall.mjs && node scripts/test-evolve.mjs && node scripts/test-commands.mjs && node scripts/test-hermes.mjs && node scripts/test-audit-skills.mjs && node scripts/test-settings-ui.mjs",
     "migrate:hermes": "node scripts/migrate-hermes.mjs --dry-run",
-    "skills:audit": "node scripts/audit-generated-skills.mjs"
+    "skills:audit": "node scripts/audit-generated-skills.mjs",
+    "prepublishOnly": "node scripts/typecheck-v02.mjs --emit-lib"
   },
   "keywords": [
     "dsh",
@@ -82,5 +91,8 @@
   ],
   "engines": {
     "node": ">=22.16.0"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

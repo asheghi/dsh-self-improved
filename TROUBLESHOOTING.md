@@ -2,7 +2,24 @@
 
 Install pitfalls; the README keeps only the install command.
 
-## Bundle auto-mount (since 0.1.1)
+## Coming from `dsh-self-improved` (DSH 0.1)
+
+The DSH 0.1 plugin is published as `dsh-self-improved`; this one is `@asheghi/dsh-self-improved`. Both mount under the same entry id, so remove the old package before adding the new one, or DSH fails to start (see *Duplicate loader entry id* below):
+
+```bash
+dsh plugin --profile web remove dsh-self-improved
+dsh plugin --profile web add @asheghi/dsh-self-improved
+```
+
+Back up `$DSH_HOME/memory` first. Opening a 0.1 memory store with this version has not been tested yet; if you rely on those memories, keep the backup until you've checked them under **Settings → Evolving Memory → Memory**.
+
+## Plugin skipped as incompatible
+
+**Symptom**: the boot log says `skipping profile bundle "@asheghi/dsh-self-improved": … is incompatible with dsh <version>`.
+
+**Cause**: your DSH is older than 0.2.1. Upgrade DSH, or use the [`v0.1` branch](https://github.com/asheghi/dsh-self-improved/tree/v0.1) for DSH 0.1.
+
+## Bundle auto-mount
 
 The package declares `dsh.bundle`, so `dsh plugin add` and the marketplace one-click install auto-mount it: dsh registers the plugin as a profile layer automatically and no manual `cordis.patch.yml` edits are needed. Restart dsh after installing.
 
@@ -11,7 +28,7 @@ Manual mount (legacy versions or special layouts only): add to the `insert` list
 ```yaml
 - insert:
     - id: dsh-self-improved
-      name: dsh-self-improved
+      name: '@asheghi/dsh-self-improved'
 ```
 
 ## GitHub source install prep (only if the install fails)
@@ -21,7 +38,7 @@ Manual mount (legacy versions or special layouts only): add to the `insert` list
 
 ```yaml
 allowBuilds:
-  dsh-self-improved: true
+  '@asheghi/dsh-self-improved': true
 ```
 
 ## Peer-dependencies double instance (resume fails)

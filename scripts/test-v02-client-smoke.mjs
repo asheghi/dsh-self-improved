@@ -32,7 +32,8 @@ sandbox.graphsHandled = [];
 vm.createContext(sandbox);
 vm.runInContext(src, sandbox, { filename: "client.js" });
 const decl = sandbox.window.__ModuleLoader__.loaded;
-assert.equal(decl.id, "dsh-self-improved");
+// The client module id is the package name: the host loads client rows by package.
+assert.equal(decl.id, JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).name);
 const factory = decl.factory;
 const withReact = (require) => factory.call(sandbox, require);
 const requireStub = (spec) => {
@@ -139,7 +140,7 @@ assert.ok(
 assert.ok(stubConfigFormSubscribed >= 1, "binding subscribed to the shared entry form");
 assert.ok(sandbox.graphsHandled.length === 1, "the typed business contribution was mounted once");
 const contribution = sandbox.graphsHandled[0];
-assert.equal(contribution.package, "dsh-self-improved");
+assert.equal(contribution.package, decl.id, "the business contribution is labelled with the package name");
 assert.ok(contribution.descriptors.length >= 8, "the contribution carries the mirrored business descriptors");
 for (const d of contribution.descriptors) {
   assert.equal(d.namespace, "selfImproved");

@@ -1,10 +1,34 @@
 # dsh-self-improved
 
-**Cross-session memory with local storage and opt-in reviewed learning.**
+**Long-term memory and session continuity for DeepSeek Harness.**
 
-![license](https://img.shields.io/badge/license-MIT-green) ![node](https://img.shields.io/badge/node-%E2%89%A522.16-blue)
+![license](https://img.shields.io/badge/license-MIT-green) ![dsh](https://img.shields.io/badge/DSH-0.2.1%2B-blue) ![node](https://img.shields.io/badge/node-%E2%89%A522.16-blue)
 
-`dsh-self-improved` is a plugin for **DeepSeek Harness (DSH)**: **cross-session long-term memory** and **self-evolution** backed by local SQLite + JSONL storage. Configured model/provider calls are opt-in and consent-gated.
+A plugin for **DeepSeek Harness (DSH)** that remembers what you teach it across sessions, recalls the relevant bits before each reply, and offers to pick up unfinished work from an earlier session. Everything is stored locally (SQLite + JSONL). Memory extraction uses your configured model; handoff summaries and learning from tool use send data to it only after you turn them on.
+
+## Install
+
+Requires **DeepSeek Harness 0.2.1 or newer** and Node.js 22.16+.
+
+```bash
+dsh plugin --profile web add @asheghi/dsh-self-improved
+```
+
+Then restart DSH (`dsh web`). Use your own profile name instead of `web` if you run a different one (`tui`, `desktop`, …). Installing registers the plugin with the profile automatically; there is no config file to edit.
+
+Open **Settings → Evolving Memory**. Memory capture, extraction and recall are on by default. Session continuity and learning from tool use are off until you turn them on there.
+
+| Task | Command |
+|---|---|
+| Upgrade | `dsh plugin --profile web update @asheghi/dsh-self-improved` |
+| Remove | `dsh plugin --profile web remove @asheghi/dsh-self-improved` (your memories stay in `$DSH_HOME/memory`) |
+
+| DSH version | Plugin |
+|---|---|
+| 0.2.1 and newer | `@asheghi/dsh-self-improved` 0.2.x (this branch) |
+| 0.1.x | the [`v0.1` branch](https://github.com/asheghi/dsh-self-improved/tree/v0.1) |
+
+Having trouble? See [TROUBLESHOOTING.md](./TROUBLESHOOTING.md).
 
 ## Why would I need this?
 
@@ -125,20 +149,22 @@ With `episodeLearning.enabled`, the plugin records tool calls and results per se
 - Master switch off = dormant: extraction, recall, the `/memory` command, and memory tools stop; memories are kept and everything resumes when re-enabled.
 - Episode learning is a separate opt-in layer with its own switch and consent prompt on first enable; captured tool arguments/results are redacted before persistence. Enabling outcome review or inactive skill drafts sends that redacted evidence to the configured provider; drafts remain local and inactive.
 
-## Installation
-
-**Requires DSH 0.2.1.** Built and tested against stock `@deepseek-ai/dsh@0.2.1-rc.2`; continuity is disabled on older runtimes. **Live migration remains gated:** real learned-procedure evaluation did not pass, and approved profile cutover is not complete. No installed runtime or production profile has been migrated by this work. Follow the [reversible live-enablement runbook](./migration/MIGRATION-LIVE-ENABLEMENT.md) and [current execution checkpoint](./migration/MIGRATION-FINALIZATION.md), including coherent verified backups and exact approvals, rather than installing directly from this section.
-
-The npm/marketplace name `dsh-self-improved` resolves to a different project, not this one. Install pitfalls (pnpm store and build prep, peerDependencies double instance, duplicate loader entry id): [TROUBLESHOOTING.md](./TROUBLESHOOTING.md).
-
-### Local development
-
-Build and verify this workspace, then use the supported plugin manager's `install_bundle` with the absolute local package directory only after the deployment gates and required approval. Inspect `application` and `warnings` and verify the actual mounted registration. Do not manually copy artifacts into the live profile, edit its package/composition metadata, or run a package manager inside it. Installation and restart behavior are determined by the manager's result, not assumed.
-
-### Build and install portability contract
+## Development
 
 ```bash
-pnpm build          # strict typecheck against the pinned DSH peers (+ --emit-lib via scripts/typecheck-v02.mjs)
+git clone https://github.com/asheghi/dsh-self-improved && cd dsh-self-improved
+pnpm install
+DSH_RUNTIME_RC2=/path/to/a/dsh-0.2.1-install pnpm build   # strict typecheck + emit lib/
+npm pack                                                  # → asheghi-dsh-self-improved-<version>.tgz
+dsh plugin --profile web add ./asheghi-dsh-self-improved-<version>.tgz
+```
+
+`DSH_RUNTIME_RC2` points at a directory where `@deepseek-ai/dsh` 0.2.1 is installed (`npm i @deepseek-ai/dsh@0.2.1-rc.2`); the build validates the plugin against those exact packages. The history of the 0.2 port lives in [migration/README.md](./migration/README.md).
+
+### Build modes
+
+```bash
+pnpm build          # strict typecheck against the pinned DSH peers (+ --emit-lib)
 node scripts/test-v02-package.mjs   # package-artifact gate (pack file list, offline runtime harness, prepare lifecycle)
 node scripts/test-v02-typecheck-modes.mjs   # staged-artifact mode regressions (strict vs artifact verification)
 ```
@@ -182,23 +208,20 @@ Audits `dsi-*` skills for duplicates and high body overlap; `--apply` moves redu
 
 ## Configuration
 
+Everything is editable in **Settings → Evolving Memory**. Saved values land in your profile's `cordis.patch.yml` (`$DSH_HOME/profiles/<profile>/cordis.patch.yml`) under the plugin's entry, so you can also edit them there:
+
 ```yaml
-# $DSH_HOME/settings.yaml
-dsh-self-improved:
-  enabled: true
-  modules:
-    capture: true
-    extract: true
-    consolidate: true
-    evolve: true
-    recall: true
-    tools: true
-  review:
-    enabled: true      # nightly review (one full evolution per day)
-    time: "22:00"      # HH:MM, 24h
+- id: dsh-self-improved
+  config:
+    continuity:
+      enabled: true          # track unfinished work
+      summaryEnabled: false  # write handoff notes with the model (sends excerpts to your provider)
+    review:
+      enabled: true          # nightly review (one full evolution per day)
+      time: "22:00"          # HH:MM, 24h
 ```
 
-- Conservative defaults are settings, not hardcode; editable fields appear in the settings UI ("Evolving Memory" → Config): `extract.provenanceFilter: "strict"`, `extract.requireEvidence: true`, `recall.relevanceMargin: 0.5`, `recall.minImportance: 0`, `recall.maxInjectPerTurn: 4`, `consolidate.scenesEnabled: false`, `episodeLearning.skillDraftsEnabled: false`. The legacy `evolve.skillSynthesis.enabled` field no longer publishes active skills.
+- Conservative defaults are settings, not hardcode; editable fields appear in the settings UI ("Evolving Memory" → Settings): `extract.provenanceFilter: "strict"`, `extract.requireEvidence: true`, `recall.relevanceMargin: 0.5`, `recall.minImportance: 0`, `recall.maxInjectPerTurn: 4`, `consolidate.scenesEnabled: false`, `episodeLearning.skillDraftsEnabled: false`. The legacy `evolve.skillSynthesis.enabled` field no longer publishes active skills.
 - Read-only `/memory` commands are zero-LLM; `/memory evolve` and episode review can call the configured provider when enabled.
 
 ## Repository layout
@@ -215,13 +238,15 @@ Tests: `pnpm run test:all`; runners in `scripts/test-*.mjs`.
 
 ## Compliance and acknowledgements
 
+- Forked from [madage/dsh-self-improved](https://github.com/madage/dsh-self-improved), published on npm as `dsh-self-improved` for DSH 0.1; this fork carries the DSH 0.2 port and is published as `@asheghi/dsh-self-improved`.
+
 - Architecture inspired by [TencentDB Agent Memory](https://github.com/TencentCloud/TencentDB-Agent-Memory) (Tencent Cloud): the four-layer memory pyramid is the direct inspiration for this pipeline; independent implementation, no affiliation with Tencent.
 - Self-evolution design inspired by [self-improving-agent](https://github.com/pskoett/self-improving-agent) (pskoett).
 
 ## Docs
 
 - `README.md`: this file
-- `ROADMAP.md`: milestones and plan history
+- `ROADMAP.md`: milestones and plan history (repository only)
 - `TROUBLESHOOTING.md`: install pitfalls and fixes
 - `migration/README.md`: v0.2 migration status and per-phase evidence records
 - `docs/` (design docs, testing guide, DSH research): local only, excluded via `.gitignore`

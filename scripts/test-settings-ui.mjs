@@ -102,7 +102,7 @@ assert.match(src, /tab === "overview" \? h\(OverviewSection, Object\.assign\(\{ 
   "tab switching mounts the SAME shared binding (no per-tab state loss)");
 
 // ── 6. Typed business remote is wired (no Config-as-RPC rows) ──────────────
-assert.ok(/remote\.\$mount\(\{ package: "dsh-self-improved", descriptors: BUSINESS_DESCRIPTORS \}\)/.test(src),
+assert.ok(src.includes(`remote.$mount({ package: ${JSON.stringify(JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).name)}, descriptors: BUSINESS_DESCRIPTORS })`),
   "the client mounts its typed business contribution via $mount");
 assert.ok(src.includes('ns: "dsh-self-improved-browser"') === false,
   "the legacy browser Config-namespace action channel is not referenced");

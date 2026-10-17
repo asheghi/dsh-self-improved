@@ -329,7 +329,8 @@ if (resolution === null) {
     const ok = r.status === 0 && Array.isArray(parsed) && parsed.length > 0;
     check("C6/offline staged npm pack succeeds (prepare = full strict rc.2 build in the stage)", r.status === 0, r.status === 0 ? `exit=0; prepare used the offline local-peer tree` : `exit=${r.status} ${(r.stderr.split("\n").filter(Boolean)[0] ?? "").slice(0, 240)}`);
     check("C6/prepare actually ran in the stage (lib emitted before packing)", existsSync(join(stage, "lib", "index.js")));
-    const packedName = `${manifest.name}-${manifest.version}.tgz`;
+    // npm names scoped tarballs "<scope>-<name>-<version>.tgz" (no "@", "/" -> "-").
+    const packedName = `${manifest.name.replace(/^@/, "").replace("/", "-")}-${manifest.version}.tgz`;
     let list = null;
     if (ok) {
       const info = parsed[0];
@@ -340,7 +341,7 @@ if (resolution === null) {
       check("C6/packed file list stays inside the manifest's declared files surface", list.every((p) => /^(package\.json|lib\/.+|src\/.+|scripts\/.+|tsconfig\.json|client\.js|cordis\.patch\.yml|LICENSE|README\.md|ROADMAP\.md|TROUBLESHOOTING\.md)$/.test(p)), list.filter((p) => !/^(package\.json|lib\/|src\/|scripts\/|tsconfig\.json|client\.js|cordis\.patch\.yml|LICENSE|README\.md|ROADMAP\.md|TROUBLESHOOTING\.md)/.test(p)).slice(0, 6).join(", ") || `${list.length} files, all allowed`);
       const banned = list.filter((p) => /(node_modules|\/fixtures\/|^fixtures\/|scratch-review|^\.diag|\.map$|^dist\/|^\.git)/.test(p));
       check("C6/no dependencies/junk/maps/fixtures/scratch material in the tarball", banned.length === 0, banned.slice(0, 5).join(", ") || "clean");
-      for (const need of ["lib/index.js", "lib/index.d.ts", "package.json", "README.md", "LICENSE", "ROADMAP.md", "TROUBLESHOOTING.md", "client.js", "cordis.patch.yml", "tsconfig.json", "scripts/typecheck-v02.mjs"]) {
+      for (const need of ["lib/index.js", "lib/index.d.ts", "package.json", "README.md", "LICENSE", "TROUBLESHOOTING.md", "client.js", "cordis.patch.yml", "tsconfig.json", "scripts/typecheck-v02.mjs"]) {
         check(`C6/required file ships: ${need}`, list.includes(need));
       }
       const stagedLib = readdirSync(join(stage, "lib"));
@@ -418,11 +419,12 @@ if (resolution === null) {
       symlinkSync(join(repo, "node_modules", "@node-rs", "jieba"), join(cons, "node_modules", "@node-rs", "jieba"));
       symlinkSync(join(resolution.peerRoot, "..", "zod"), join(cons, "node_modules", "zod"));
       for (const s of PEER_SLUGS) symlinkSync(join(resolution.peerRoot, s), join(cons, "node_modules", "@deepseek-ai", s));
+      mkdirSync(dirname(join(cons, "node_modules", manifest.name)), { recursive: true }); // scoped name needs its @scope dir
       symlinkSync(pkg, join(cons, "node_modules", manifest.name));
       writeFileSync(join(cons, "package.json"), JSON.stringify({ name: "offline-harness-consumer", private: true, type: "module" }, null, 2));
       writeFileSync(join(cons, "launcher.mjs"), [
-        "const m = await import(\"dsh-self-improved\");",
-        "const client = import.meta.resolve(\"dsh-self-improved/client\");",
+        `const m = await import(${JSON.stringify(manifest.name)});`,
+        `const client = import.meta.resolve(${JSON.stringify(manifest.name + "/client")});`,
         "const { existsSync } = await import(\"node:fs\");",
         "if (typeof client !== \"string\") throw new Error(\"client subpath did not resolve\");",
         "console.log(JSON.stringify({",
@@ -442,7 +444,7 @@ if (resolution === null) {
       }
       check("C7/extracted artifact's lib/index.js imports cleanly through the offline peer harness", imp.status === 0 && info !== null, imp.status !== 0 ? imp.stderr.slice(0, 400) : "named import OK");
       check("C7/plugin module keeps its exported Cordis name (self-improved, matching src/index.ts; the bundle row id remains dsh-self-improved) and plugin surface", info && info.name === "self-improved" && ["name", "apply", "Config"].every((k) => (info.keys ?? []).includes(k)), `name=${info?.name} keys=${((info?.keys ?? []).length)} (${(info?.keys ?? []).slice(0, 6).join(",")}${(info?.keys?.length ?? 0) > 6 ? "…" : ""})`);
-      check("C7/`dsh-self-improved/client` exports subpath maps to the shipped client.js present inside the tarball", info && info.clientResolved === true, `clientResolved=${info?.clientResolved}`);
+      check(`C7/\`${manifest.name}/client\` exports subpath maps to the shipped client.js present inside the tarball`, info && info.clientResolved === true, `clientResolved=${info?.clientResolved}`);
 
       // -------------------------------------------------------------------
       // C8: consumer artifact lifecycle in the extracted artifact (honest

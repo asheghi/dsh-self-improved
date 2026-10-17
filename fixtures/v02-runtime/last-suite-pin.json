@@ -1,6 +1,6 @@
 {
-  "captured": 1792234107801,
-  "pinned": "7b3fa2098e96c5973e8f9d9d3e8efb69c9db046f58a1fe1f8b104161c33b7c71",
+  "captured": 1792239449888,
+  "pinned": "e58fbdeffd5f12fc812fef67807bb5d584c37ba0cae3e8d101925fa7301735c6",
   "files": {
     "business.js": "5fd8ca4d122cbb31ef414a57144f962c6d54e4d7f51535a55e95b2f2d81d7b8c",
     "capture.js": "6944e1034586176d20188369a67fd2eeff82e8be609901c60d8fe4575fb485ec",
@@ -15,7 +15,7 @@
     "continuity-envelope-v03.js": "0352e1984fbf110b9d178ce424a7267123bb53f506d1d4edbcebf02bcd499fce",
     "continuity-handoff-v02.js": "f5a1410df3c2298ad6508af605e617ebb6d0e92328b7d407ffab890563a4a733",
     "continuity-host-auth-v02.js": "6d1716696ae0c1d18c8bb43b99f1e951960d9edf46da0427fc1b08c2f50ec8e5",
-    "continuity-inventory-ui.js": "f8f468a4bce6da6d524778b4eebed61dbefe6f46d81b2cd1ad3a5d6961ba6ea1",
+    "continuity-inventory-ui.js": "92cfc196f81fcbe6907368c69c7a6d08ede324d82a2e2770be5425547f0dd90c",
     "continuity-lineage-policy-v03.js": "7e62d7e46bd2cfba83663576537ac1ee46e2b8e74bd98e5876c16417c007470c",
     "continuity-live-human-event-v03.js": "39947300d75cd8ecea12fc171463bc9ec48366819469525daebaddb954fb996f",
     "continuity-offline-migrator-v03.js": "4dd2412a31aa6bca9c7eeb581872d8f06f0d51609f25778772fb9f864c3536ce",
@@ -66,15 +66,15 @@
     "storage.js": "ac00be13c54793181fe5aa4033f9390f4fcedc5ef2058021a483cd6bb4aaa2f1",
     "tools.js": "1a61a7ab85eced391bff9c30b3f8415b86d296fcd0a72f04ec95b9e7cb494646"
   },
-  "suiteEndComposite": "7b3fa2098e96c5973e8f9d9d3e8efb69c9db046f58a1fe1f8b104161c33b7c71",
+  "suiteEndComposite": "e58fbdeffd5f12fc812fef67807bb5d584c37ba0cae3e8d101925fa7301735c6",
   "changedDuringSuite": false,
   "perCase": {
-    "case1": "7b3fa2098e96c5973e8f9d9d3e8efb69c9db046f58a1fe1f8b104161c33b7c71",
-    "case2": "7b3fa2098e96c5973e8f9d9d3e8efb69c9db046f58a1fe1f8b104161c33b7c71",
-    "case3-row": "7b3fa2098e96c5973e8f9d9d3e8efb69c9db046f58a1fe1f8b104161c33b7c71",
-    "case3-config": "7b3fa2098e96c5973e8f9d9d3e8efb69c9db046f58a1fe1f8b104161c33b7c71",
-    "case4": "7b3fa2098e96c5973e8f9d9d3e8efb69c9db046f58a1fe1f8b104161c33b7c71",
-    "case5": "7b3fa2098e96c5973e8f9d9d3e8efb69c9db046f58a1fe1f8b104161c33b7c71"
+    "case1": "e58fbdeffd5f12fc812fef67807bb5d584c37ba0cae3e8d101925fa7301735c6",
+    "case2": "e58fbdeffd5f12fc812fef67807bb5d584c37ba0cae3e8d101925fa7301735c6",
+    "case3-row": "e58fbdeffd5f12fc812fef67807bb5d584c37ba0cae3e8d101925fa7301735c6",
+    "case3-config": "e58fbdeffd5f12fc812fef67807bb5d584c37ba0cae3e8d101925fa7301735c6",
+    "case4": "e58fbdeffd5f12fc812fef67807bb5d584c37ba0cae3e8d101925fa7301735c6",
+    "case5": "e58fbdeffd5f12fc812fef67807bb5d584c37ba0cae3e8d101925fa7301735c6"
   },
   "results": [
     {
@@ -153,13 +153,13 @@
       "name": "case1/the only credential variable is the synthetic per-run fixture key",
       "class": "check",
       "ok": true,
-      "detail": "synthetic-fixture-key-case1-1792234101295-c7c1fb"
+      "detail": "synthetic-fixture-key-case1-1792239443393-b407ed"
     },
     {
       "name": "case1/the provider route is this run's loopback stub (config, not network enforcement)",
       "class": "check",
       "ok": true,
-      "detail": "http://127.0.0.1:41207"
+      "detail": "http://127.0.0.1:32939"
     },
     {
       "name": "case1/telemetry opt-out and permission mode are the verified rc.2 launcher values",
@@ -171,7 +171,7 @@
       "name": "case1/run exit code 0",
       "class": "check",
       "ok": true,
-      "detail": "exit=0 :: 2026-10-17T10:48:21.910Z (+552ms) [err] (node:934982) ExperimentalWarning: SQLite is an experimental feature and might change at any time | 2026-10-17T10:48:21.910Z (+552ms) [err] (Use `node --trace-warnings ...` to show where the warning was created) | "
+      "detail": "exit=0 :: 2026-10-17T12:17:23.984Z (+530ms) [err] (node:3396976) ExperimentalWarning: SQLite is an experimental feature and might change at any time | 2026-10-17T12:17:23.984Z (+530ms) [err] (Use `node --trace-warnings ...` to show where the warning was created) | "
     },
     {
       "name": "case1/unmount drain completes without plugin extraction errors on stderr",
@@ -183,7 +183,7 @@
       "name": "case1/--json session id reported",
       "class": "check",
       "ok": true,
-      "detail": "session-a57b32b5-4f50-4685-9c8a-cbf8e4996ed5"
+      "detail": "session-48563b86-5696-463b-a3b1-5f6ee370a44a"
     },
     {
       "name": "case1/main model request seen at the stub",
@@ -195,7 +195,7 @@
       "name": "case1/every provider request carried the synthetic fixture key (no real credential possible)",
       "class": "check",
       "ok": true,
-      "detail": "keys=synthetic-fixture-key-case1-1792234101295-c7c1fb"
+      "detail": "keys=synthetic-fixture-key-case1-1792239443393-b407ed"
     },
     {
       "name": "case1/stub endpoint is on this case's loopback port",
@@ -291,7 +291,7 @@
       "name": "case1/derived memory carries explicit evidence coordinates resolvable to the journal source row",
       "class": "check",
       "ok": true,
-      "detail": "evidence=session-a57b32b5-4f50-4685-9c8a-cbf8e4996ed5#8"
+      "detail": "evidence=session-48563b86-5696-463b-a3b1-5f6ee370a44a#8"
     },
     {
       "name": "case2/runA/egress guard log written",
@@ -351,13 +351,13 @@
       "name": "case2/runA/the only credential variable is the synthetic per-run fixture key",
       "class": "check",
       "ok": true,
-      "detail": "synthetic-fixture-key-case2-1792234102123-a6d079-A"
+      "detail": "synthetic-fixture-key-case2-1792239444219-6c00b1-A"
     },
     {
       "name": "case2/runA/the provider route is this run's loopback stub (config, not network enforcement)",
       "class": "check",
       "ok": true,
-      "detail": "http://127.0.0.1:42301"
+      "detail": "http://127.0.0.1:37859"
     },
     {
       "name": "case2/runA/telemetry opt-out and permission mode are the verified rc.2 launcher values",
@@ -369,13 +369,13 @@
       "name": "case2/run A exit code 0",
       "class": "check",
       "ok": true,
-      "detail": "exit=0 :: 2026-10-17T10:48:22.724Z (+482ms) [err] (node:935381) ExperimentalWarning: SQLite is an experimental feature and might change at any time | 2026-10-17T10:48:22.724Z (+482ms) [err] (Use `node --trace-warnings ...` to show where the warning was created) | "
+      "detail": "exit=0 :: 2026-10-17T12:17:24.812Z (+477ms) [err] (node:3397347) ExperimentalWarning: SQLite is an experimental feature and might change at any time | 2026-10-17T12:17:24.812Z (+477ms) [err] (Use `node --trace-warnings ...` to show where the warning was created) | "
     },
     {
       "name": "case2/run A session id",
       "class": "check",
       "ok": true,
-      "detail": "session-c437c452-a7ba-4d64-bf73-e214132dc689"
+      "detail": "session-7ccfa5ad-6ffc-40be-b2b5-653800e306b1"
     },
     {
       "name": "case2/run A first main request captured",
@@ -495,13 +495,13 @@
       "name": "case2/runB/the only credential variable is the synthetic per-run fixture key",
       "class": "check",
       "ok": true,
-      "detail": "synthetic-fixture-key-case2-1792234102123-a6d079-B"
+      "detail": "synthetic-fixture-key-case2-1792239444219-6c00b1-B"
     },
     {
       "name": "case2/runB/the provider route is this run's loopback stub (config, not network enforcement)",
       "class": "check",
       "ok": true,
-      "detail": "http://127.0.0.1:42301"
+      "detail": "http://127.0.0.1:37859"
     },
     {
       "name": "case2/runB/telemetry opt-out and permission mode are the verified rc.2 launcher values",
@@ -513,13 +513,13 @@
       "name": "case2/run B (resume + fork) exit code 0",
       "class": "check",
       "ok": true,
-      "detail": "exit=0 :: 2026-10-17T10:48:23.416Z (+464ms) [err] (node:935651) ExperimentalWarning: SQLite is an experimental feature and might change at any time | 2026-10-17T10:48:23.416Z (+464ms) [err] (Use `node --trace-warnings ...` to show where the warning was created) | "
+      "detail": "exit=0 :: 2026-10-17T12:17:25.543Z (+484ms) [err] (node:3397662) ExperimentalWarning: SQLite is an experimental feature and might change at any time | 2026-10-17T12:17:25.543Z (+484ms) [err] (Use `node --trace-warnings ...` to show where the warning was created) | "
     },
     {
       "name": "case2/run B adopted the native session",
       "class": "check",
       "ok": true,
-      "detail": "session-c437c452-a7ba-4d64-bf73-e214132dc689"
+      "detail": "session-7ccfa5ad-6ffc-40be-b2b5-653800e306b1"
     },
     {
       "name": "case2/run B produced the stub final answer",
@@ -567,7 +567,7 @@
       "name": "case2/fork child request used its own session id",
       "class": "check",
       "ok": true,
-      "detail": "726a1f23-6f03-4b10-a614-3a54e65e61ee"
+      "detail": "5c5701d4-b3be-4772-8d25-aa4f6629d839"
     },
     {
       "name": "case2/fork child inherited the parent history (task A present)",
@@ -693,13 +693,13 @@
       "name": "case3-row/the only credential variable is the synthetic per-run fixture key",
       "class": "check",
       "ok": true,
-      "detail": "synthetic-fixture-key-case3-row-1792234103715-c3fe0a"
+      "detail": "synthetic-fixture-key-case3-row-1792239445852-4cbfca"
     },
     {
       "name": "case3-row/the provider route is this run's loopback stub (config, not network enforcement)",
       "class": "check",
       "ok": true,
-      "detail": "http://127.0.0.1:34157"
+      "detail": "http://127.0.0.1:41647"
     },
     {
       "name": "case3-row/telemetry opt-out and permission mode are the verified rc.2 launcher values",
@@ -825,13 +825,13 @@
       "name": "case3-config/the only credential variable is the synthetic per-run fixture key",
       "class": "check",
       "ok": true,
-      "detail": "synthetic-fixture-key-case3-config-1792234104380-b959f0"
+      "detail": "synthetic-fixture-key-case3-config-1792239446501-e6829f"
     },
     {
       "name": "case3-config/the provider route is this run's loopback stub (config, not network enforcement)",
       "class": "check",
       "ok": true,
-      "detail": "http://127.0.0.1:36571"
+      "detail": "http://127.0.0.1:33571"
     },
     {
       "name": "case3-config/telemetry opt-out and permission mode are the verified rc.2 launcher values",
@@ -843,7 +843,7 @@
       "name": "case3-config/run exit code 0",
       "class": "check",
       "ok": true,
-      "detail": "exit=0 :: 2026-10-17T10:48:24.977Z (+480ms) [err] (node:936408) ExperimentalWarning: SQLite is an experimental feature and might change at any time | 2026-10-17T10:48:24.977Z (+480ms) [err] (Use `node --trace-warnings ...` to show where the warning was created) | "
+      "detail": "exit=0 :: 2026-10-17T12:17:27.102Z (+477ms) [err] (node:3398429) ExperimentalWarning: SQLite is an experimental feature and might change at any time | 2026-10-17T12:17:27.102Z (+477ms) [err] (Use `node --trace-warnings ...` to show where the warning was created) | "
     },
     {
       "name": "case3-config/main turn reached the provider once",
@@ -957,13 +957,13 @@
       "name": "case4/runA/the only credential variable is the synthetic per-run fixture key",
       "class": "check",
       "ok": true,
-      "detail": "synthetic-fixture-key-case4-1792234105106-c0ad34-A"
+      "detail": "synthetic-fixture-key-case4-1792239447222-ef8131-A"
     },
     {
       "name": "case4/runA/the provider route is this run's loopback stub (config, not network enforcement)",
       "class": "check",
       "ok": true,
-      "detail": "http://127.0.0.1:35439"
+      "detail": "http://127.0.0.1:33553"
     },
     {
       "name": "case4/runA/telemetry opt-out and permission mode are the verified rc.2 launcher values",
@@ -975,13 +975,13 @@
       "name": "case4/run A exit code 0",
       "class": "check",
       "ok": true,
-      "detail": "exit=0 :: 2026-10-17T10:48:25.653Z (+545ms) [err] (node:936688) ExperimentalWarning: SQLite is an experimental feature and might change at any time | 2026-10-17T10:48:25.653Z (+545ms) [err] (Use `node --trace-warnings ...` to show where the warning was created) | "
+      "detail": "exit=0 :: 2026-10-17T12:17:27.753Z (+530ms) [err] (node:3398655) ExperimentalWarning: SQLite is an experimental feature and might change at any time | 2026-10-17T12:17:27.753Z (+530ms) [err] (Use `node --trace-warnings ...` to show where the warning was created) | "
     },
     {
       "name": "case4/run A session id",
       "class": "check",
       "ok": true,
-      "detail": "session-c5896a97-3811-4df8-86e8-da4965943af1"
+      "detail": "session-c0d4b9ec-1bdb-4935-9687-2f6f52319aa6"
     },
     {
       "name": "case4/run A issued only the main request + title (the in-process pump did not drain in this run, no aux call)",
@@ -1065,13 +1065,13 @@
       "name": "case4/runB/the only credential variable is the synthetic per-run fixture key",
       "class": "check",
       "ok": true,
-      "detail": "synthetic-fixture-key-case4-1792234105106-c0ad34-B"
+      "detail": "synthetic-fixture-key-case4-1792239447222-ef8131-B"
     },
     {
       "name": "case4/runB/the provider route is this run's loopback stub (config, not network enforcement)",
       "class": "check",
       "ok": true,
-      "detail": "http://127.0.0.1:35439"
+      "detail": "http://127.0.0.1:33553"
     },
     {
       "name": "case4/runB/telemetry opt-out and permission mode are the verified rc.2 launcher values",
@@ -1089,7 +1089,7 @@
       "name": "case4/run B adopted the session without recapture work",
       "class": "check",
       "ok": true,
-      "detail": "session-c5896a97-3811-4df8-86e8-da4965943af1"
+      "detail": "session-c0d4b9ec-1bdb-4935-9687-2f6f52319aa6"
     },
     {
       "name": "case4/run B quiescence: no plugin-driven model work for the accepted job (no aux call)",
@@ -1113,7 +1113,7 @@
       "name": "case4/run B quiescence: journal personal-lane rows untouched by the unmounted plugin",
       "class": "check",
       "ok": true,
-      "detail": "journal hash before=a3e61ce5547f after=a3e61ce5547f"
+      "detail": "journal hash before=438177c03505 after=438177c03505"
     },
     {
       "name": "case4/run B quiescence: memory rows untouched",
@@ -1185,13 +1185,13 @@
       "name": "case4/runC/the only credential variable is the synthetic per-run fixture key",
       "class": "check",
       "ok": true,
-      "detail": "synthetic-fixture-key-case4-1792234105106-c0ad34-C"
+      "detail": "synthetic-fixture-key-case4-1792239447222-ef8131-C"
     },
     {
       "name": "case4/runC/the provider route is this run's loopback stub (config, not network enforcement)",
       "class": "check",
       "ok": true,
-      "detail": "http://127.0.0.1:35439"
+      "detail": "http://127.0.0.1:33553"
     },
     {
       "name": "case4/runC/telemetry opt-out and permission mode are the verified rc.2 launcher values",
@@ -1203,7 +1203,7 @@
       "name": "case4/run C (config-disabled inert mount) exit code 0",
       "class": "check",
       "ok": true,
-      "detail": "exit=0 :: 2026-10-17T10:48:26.874Z (+451ms) [err] (node:937386) ExperimentalWarning: SQLite is an experimental feature and might change at any time | 2026-10-17T10:48:26.874Z (+451ms) [err] (Use `node --trace-warnings ...` to show where the warning was created) | "
+      "detail": "exit=0 :: 2026-10-17T12:17:28.971Z (+478ms) [err] (node:3399238) ExperimentalWarning: SQLite is an experimental feature and might change at any time | 2026-10-17T12:17:28.971Z (+478ms) [err] (Use `node --trace-warnings ...` to show where the warning was created) | "
     },
     {
       "name": "case4/run C mounted but inert banner present",
@@ -1239,7 +1239,7 @@
       "name": "case4/run C quiescence: journal personal-lane rows still untouched",
       "class": "check",
       "ok": true,
-      "detail": "journal hash after run C=a3e61ce5547f"
+      "detail": "journal hash after run C=438177c03505"
     },
     {
       "name": "case4/runD/egress guard log written",
@@ -1299,13 +1299,13 @@
       "name": "case4/runD/the only credential variable is the synthetic per-run fixture key",
       "class": "check",
       "ok": true,
-      "detail": "synthetic-fixture-key-case4-1792234105106-c0ad34-D"
+      "detail": "synthetic-fixture-key-case4-1792239447222-ef8131-D"
     },
     {
       "name": "case4/runD/the provider route is this run's loopback stub (config, not network enforcement)",
       "class": "check",
       "ok": true,
-      "detail": "http://127.0.0.1:35439"
+      "detail": "http://127.0.0.1:33553"
     },
     {
       "name": "case4/runD/telemetry opt-out and permission mode are the verified rc.2 launcher values",
@@ -1317,7 +1317,7 @@
       "name": "case4/run D (re-enabled) exit code 0",
       "class": "check",
       "ok": true,
-      "detail": "exit=0 :: 2026-10-17T10:48:27.461Z (+471ms) [err] (node:937622) ExperimentalWarning: SQLite is an experimental feature and might change at any time | 2026-10-17T10:48:27.461Z (+471ms) [err] (Use `node --trace-warnings ...` to show where the warning was created) | "
+      "detail": "exit=0 :: 2026-10-17T12:17:29.558Z (+470ms) [err] (node:3399577) ExperimentalWarning: SQLite is an experimental feature and might change at any time | 2026-10-17T12:17:29.558Z (+470ms) [err] (Use `node --trace-warnings ...` to show where the warning was created) | "
     },
     {
       "name": "case4/continuity: the accepted pending extraction job is drained by the first enabled flush after the disable window",

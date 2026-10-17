@@ -106,11 +106,11 @@ export interface ContinuityLaneStatus {
   lastCut: number | null;
 }
 
-const LANE_OFF = "Structural continuity is off, so nothing is captured or offered. Turn it on under Settings \u2192 Session continuity.";
-const LANE_BODY_OFF = "Capture is on, but handoff summaries are off, so nothing can be offered to continue. Turn on summary consent under Settings \u2192 Session continuity.";
-const LANE_NO_ROUTE = "No model route resolves, so no handoff can be produced. Set the extraction provider and model under Settings, or select a default model.";
-const LANE_UNHEALTHY = "Continuity storage is not ready, so the lane is not running. Check the plugin log, then retry.";
-const LANE_EMPTY = "Nothing captured yet. Send a message in a session to start; the first handoff appears after that turn ends.";
+const LANE_OFF = "Continuity is off, so unfinished work isn't tracked. Turn on \u201cTrack unfinished work\u201d in Settings.";
+const LANE_BODY_OFF = "Unfinished work is tracked, but handoff summaries are off, so there is nothing to continue from yet. Turn on \u201cWrite handoff summaries with the model\u201d in Settings.";
+const LANE_NO_ROUTE = "No model is available to write handoff summaries. Pick a default model, or set the extraction model under Settings \u2192 Advanced tuning.";
+const LANE_UNHEALTHY = "Continuity storage isn't ready, so continuity is paused. Check the DSH log, then restart.";
+const LANE_EMPTY = "Nothing tracked yet. Send a message in a project session; if you stop partway, a handoff appears here.";
 
 export function readContinuityLaneStatus(
   owner: { getJournalSqlite(): DatabaseSync },
@@ -149,11 +149,11 @@ export function readContinuityLaneStatus(
   if (!state.bodyEnabled) { status.reason = LANE_BODY_OFF; return status; }
   if (!state.route) { status.reason = LANE_NO_ROUTE; return status; }
   if (status.handoffs > 0) {
-    status.reason = `${status.handoffs} unfinished work item(s) have a handoff that can be continued in the Sessions tab.`;
+    status.reason = status.handoffs === 1 ? "1 unfinished task is ready to continue." : `${status.handoffs} unfinished tasks are ready to continue.`;
     return status;
   }
   status.reason = status.pending > 0
-    ? `${status.pending} piece(s) of unfinished work are captured; no handoff has been produced yet.${status.failed > 0 ? ` ${status.failed} processing attempt(s) failed — check the plugin log.` : ""}`
+    ? `${status.pending} unfinished task(s) tracked; the handoff isn't written yet.${status.failed > 0 ? ` ${status.failed} attempt(s) failed; check the DSH log.` : ""}`
     : LANE_EMPTY;
   return status;
 }

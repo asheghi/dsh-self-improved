@@ -1,8 +1,8 @@
 {
   "actualBrowser": true,
-  "fixtureRun": "mounted-ui-1792238366688-003e65",
+  "fixtureRun": "mounted-ui-1792239544220-1c5fc0",
   "build": "77126a8fcb3ea3db53beec0484f0befb8276523d15318eedd8c1193598a3437f",
-  "client": "8be0d82fa4d775ce822f30d418d092404366e0f24cadff660d654b6ea36d6937",
+  "client": "2e8bef42727f62dbe723a4384718c85819ad23b185f59b2671ff8fe68eb47bde",
   "results": [
     {
       "name": "mounted settings and seeded memory",

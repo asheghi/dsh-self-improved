@@ -30,7 +30,7 @@
  *   no operation rides volatile Config values; dry-review is cancellable.
  */
 window.__ModuleLoader__.load({
-  id: "dsh-self-improved",
+  id: "@asheghi/dsh-self-improved",
   factory: (require) => {
     var module = { exports: {} };
     var exports = module.exports;
@@ -1042,7 +1042,7 @@ window.__ModuleLoader__.load({
       }
       var unmount = null;
       var settled = new Promise(function (resolve) {
-        Promise.resolve(remote.$mount({ package: "dsh-self-improved", descriptors: BUSINESS_DESCRIPTORS }))
+        Promise.resolve(remote.$mount({ package: "@asheghi/dsh-self-improved", descriptors: BUSINESS_DESCRIPTORS }))
           .then(function (u) {
             unmount = u;
             resolve(true);

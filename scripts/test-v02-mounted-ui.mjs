@@ -118,7 +118,8 @@ function buildShadow(pluginDir) {
   }
   copyFileSync(join(ROOT, "client.js"), join(pluginDir, "client.js"));
   writeFileSync(join(pluginDir, "package.json"), JSON.stringify({
-    name: "dsh-self-improved",
+    // Real package name: the Host loads the client module by package name.
+    name: JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")).name,
     version: "0.0.0-fixture-ui",
     type: "module",
     exports: { ".": "./lib/index.js", "./client": "./client.js" },

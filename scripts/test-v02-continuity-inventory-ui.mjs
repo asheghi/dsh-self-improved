@@ -68,10 +68,10 @@ try {
   });
   await check('lane status names the FIRST blocking reason and reports bounded counters', async () => {
     const states = [
-      [{ enabled: false, bodyEnabled: false, route: false, healthy: true }, 'off', /Structural continuity is off/],
+      [{ enabled: false, bodyEnabled: false, route: false, healthy: true }, 'off', /Continuity is off/],
       [{ enabled: true, bodyEnabled: false, route: true, healthy: true }, 'on', /handoff summaries are off/],
-      [{ enabled: true, bodyEnabled: true, route: false, healthy: true }, 'on', /No model route resolves/],
-      [{ enabled: true, bodyEnabled: true, route: true, healthy: false }, 'unavailable', /not ready/],
+      [{ enabled: true, bodyEnabled: true, route: false, healthy: true }, 'on', /No model is available/],
+      [{ enabled: true, bodyEnabled: true, route: true, healthy: false }, 'unavailable', /isn't ready/],
     ];
     for (const [state, structural, pattern] of states) {
       const lane = readContinuityLaneStatus(owner, state);
@@ -90,7 +90,7 @@ try {
     const pending = countOr0("SELECT COUNT(*) AS n FROM main.continuity_jobs WHERE status='pending'");
     const handoffs = countOr0("SELECT COUNT(*) AS n FROM main.continuity_handoff");
     assert.equal(ready.pending, pending); assert.equal(ready.handoffs, handoffs);
-    assert.match(ready.reason, handoffs > 0 ? /have a handoff that can be continued/ : pending > 0 ? /no handoff has been produced yet/ : /Nothing captured yet/);
+    assert.match(ready.reason, handoffs > 0 ? /ready to continue/ : pending > 0 ? /handoff isn't written yet/ : /Nothing tracked yet/);
     assert.ok(!JSON.stringify(ready).includes('session-'), 'lane status must never carry a session/project identity');
   });
   console.log(`${passes} actual native read-only inventory/business gates PASS; no authenticated Continue or live browser acceptance claimed`);
