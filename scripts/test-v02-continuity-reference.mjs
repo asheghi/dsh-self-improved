@@ -8,8 +8,8 @@ const runtime = process.env.DSH_RUNTIME_RC2;
 assert.ok(runtime, 'Explicit DSH_RUNTIME_RC2 required; no install/profile/fallback');
 const repo = fileURLToPath(new URL('../', import.meta.url));
 for (const name of ['dsh-session', 'dsh-session-query', 'dsh-session-projection'])
-  assert.equal(JSON.parse(readFileSync(join(runtime, 'node_modules/@deepseek-ai', name, 'package.json'), 'utf8')).version, '0.2.0-rc.2');
-assert.equal(JSON.parse(readFileSync(join(runtime, 'node_modules/zod/package.json'), 'utf8')).version, '4.6.5');
+  assert.equal(JSON.parse(readFileSync(join(runtime, 'node_modules/@deepseek-ai', name, 'package.json'), 'utf8')).version, '0.2.1-rc.2');
+assert.equal(JSON.parse(readFileSync(join(runtime, 'node_modules/zod/package.json'), 'utf8')).version, '4.4.3');
 mkdirSync(join(repo, '.tmp-import-lane'), { recursive: true });
 const pkg = mkdtempSync(join(repo, '.tmp-import-lane/continuity-reference-'));
 cpSync(join(repo, 'lib'), join(pkg, 'lib'), { recursive: true }); cpSync(join(repo, 'package.json'), join(pkg, 'package.json'));

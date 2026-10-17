@@ -51,7 +51,7 @@ import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 
 const repo = fileURLToPath(new URL("..", import.meta.url));
-const RD = process.env.DSH_RUNTIME_RC2 ?? "/home/bahman/github/dsh-v0.2";
+const RD = process.env.DSH_RUNTIME_RC2 ?? "/home/bahman/github/dsh-v0.2.1";
 
 const PASS = [];
 const checks = [];
@@ -90,8 +90,8 @@ for (const pkg of ["dsh-api-gateway", "dsh-typert-protocol", "dsh-typert-registr
 }
 const gatewayVersion = JSON.parse(readFileSync(join(RD, "node_modules/@deepseek-ai/dsh-api-gateway/package.json"), "utf8")).version;
 const pluginPeer = JSON.parse(readFileSync(join(repo, "package.json"), "utf8")).peerDependencies["@deepseek-ai/dsh-typert-protocol"];
-assert.ok(/0\.2\.0-rc\.2/.test(pluginPeer), `plugin targets rc.2 (peer ${pluginPeer})`);
-assert.ok(/0\.2\.0-rc/.test(gatewayVersion), `the genuine Gateway under test is the rc.2 runtime (installed ${gatewayVersion})`);
+assert.ok(/0\.2\.1-rc\.2/.test(pluginPeer), `plugin targets rc.2 (peer ${pluginPeer})`);
+assert.ok(/0\.2\.1-rc/.test(gatewayVersion), `the genuine Gateway under test is the rc.2 runtime (installed ${gatewayVersion})`);
 // SRC cancellation selection in the installed gateway (read-only source facts
 // the suite leans on): the descriptor declares `cancellation.parameter=
 // 'signal'` for a trailing param named `signal`, and dispatch pushes it last.
@@ -368,7 +368,9 @@ check("gateway: genuine Loader+plugin mid-flight carrier cancel aborts the invoc
   new TypertRegistry(boot.root);
   const gateway = new gatewayMod.TypertGatewayService(boot.root, { websocketHeartbeatIntervalMs: 2000, streamInboxBytes: 262144 });
   const neverAborted = new AbortController().signal;
-  const rpc = (endpoint, args, control) => gateway.dispatchRpc(endpoint, { args }, control?.signal ?? neverAborted, undefined);
+  // 0.2.1 requires a live Peer on every invocation; the HTTP route supplies an owner Peer.
+  const ownerPeer = { id: "peer-cancel-owner", ctx: boot.root, principal: { kind: "owner" }, signal: neverAborted, interactions: "none", dispose: async () => {} };
+  const rpc = (endpoint, args, control) => gateway.dispatchRpc(endpoint, { args }, control?.signal ?? neverAborted, ownerPeer);
 
   // ⑤ prepareMutation over the REAL gateway.
   const prep = await rpc("selfImproved/prepareMutation", { args: { op: "dryReview" } });

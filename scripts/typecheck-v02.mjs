@@ -17,7 +17,7 @@
  *    with the same exact validation, so a checkout with the correct peers
  *    installed builds on any machine without the coordination test site.
  * 3. Coordinator test site (documented deliberate default,
- *    /home/bahman/github/dsh-v0.2): used only when no override is set AND the
+ *    /home/bahman/github/dsh-v0.2.1): used only when no override is set AND the
  *    local peer set is absent or does not match exactly AND
  *    DSH_V02_NO_TEST_SITE=1 is not set. Legacy rc.6/rc.8 peers in a checkout
  *    with no valid rc.2 source anywhere are never silently used — the script
@@ -63,7 +63,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
-const DEFAULT_TEST_SITE = "/home/bahman/github/dsh-v0.2";
+const DEFAULT_TEST_SITE = "/home/bahman/github/dsh-v0.2.1";
 const PLUGIN_DEPS = ["sqlite-vec", "@node-rs/jieba", "zod"]; // plugin-owned runtime dependencies (not peer contracts)
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "..");

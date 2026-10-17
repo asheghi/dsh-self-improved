@@ -1,4 +1,4 @@
-// Actual candidate Host HTTP authentication negatives; private fixture only.
+// Actual stock Host HTTP authentication negatives; private fixture only.
 import assert from 'node:assert/strict';
 import { readFile, realpath, writeFile } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
@@ -30,5 +30,5 @@ await check('cross-Origin genuine cookie is rejected', 403, cookie, { origin: 'h
 await check('launch token is not an API bearer substitute', 401, undefined, { authorization: 'Bearer ' + login.searchParams.get('token') });
 const continued = await fetch(base + '/api/selfImproved/prepareContinue', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ type: 'client-request', rpcId: randomUUID(), method: 'selfImproved/prepareContinue', payload: { args: { targetSessionId: 'forged-target', jobId: 'forged-job' } } }) });
 assert.equal(continued.status, 401); results.push({ label: 'Continue without authenticated ingress is refused', passed: true });
-await writeFile(join(run, 'auth-negative-receipt.json'), JSON.stringify({ version: 1, boundary: 'actual private copied-core Host; not physical-human-click proof', build: facts.build, client: facts.client, results }, null, 2));
-console.log('PASS whole candidate Host genuine signed-cookie dispatch and no-cookie/forged/tampered/wrong-authority/cross-Origin/API-bearer/Continue negatives. No profile/settings/session mutation.');
+await writeFile(join(run, 'auth-negative-receipt.json'), JSON.stringify({ version: 1, boundary: 'actual stock Host; not physical-human-click proof', build: facts.build, client: facts.client, results }, null, 2));
+console.log('PASS whole stock Host genuine signed-cookie dispatch and no-cookie/forged/tampered/wrong-authority/cross-Origin/API-bearer/Continue negatives. No profile/settings/session mutation.');

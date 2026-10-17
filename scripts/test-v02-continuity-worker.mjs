@@ -9,9 +9,9 @@ import { DatabaseSync } from 'node:sqlite';
 const runtime = process.env.DSH_RUNTIME_RC2;
 assert.ok(runtime, 'Explicit DSH_RUNTIME_RC2 required; no fallback/install/profile');
 for (const name of ['dsh-session', 'dsh-session-query', 'dsh-session-projection', 'dsh-llm']) {
-  assert.equal(JSON.parse(readFileSync(join(runtime, 'node_modules/@deepseek-ai', name, 'package.json'), 'utf8')).version, '0.2.0-rc.2');
+  assert.equal(JSON.parse(readFileSync(join(runtime, 'node_modules/@deepseek-ai', name, 'package.json'), 'utf8')).version, '0.2.1-rc.2');
 }
-assert.equal(JSON.parse(readFileSync(join(runtime, 'node_modules/zod/package.json'), 'utf8')).version, '4.6.5');
+assert.equal(JSON.parse(readFileSync(join(runtime, 'node_modules/zod/package.json'), 'utf8')).version, '4.4.3');
 const repo = fileURLToPath(new URL('../', import.meta.url));
 mkdirSync(join(repo, '.tmp-import-lane'), { recursive: true });
 const pkg = mkdtempSync(join(repo, '.tmp-import-lane/continuity-worker-'));

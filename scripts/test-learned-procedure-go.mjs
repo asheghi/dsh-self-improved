@@ -22,6 +22,6 @@ try{
  await assert.rejects(t.fetch('https://configured.example/go/v1/chat/completions',{method:'POST',body}),/outside bounded/);assert.equal(calls.length,4);count++;
  assert.equal(receipts.length,4);assert.ok(!JSON.stringify(receipts).includes('test-only-secret'));assert.ok(!JSON.stringify(receipts).includes('test-only evidence'));count++;
  const home=join(run,'credential-home');await mkdir(home);const credentialFile=join(home,'.credentials.yaml');const fixture='version: 1\nrefs:\n  PHASE_E_TEST_KEY: test-only-in-memory-inheritance\n';await writeFile(credentialFile,fixture,{mode:0o600});
- const env=await inheritedCredential('/home/bahman/github/dsh-v0.2','PHASE_E_TEST_KEY',home);assert.equal(env.PHASE_E_TEST_KEY,'test-only-in-memory-inheritance');assert.equal(await readFile(credentialFile,'utf8'),fixture);count++;
+ const env=await inheritedCredential('/home/bahman/github/dsh-v0.2.1','PHASE_E_TEST_KEY',home);assert.equal(env.PHASE_E_TEST_KEY,'test-only-in-memory-inheritance');assert.equal(await readFile(credentialFile,'utf8'),fixture);count++;
  console.log(`${count} Go header/privacy/credential-reference checks PASS (no provider call, test-only secret)`);
 }finally{assert.equal(await realpath(run),run);assert.ok(run.startsWith(base+'/run-go-test-'));await rm(run,{recursive:true,force:true});}

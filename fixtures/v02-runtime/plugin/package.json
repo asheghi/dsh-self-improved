@@ -10,6 +10,6 @@
   "dependencies": {
     "@node-rs/jieba": "^2.0.1",
     "sqlite-vec": "0.1.7-alpha.2",
-    "zod": "4.6.5"
+    "zod": "4.4.3"
   }
 }

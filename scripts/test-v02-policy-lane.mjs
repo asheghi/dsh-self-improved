@@ -43,7 +43,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 
 const repo = fileURLToPath(new URL("..", import.meta.url));
-const RD = process.env.DSH_RUNTIME_RC2 ?? "/home/bahman/github/dsh-v0.2";
+const RD = process.env.DSH_RUNTIME_RC2 ?? "/home/bahman/github/dsh-v0.2.1";
 const runtimeImport = async (pkg, file = "lib/index.js") => import(`${RD}/node_modules/@deepseek-ai/${pkg}/${file}`);
 const lib = (file) => import(pathToFileURL(join(repo, "lib", file)).href);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -530,8 +530,10 @@ async function mountedDrive() {
   const gatewayMod = await runtimeImport("dsh-api-gateway");
   new TypertRegistry(root);
   const gateway = new gatewayMod.TypertGatewayService(root);
+  // 0.2.1 requires a live Peer on every invocation; the HTTP route supplies an owner Peer.
+  const ownerPeer = { id: "peer-policy-owner", ctx: root, principal: { kind: "owner" }, signal: new AbortController().signal, interactions: "none", dispose: async () => {} };
   const rpc = (endpoint, args, signal = new AbortController().signal) =>
-    gateway.dispatchRpc(endpoint, { args }, signal, undefined);
+    gateway.dispatchRpc(endpoint, { args }, signal, ownerPeer);
 
   flush(fakeSession(S(3), [humanEvent(1, fact[3])]));
   try {

@@ -9,9 +9,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const runtime = process.env.DSH_RUNTIME_RC2;
 assert.ok(runtime, 'Explicit DSH_RUNTIME_RC2 required; no install/profile/fallback');
 for (const name of ['dsh-session', 'dsh-session-persistence-jsonl', 'dsh-session-query', 'dsh-session-projection']) {
-  assert.equal(JSON.parse(readFileSync(join(runtime, 'node_modules/@deepseek-ai', name, 'package.json'), 'utf8')).version, '0.2.0-rc.2');
+  assert.equal(JSON.parse(readFileSync(join(runtime, 'node_modules/@deepseek-ai', name, 'package.json'), 'utf8')).version, '0.2.1-rc.2');
 }
-assert.equal(JSON.parse(readFileSync(join(runtime, 'node_modules/zod/package.json'), 'utf8')).version, '4.6.5');
+assert.equal(JSON.parse(readFileSync(join(runtime, 'node_modules/zod/package.json'), 'utf8')).version, '4.4.3');
 const script = fileURLToPath(import.meta.url), repo = resolve(dirname(script), '..');
 const mode = process.argv[2], pkg = process.argv[3];
 if (!mode) {
@@ -52,7 +52,7 @@ if (!mode) {
   const native = name => import(pathToFileURL(join(runtime, 'node_modules/@deepseek-ai', name, 'lib/index.js')).href);
   const { Context } = await native('cordis');
   const { SessionStore } = await native('dsh-session');
-  const { default: JsonlPersistence } = await native('dsh-session-persistence-jsonl');
+  const jsonlModule = await native('dsh-session-persistence-jsonl'), JsonlPersistence = jsonlModule.default ?? jsonlModule;
   const { SessionQueryEngine } = await native('dsh-session-query');
   const { SessionProjectionRegistry } = await native('dsh-session-projection');
   const { createUserMessage } = await native('dsh-llm');

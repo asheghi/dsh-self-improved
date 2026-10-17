@@ -37,7 +37,7 @@
  *   C9  temp hygiene: every wrapper run removed BOTH its check tree and its
  *       mkdtemp parent (pre-fix leak), suite temp root fully removed
  *
- * The coordinator test site (/home/bahman/github/dsh-v0.2) is only used
+ * The coordinator test site (/home/bahman/github/dsh-v0.2.1) is only used
  * read-only, deliberately, and as the documented default peer source; every
  * result that depends on it says so. No active profile is touched, no network
  * install, no dependency patching, no compatibility exemptions. Durable
@@ -230,7 +230,7 @@ const repoTgzAtStart = readdirSync(repo).filter((f) => f.endsWith(".tgz"));
   } else {
     resolution = JSON.parse(r.stdout.slice(start));
     check("C1/wrapper resolves on this machine (mode coordinator-test-site-default, the documented deliberate default)", resolution.mode === "coordinator-test-site-default", `mode=${resolution.mode}`);
-    check("C1/resolved peer root is the documented coordinator test site", resolution.peerRoot === "/home/bahman/github/dsh-v0.2/node_modules/@deepseek-ai", resolution.peerRoot);
+    check("C1/resolved peer root is the documented coordinator test site", resolution.peerRoot === "/home/bahman/github/dsh-v0.2.1/node_modules/@deepseek-ai", resolution.peerRoot);
     const mismatch = Object.entries(resolution.peers ?? {}).filter(([k, v]) => {
       const req = String(peerDeps[`@deepseek-ai/${k}`] ?? "").replace(/^[~^]/, "");
       return req && v !== req;
@@ -274,7 +274,7 @@ if (resolution === null) {
   {
     const r = child("node", [WRAPPER], { cwd: dev, env: { ...process.env, DSH_RUNTIME_RC2: join(tempRoot, "no-such-tree") } });
     check("C4/explicit invalid DSH_RUNTIME_RC2 fails closed (exit 2) even although this tree has valid local peers", r.status === 2 && !/PASSED/.test(`${r.stdout}\n${r.stderr}`), `exit=${r.status}; first: ${(r.stderr.split("\n")[0] ?? "").slice(0, 160)}`);
-    const r2 = child("node", [WRAPPER], { cwd: dev, env: { ...process.env, DSH_RUNTIME_RC2: "/home/bahman/github/dsh-v0.2" } });
+    const r2 = child("node", [WRAPPER], { cwd: dev, env: { ...process.env, DSH_RUNTIME_RC2: "/home/bahman/github/dsh-v0.2.1" } });
     check("C4/valid explicit override wins over local peers and passes strictly", r2.status === 0 && /peer source \[explicit override/.test(r2.stdout), `exit=${r2.status} ${(r2.stdout.match(/peer source \[[^\]]+\]/) ?? [""])[0]}`);
   }
   const legacy = buildHarness({ name: "legacy-peers", peersFrom: "repo", offlineDev: true, copy: ["package.json", "tsconfig.json", "client.js", "cordis.patch.yml", "src", "scripts"] });
@@ -374,7 +374,7 @@ if (resolution === null) {
           }
         }
         check("C6/no external absolute dev paths embedded in lib/src/manifest/patch payload", Object.keys(found).length === 0, Object.entries(found).map(([f, re]) => `${f}: ${re}`).join(" | ") || "clean");
-        const scriptsWithSite = readdirSync(join(pkg, "scripts")).filter((f) => readFileSync(join(pkg, "scripts", f), "utf8").includes("/home/bahman/github/dsh-v0.2"));
+        const scriptsWithSite = readdirSync(join(pkg, "scripts")).filter((f) => readFileSync(join(pkg, "scripts", f), "utf8").includes("/home/bahman/github/dsh-v0.2.1"));
         // Expected-finding list (informational, coordinator-owned manifest files
         // choice): ring test scripts default to the documented coordinator site
         // unless overridden, and validate-episode-rollout.mjs still carries the

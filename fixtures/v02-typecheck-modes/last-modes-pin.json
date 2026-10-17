@@ -1,9 +1,9 @@
 {
-  "suiteId": "typecheck-modes-2026-10-15T12:55:14.145Z-234",
-  "timestamp": "2026-10-15T12:55:15.033Z",
+  "suiteId": "typecheck-modes-2026-10-17T10:49:10.033Z-957136",
+  "timestamp": "2026-10-17T10:49:10.363Z",
   "node": "v24.13.1",
   "wrapper": "scripts/typecheck-v02.mjs",
-  "wrapperSha256": "38d16da0e6ffa369f73db337e04e2bd80e20a0c77155f653424ec5770622cbae",
+  "wrapperSha256": "50001b3c9fb83c7eb4add719dba41a32a9b29c107788dfa4672013b891c851d8",
   "harness": "real copies staged under the suite's own unique temp root; no toolchain, no coordinator test site, no network, no installs",
   "strictPass": 21,
   "strictFail": 0

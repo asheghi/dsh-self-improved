@@ -52,9 +52,9 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const ROOT = new URL("..", import.meta.url).pathname;
-const RUNTIME = "/home/bahman/github/dsh-v0.2"; // installed read-only rc.2 installation
+const RUNTIME = process.env.DSH_RUNTIME_RC2 || "/home/bahman/github/dsh-v0.2.1"; // installed read-only runtime (explicit override or documented site)
 const DSH_BIN = join(RUNTIME, "node_modules", ".bin", "dsh");
-const RC2 = "0.2.0-rc.2";
+const RC2 = "0.2.1-rc.2";
 const TEMP = join(ROOT, "fixtures", "v02-ui", "temp");
 const OWNER_MARKER = ".dsh-mounted-ui-owner.json";
 

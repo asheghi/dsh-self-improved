@@ -127,7 +127,7 @@ With `episodeLearning.enabled`, the plugin records tool calls and results per se
 
 ## Installation
 
-**Live migration remains gated.** The private candidate's scoped unary authentication/continuity and browser checks pass, but real learned-procedure evaluation and approved runtime/profile cutover are not complete. No installed runtime or production profile has been migrated by this work. Follow the [reversible live-enablement runbook](./migration/MIGRATION-LIVE-ENABLEMENT.md) and [current execution checkpoint](./migration/MIGRATION-FINALIZATION.md), including coherent verified backups and exact approvals, rather than installing directly from this section.
+**Requires DSH 0.2.1.** Built and tested against stock `@deepseek-ai/dsh@0.2.1-rc.2`; continuity is disabled on older runtimes. **Live migration remains gated:** real learned-procedure evaluation did not pass, and approved profile cutover is not complete. No installed runtime or production profile has been migrated by this work. Follow the [reversible live-enablement runbook](./migration/MIGRATION-LIVE-ENABLEMENT.md) and [current execution checkpoint](./migration/MIGRATION-FINALIZATION.md), including coherent verified backups and exact approvals, rather than installing directly from this section.
 
 The npm/marketplace name `dsh-self-improved` resolves to a different project, not this one. Install pitfalls (pnpm store and build prep, peerDependencies double instance, duplicate loader entry id): [TROUBLESHOOTING.md](./TROUBLESHOOTING.md).
 
@@ -138,7 +138,7 @@ Build and verify this workspace, then use the supported plugin manager's `instal
 ### Build and install portability contract
 
 ```bash
-pnpm build          # strict rc.2 typecheck (+ --emit-lib via scripts/typecheck-v02.mjs)
+pnpm build          # strict typecheck against the pinned DSH peers (+ --emit-lib via scripts/typecheck-v02.mjs)
 node scripts/test-v02-package.mjs   # package-artifact gate (pack file list, offline runtime harness, prepare lifecycle)
 node scripts/test-v02-typecheck-modes.mjs   # staged-artifact mode regressions (strict vs artifact verification)
 ```

@@ -10,7 +10,7 @@ const runtimeRoot = process.env.DSH_RUNTIME_RC2;
 assert.ok(runtimeRoot, 'Explicit pinned DSH_RUNTIME_RC2 required');
 for (const name of ['cordis', 'dsh-session', 'dsh-session-query', 'dsh-session-projection']) assert.equal(
   JSON.parse(readFileSync(join(runtimeRoot, 'node_modules/@deepseek-ai', name, 'package.json'), 'utf8')).version,
-  name === 'cordis' ? '4.0.4' : '0.2.0-rc.2');
+  name === 'cordis' ? '4.0.5' : '0.2.1-rc.2');
 mkdirSync(join(repo, '.tmp-import-lane'), { recursive: true });
 const pkg = mkdtempSync(join(repo, '.tmp-import-lane/runtime-v03-'));
 cpSync(join(repo, 'lib'), join(pkg, 'lib'), { recursive: true }); cpSync(join(repo, 'package.json'), join(pkg, 'package.json'));

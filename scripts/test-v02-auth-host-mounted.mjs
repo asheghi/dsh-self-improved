@@ -1,15 +1,14 @@
-// Whole private candidate Host battery in ONE managed job/PID namespace.
+// Whole stock-runtime Host battery (0.2.1 Peer model) in ONE managed job/PID namespace.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-const env = { ...process.env, DSH_AUTH_DIAG: '1', DSH_AUTH_PROBE: '1' };
-assert(env.DSH_AUTH_CANDIDATE_RUNTIME, 'explicit private candidate runtime required');
+const env = { ...process.env, DSH_AUTH_PROBE: '1' };
 const children = [];
 function start(script, args) { const child = spawn(process.execPath, [script, ...args], { env, stdio: ['ignore', 'pipe', 'pipe'] }); children.push(child); child.stderr.pipe(process.stderr); return child; }
 async function command(script, args) { const child = start(script, args); child.stdout.pipe(process.stdout); const [code] = await once(child, 'exit'); assert.equal(code, 0, `${script} ${args.join(' ')} failed`); }
-async function fixture(args, field) { const child = start('scripts/run-v02-auth-runtime-candidate.mjs', args); let text = ''; const facts = await new Promise((resolve, reject) => { child.stdout.on('data', chunk => { text += chunk; process.stdout.write(chunk); try { const value = JSON.parse(text); if (value[field] !== undefined) resolve(value); } catch {} }); child.once('exit', code => reject(new Error(`fixture exited before facts: ${code}`))); }); return facts; }
+async function fixture(args, field) { const child = start('scripts/run-v02-auth-host.mjs', args); let text = ''; const facts = await new Promise((resolve, reject) => { child.stdout.on('data', chunk => { text += chunk; process.stdout.write(chunk); try { const value = JSON.parse(text); if (value[field] !== undefined) resolve(value); } catch {} }); child.once('exit', code => reject(new Error(`fixture exited before facts: ${code}`))); }); return facts; }
 try {
  const facts = await fixture(['up', '--keep'], 'runDir');
  const run = facts.runDir;
@@ -23,5 +22,5 @@ try {
  await fixture(['restart', '--run', run, '--keep'], 'restarts');
  await command('scripts/test-v02-continuity-restart-mounted.mjs', ['--phase2', '--run', run]);
  await command('scripts/test-v02-auth-mounted-negative.mjs', ['--run', run]);
- console.log('PASS whole private candidate Host authenticated capture, durable restart, Continue and HTTP negatives; provider is synthetic; not full auth acceptance.');
+ console.log('PASS whole stock Host authenticated capture, durable restart, Continue and HTTP negatives; provider is synthetic; not full auth acceptance.');
 } finally { for (const child of children.reverse()) if (child.exitCode === null) child.kill('SIGTERM'); }

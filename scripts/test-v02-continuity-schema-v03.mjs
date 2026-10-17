@@ -24,7 +24,7 @@ import { ContinuityBoundaryV03 } from '../lib/continuity-boundary-v03.js';
 const runtime = process.env.DSH_RUNTIME_RC2;
 assert.ok(runtime, 'Explicit validated DSH_RUNTIME_RC2 required for the exact checkpoint Zod schema');
 const zodDir = join(runtime, 'node_modules/zod');
-assert.equal(JSON.parse(readFileSync(join(zodDir, 'package.json'), 'utf8')).version, '4.6.5');
+assert.equal(JSON.parse(readFileSync(join(zodDir, 'package.json'), 'utf8')).version, '4.4.3');
 const z = await import(pathToFileURL(join(zodDir, 'index.js')).href);
 
 let passes = 0;

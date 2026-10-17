@@ -17,7 +17,7 @@ try {
  await mkdir(join(run,'home/profiles/learned-evaluation'),{recursive:true});await writeFile(join(run,'home/profiles/learned-evaluation/cordis.patch.yml'),'test-only-profile\n');
  const prior=join(run,'test-only-prior');await mkdir(join(prior,'evaluation'),{recursive:true});await writeFile(join(prior,'evaluation/freeze.json'),'test-only prior failed freeze');await writeFile(join(run,'amendment.json'),JSON.stringify({priorRun:relative(resolve('.'),prior),priorFreezeSha256:sha256('test-only prior failed freeze')}));
  await writeFile(join(run,'route.json'),JSON.stringify({provider:'test-only-provider',model:'test-only-model'}));
- await writeFile(join(run,'runtime.json'),JSON.stringify(await runtimeFingerprint('/home/bahman/github/dsh-v0.2')));
+ await writeFile(join(run,'runtime.json'),JSON.stringify(await runtimeFingerprint('/home/bahman/github/dsh-v0.2.1')));
  await mkdir(join(run,'plugin/lib'),{recursive:true});await writeFile(join(run,'plugin/lib/index.js'),'// test-only build\n');
  const fixed=`import {readFileSync,mkdirSync,copyFileSync} from 'node:fs';import {dirname} from 'node:path';const walk=v=>typeof v==='string'?[v]:v&&typeof v==='object'?Object.values(v).flatMap(walk):[];for(const p of new Set(walk(JSON.parse(readFileSync('package.json','utf8')).exports))){if(!p.startsWith('./dist/'))continue;mkdirSync(dirname(p),{recursive:true});copyFileSync(p.endsWith('.cjs')?'src/api.cjs':'src/api.mjs',p);}\n`;
  for(const task of cases){

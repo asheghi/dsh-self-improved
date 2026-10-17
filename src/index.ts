@@ -810,9 +810,9 @@ export function apply(ctx: Context, rawConfig: RuntimeConfig): void {
       }, "continuity registration policy owner");
       syncContinuityProjection = syncProjection;
       syncProjection();
-      // The candidate Host verifier must exist before the first runtime sync.
-      // Mounting on sessionQuery alone can permanently sync(false) while the
-      // Connection service is still starting, even though later receipts verify.
+      // The Connection (0.2.1 Peer model) must exist before the first runtime
+      // sync. Mounting on sessionQuery alone can permanently sync(false) while
+      // the Connection service is still starting.
       child.inject(["sessionQuery", "connection"], (queryChild) => {
         if (disposed || shuttingDown || !continuityStorePolicyHealthy) return;
         try {

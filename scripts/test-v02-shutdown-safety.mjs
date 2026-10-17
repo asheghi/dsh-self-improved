@@ -21,13 +21,13 @@ import { fileURLToPath } from "node:url";
 import { performance } from "node:perf_hooks";
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const RD = process.env.DSH_RUNTIME_RC2 ?? "/home/bahman/github/dsh-v0.2";
+const RD = process.env.DSH_RUNTIME_RC2 ?? "/home/bahman/github/dsh-v0.2.1";
 /** Genuine rc.2 runtime classes (same access pattern as scripts/test-v02-settings.mjs). */
 const runtime = (pkg, file = "lib/index.js") => import(`${RD}/node_modules/@deepseek-ai/${pkg}/${file}`);
 const manifestOf = (pkg) => JSON.parse(readFileSync(`${RD}/node_modules/@deepseek-ai/${pkg}/package.json`, "utf8"));
 
 const cordis = await runtime("cordis");
-assert.equal(manifestOf("cordis").version, "4.0.4", "genuine rc.2 runtime cordis version pinned");
+assert.equal(manifestOf("cordis").version, "4.0.5", "genuine rc.2 runtime cordis version pinned");
 const { MemoryStore } = await import(join(repo, "lib/storage.js"));
 const { registerShutdownDrain, combineAbortSignals, SHUTDOWN_DRAIN_BUDGET_MS } = await import(join(repo, "lib/index.js"));
 const shutdownModule = await import(join(repo, "lib/shutdown-v02.js"));

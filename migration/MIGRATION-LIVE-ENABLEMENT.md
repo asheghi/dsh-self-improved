@@ -1,8 +1,8 @@
 # Live enablement runbook (reversible)
 
-**Status: deployment is gated, not approved or executed.** The private candidate's scoped unary Host-authenticated continuity boundary passes. **The governing migration plan's Phase E real-learning gate is recorded UNMET by the user's explicit finalization decision; further efficacy attempts are intentionally not authorized.** Before live enablement a separately approved runtime/profile cutover procedure is required; the [phase C decision](<MIGRATION-PHASE-C-ACCEPTANCE.md>) and [finalization checkpoint](<MIGRATION-FINALIZATION.md>) carry exact evidence. Nothing in this document has been executed against a live profile. If a verification fails, stop; do not proceed or improvise.
+**Status: deployment is gated, not approved or executed.** The plugin now runs on stock DSH `0.2.1-rc.2` and its continuity auth uses the Host's own Peer model ([0.2.1 port](<MIGRATION-DSH-0.2.1-PORT.md>)); no runtime patch or runtime cutover is needed. **The governing migration plan's Phase E real-learning gate is recorded UNMET by the user's explicit finalization decision; further efficacy attempts are intentionally not authorized.** Nothing in this document has been executed against a live profile. If a verification fails, stop; do not proceed or improvise.
 
-Runtime prerequisites: this plugin is pinned to the rc.2 contracts it was built and tested against (`node scripts/typecheck-v02.mjs`). Do not enable it against a different runtime without re-running that check.
+Runtime prerequisites: DSH `0.2.1-rc.2` or later in the 0.2.1 line, matching the exact peer pins in `package.json` (`DSH_RUNTIME_RC2=<runtime> node scripts/typecheck-v02.mjs`). Do not enable it against a different runtime without re-running that check. Pre-0.2.1 runtimes keep continuity disabled (fail closed).
 
 ## Step 0 — Decide, because two of these are consents, not settings
 
@@ -14,7 +14,7 @@ Runtime prerequisites: this plugin is pinned to the rc.2 contracts it was built 
 
 Both continuity flags and `episodeLearning.enabled` default to **false**, and the summary consent is independent of the structural one: turning continuity on does not turn provider transfer on. Agree to `summaryEnabled` only if you accept the transfer in the middle column.
 
-**Mandatory runtime gate, not an acceptable deployment waiver:** the installed rc.2 runtime currently admits loopback `/api` requests as the same operator peer without signed-cookie authentication. Do not enable continuity on that runtime. The staged authenticated core has passed its named private unary whole-Host gates, but must still be separately approved and applied, then verified on the target runtime, before these steps proceed. The plugin now fails closed when the required Host receipt verifier is absent; a mounted operator door or shared Peer ID is not authentication. Track evidence in [Host receipt audit](<MIGRATION-AUTH-HOST-RECEIPT-AUDIT.md>).
+**Runtime auth gate:** DSH 0.2.1 admits `/api` only with a signed cookie, refuses any invocation without a live Peer, and stamps owner prompts. The plugin requires an owner Peer for Continue and an owner-sourced prompt for capture, and fails closed on older runtimes. Never run a runtime with browser authentication disabled (the old local `dsh-v0.2` test instance had it disabled by a local patch). In-process plugins are trusted, as in DSH itself.
 
 ## Step 1 — Inventory (read-only; write nothing yet)
 

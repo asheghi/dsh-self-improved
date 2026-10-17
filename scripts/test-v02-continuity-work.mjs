@@ -7,7 +7,7 @@ import { MemoryStore } from '../lib/storage.js';
 import { ContinuityWorkV02 } from '../lib/continuity-work-v02.js';
 const runtime = process.env.DSH_RUNTIME_RC2;
 assert.ok(runtime, 'Explicit DSH_RUNTIME_RC2 required; no SDK install/patch/fallback');
-assert.equal(JSON.parse(readFileSync(join(runtime, 'node_modules/@deepseek-ai/dsh-session/package.json'), 'utf8')).version, '0.2.0-rc.2');
+assert.equal(JSON.parse(readFileSync(join(runtime, 'node_modules/@deepseek-ai/dsh-session/package.json'), 'utf8')).version, '0.2.1-rc.2');
 mkdirSync('.tmp-import-lane', { recursive: true }); const dir = mkdtempSync('.tmp-import-lane/continuity-work-');
 let store = new MemoryStore(join(dir, 'data')), db = store.getJournalSqlite();
 db.exec(`CREATE TABLE continuity_policy(session_id TEXT PRIMARY KEY,project_id TEXT NOT NULL,generation INTEGER NOT NULL,allowed INTEGER NOT NULL) STRICT;

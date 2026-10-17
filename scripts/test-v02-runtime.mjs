@@ -98,14 +98,14 @@ import zlib from "node:zlib";
 // ---------------------------------------------------------------------------
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url)); // repository root
-const RUNTIME = process.env.DSH_RUNTIME_DIR ?? "/home/bahman/github/dsh-v0.2";
+const RUNTIME = process.env.DSH_RUNTIME_DIR ?? "/home/bahman/github/dsh-v0.2.1";
 const DSH_BIN = join(RUNTIME, "node_modules", ".bin", "dsh");
 const FIXTURES = join(ROOT, "fixtures", "v02-runtime");
 const TEMP = join(FIXTURES, "temp");
 const SHADOW = join(FIXTURES, "plugin"); // rebuilt at each invocation
 const EGRESS_GUARD = join(FIXTURES, "egress-guard.mjs");
 
-const RC2 = "0.2.0-rc.2";
+const RC2 = "0.2.1-rc.2";
 const RUN_TIMEOUT_MS = 120_000;
 /** First-request delay used only inside case1, so the post-turn flush happens
  *  after lib/extract-journal-v02.js' 30 s in-process pump gap and drains

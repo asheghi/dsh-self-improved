@@ -8,7 +8,7 @@ const runtime = process.env.DSH_RUNTIME_RC2;
 assert.ok(runtime, 'Explicit pinned DSH_RUNTIME_RC2 required');
 for (const name of ['cordis', 'dsh-session', 'dsh-session-query', 'dsh-session-projection']) {
   const version = JSON.parse(readFileSync(join(runtime, 'node_modules/@deepseek-ai', name, 'package.json'), 'utf8')).version;
-  assert.equal(version, name === 'cordis' ? '4.0.4' : '0.2.0-rc.2');
+  assert.equal(version, name === 'cordis' ? '4.0.5' : '0.2.1-rc.2');
 }
 const native = name => import(pathToFileURL(join(runtime, 'node_modules/@deepseek-ai', name, 'lib/index.js')).href);
 const { Context } = await native('cordis'); const { SessionStore } = await native('dsh-session');

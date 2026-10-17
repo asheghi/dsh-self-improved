@@ -9,7 +9,7 @@ const runtime = process.env.DSH_RUNTIME_RC2;
 assert.ok(runtime, "Explicit DSH_RUNTIME_RC2 required; no runtime install/profile/fallback");
 for (const name of ["cordis", "dsh-agent-default-model", "dsh-llm"]) {
   const meta = JSON.parse(readFileSync(join(runtime, "node_modules/@deepseek-ai", name, "package.json"), "utf8"));
-  if (name !== "cordis") assert.equal(meta.version, "0.2.0-rc.2", `${name} must be the pinned rc.2 contract`);
+  if (name !== "cordis") assert.equal(meta.version, "0.2.1-rc.2", `${name} must be the pinned rc.2 contract`);
 }
 
 const repo = fileURLToPath(new URL("../", import.meta.url));

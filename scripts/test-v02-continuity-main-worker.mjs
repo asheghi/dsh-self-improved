@@ -14,8 +14,8 @@ const extraSummaryIndex = process.argv.includes('--summary-fence-extra-index');
 const reorderedHumanWatermark = process.argv.includes('--watermark-reordered-schema');
 const settingsRouteUpdate = process.argv.includes('--settings-route-update');
 assert.ok(runtime, 'Explicit DSH_RUNTIME_RC2 required; no runtime install/patch/profile/fallback');
-for (const name of ['dsh-session', 'dsh-session-query', 'dsh-session-projection', 'dsh-llm']) assert.equal(JSON.parse(readFileSync(join(runtime, 'node_modules/@deepseek-ai', name, 'package.json'), 'utf8')).version, '0.2.0-rc.2');
-if (settingsRouteUpdate) for (const name of ['dsh-agent-default-model', 'dsh-settings']) assert.equal(JSON.parse(readFileSync(join(runtime, 'node_modules/@deepseek-ai', name, 'package.json'), 'utf8')).version, '0.2.0-rc.2');
+for (const name of ['dsh-session', 'dsh-session-query', 'dsh-session-projection', 'dsh-llm']) assert.equal(JSON.parse(readFileSync(join(runtime, 'node_modules/@deepseek-ai', name, 'package.json'), 'utf8')).version, '0.2.1-rc.2');
+if (settingsRouteUpdate) for (const name of ['dsh-agent-default-model', 'dsh-settings']) assert.equal(JSON.parse(readFileSync(join(runtime, 'node_modules/@deepseek-ai', name, 'package.json'), 'utf8')).version, '0.2.1-rc.2');
 const repo = fileURLToPath(new URL('../', import.meta.url));
 mkdirSync(join(repo, '.tmp-import-lane'), { recursive: true }); const dir = mkdtempSync(join(repo, '.tmp-import-lane/continuity-main-worker-'));
 const pkg = join(dir, 'plugin'); mkdirSync(pkg, { recursive: true }); cpSync(join(repo, 'lib'), join(pkg, 'lib'), { recursive: true }); cpSync(join(repo, 'package.json'), join(pkg, 'package.json'));
@@ -31,17 +31,10 @@ const { SessionProjectionRegistry } = await native('dsh-session-projection');
 const { LlmRuntime, LlmAdapter, createUserMessage } = await native('dsh-llm');
 const { MemoryStore } = await import(pathToFileURL(join(pkg, 'lib/storage.js')).href);
 const root = new Context(), fibers = [];
-// Test-owned synthetic admission only. Production default-deny is unchanged.
-// Genuine-object, finalized-only, one-use semantics avoid turning arbitrary
-// user-shaped history into admitted excerpts inside these lifecycle fixtures.
-const fixtureReceipts = new WeakMap(); let fixturePrompt = 0;
-root.provide('connection', {
-  consumeFinalizedPromptReceipt(receipt) {
-    if (fixtureReceipts.get(receipt) !== 'finalized') return undefined;
-    fixtureReceipts.delete(receipt); return receipt;
-  },
-  readAuthenticatedInvocationAdmission() { return undefined; },
-});
+// 0.2.1 Peer-model marker only. Authority comes from the native owner prompt
+// source `{kind:'user',rpcId}` on the appended message itself.
+let fixturePrompt = 0;
+root.provide('connection', { createPeer() { throw new Error('fixture connection mints no Peers'); } });
 if (!settingsRouteUpdate) root.provide('settings', { configure: () => () => {} });
 root.provide('systemPrompt', { section: () => {} });
 root.provide('tools', { register: () => () => {} }); root.provide('commands', { register: () => () => {} });
@@ -119,11 +112,7 @@ const newSession = name => root.sessions.create('main-worker-' + ++serial + '-' 
 const user = (s, text = 'Continue the unfinished synthetic parser.') => {
   const requestId = `synthetic-isolated-admission-${++fixturePrompt}`;
   const message = createUserMessage({ source: { kind: 'user', rpcId: requestId }, content: [{ type: 'text', text }] });
-  const receipt = Object.freeze({ sessionId: s.id, messageId: message.id, requestId });
-  fixtureReceipts.set(receipt, 'provisional'); root.emit('session/prompt-admission', { phase: 'provisional', receipt });
-  const event = s.append('user/message', message, { surfaceOp: 'append' });
-  fixtureReceipts.set(receipt, 'finalized'); root.emit('session/prompt-admission', { phase: 'finalized', receipt });
-  return event;
+  return s.append('user/message', message, { surfaceOp: 'append' });
 };
 const update = async patch => { const next = structuredClone(config); patch(next); await entry.update({ config: next }); await loader.await(); Object.assign(config, next); };
 const boundary = s => s.append('turn/end', { turn: 1, reason: { kind: 'interrupted' } });

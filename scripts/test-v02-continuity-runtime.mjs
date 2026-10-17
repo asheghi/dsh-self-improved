@@ -52,6 +52,7 @@ let providerCalls = 0;
 root.provide('llm', { async *stream() { providerCalls++; throw new Error('unexpected continuity provider call'); } });
 root.provide('tools', { register: () => () => {} });
 root.provide('commands', { register: () => () => {} });
+root.provide('connection', { createPeer() { throw new Error('fixture connection mints no Peers'); } });
 let loader;
 let entryRemoved = false;
 const registryFiber = root.plugin(SessionProjectionRegistry);
@@ -113,11 +114,14 @@ try {
   check('capture-module reenable re-registers exactly one owned unit', () => { assert.equal(registry.stateOf(session, KEY).lastHumanSeq, 1); });
   const db = new DatabaseSync(join(config.storageRoot, 'memory.db'), { readOnly: true });
   const pendingCount = () => Number(db.prepare("SELECT COUNT(*) AS n FROM continuity_jobs WHERE status='pending'").get().n);
+  let boundaries = 0;
   const boundary = async () => {
     let timer;
     const done = new Promise((resolve, reject) => {
       leasedDone = resolve; timer = setTimeout(() => reject(new Error('main continuity source lease did not settle')), 10_000);
     });
+    // Consent/scope changes rotate the owner-prompt epoch: each boundary needs a fresh owner prompt.
+    session.append('user/message', createUserMessage({ source: { kind: 'user', rpcId: `synthetic-owner-prompt-b${++boundaries}` }, content: [{ type: 'text', text: 'continue the synthetic task' }] }), { surfaceOp: 'append' });
     session.append('turn/end', { turn: 1, reason: { kind: 'interrupted' } });
     try { await done; } finally { clearTimeout(timer); leasedDone = undefined; }
   };

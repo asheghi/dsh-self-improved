@@ -12,7 +12,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const runtime = process.env.DSH_RUNTIME_RC2;
 assert.ok(runtime, 'Explicit DSH_RUNTIME_RC2 required; no runtime install/profile/fallback');
 for (const name of ['dsh-session', 'dsh-session-persistence-jsonl', 'dsh-session-query', 'dsh-session-projection', 'dsh-llm']) {
-  assert.equal(JSON.parse(readFileSync(join(runtime, 'node_modules/@deepseek-ai', name, 'package.json'), 'utf8')).version, '0.2.0-rc.2');
+  assert.equal(JSON.parse(readFileSync(join(runtime, 'node_modules/@deepseek-ai', name, 'package.json'), 'utf8')).version, '0.2.1-rc.2');
 }
 const script = fileURLToPath(import.meta.url);
 const repo = resolve(dirname(script), '..');
@@ -55,32 +55,21 @@ if (!mode) {
   const { Context } = await native('cordis');
   const { Loader } = await native('cordis-plugin-loader');
   const { SessionStore } = await native('dsh-session');
-  const { default: JsonlPersistence } = await native('dsh-session-persistence-jsonl');
+  const jsonlModule = await native('dsh-session-persistence-jsonl'), JsonlPersistence = jsonlModule.default ?? jsonlModule;
   const { SessionQueryEngine } = await native('dsh-session-query');
   const { SessionProjectionRegistry } = await native('dsh-session-projection');
   const { LlmRuntime, LlmAdapter, createUserMessage } = await native('dsh-llm');
   const { MemoryStore } = await own('storage');
 
   const context = new Context(), fibers = [];
-  // Deliberately isolated test admission, never a production verifier. Authority
-  // is genuine-object/finalized/one-use and intentionally lost across processes.
-  const fixtureReceipts = new WeakMap();
-  const fixtureConnection = {
-    consumeFinalizedPromptReceipt(receipt) {
-      if (fixtureReceipts.get(receipt) !== 'finalized') return undefined;
-      fixtureReceipts.delete(receipt); return receipt;
-    },
-    readAuthenticatedInvocationAdmission() { return undefined; },
-  };
-  context.provide('connection', fixtureConnection);
+  // 0.2.1 Peer-model marker only. Authority comes from the native owner prompt
+  // source on a live append and is intentionally lost across processes.
+  context.provide('connection', { createPeer() { throw new Error('fixture connection mints no Peers'); } });
   const admitFixturePrompt = (session, text) => {
     const requestId = 'synthetic-main-process-restart-admission';
     const message = createUserMessage({ source: { kind: 'user', rpcId: requestId }, content: [{ type: 'text', text }] });
-    const receipt = Object.freeze({ sessionId: session.id, messageId: message.id, requestId });
-    fixtureReceipts.set(receipt, 'provisional'); context.emit('session/prompt-admission', { phase: 'provisional', receipt });
     session.append('user/message', message, { surfaceOp: 'append' });
-    fixtureReceipts.set(receipt, 'finalized'); context.emit('session/prompt-admission', { phase: 'finalized', receipt });
-    return receipt;
+    return { sessionId: session.id, messageId: message.id, requestId };
   };
   context.provide('settings', { configure: () => () => {} });
   context.provide('systemPrompt', { section: () => {} });
@@ -204,13 +193,9 @@ if (!mode) {
       await loadMainPlugin(); db = new DatabaseSync(join(storageRoot, 'memory.db'), { readOnly: true });
       check('main plugin boot does not scan/re-capture a cold session without a live event',
         (observed.get(sessionId) ?? 0) === readsBeforePluginBoot);
-      check('serialized prior-process admission proof cannot authenticate after restart',
-        fixtureConnection.consumeFinalizedPromptReceipt(saved.receipt) === undefined
-        && fixtureConnection.readAuthenticatedInvocationAdmission(saved.receipt) === undefined);
-      context.emit('session/prompt-admission', { phase: 'provisional', receipt: saved.receipt });
-      context.emit('session/prompt-admission', { phase: 'finalized', receipt: saved.receipt });
       for (let turn = 0; turn < 4; turn++) await new Promise(resolvePromise => setImmediate(resolvePromise));
-      check('replayed serialized proof never observes or re-captures cold source', (observed.get(sessionId) ?? 0) === readsBeforePluginBoot);
+      check('restart drops process-local owner-prompt authority; cold source is never observed or re-captured',
+        (observed.get(sessionId) ?? 0) === readsBeforePluginBoot);
       const policy = policyFor(sessionId), checkpoint = checkpointFor(sessionId), job = jobFor(sessionId);
       check('main-plugin process restart preserves exact structural policy/checkpoint/pending job',
         JSON.stringify(policy) === JSON.stringify(saved.policy)

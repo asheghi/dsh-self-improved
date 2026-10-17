@@ -10,8 +10,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { inheritedCredential } from './learned-procedure-credential-env.mjs';
 import { runtimeFingerprint } from './learned-procedure-runtime-fingerprint.mjs';
 const repo = fileURLToPath(new URL('../', import.meta.url));
-const runtime = resolve(process.env.DSI_EVALUATION_RUNTIME ?? '/home/bahman/github/dsh-v0.2');
-if (runtime !== '/home/bahman/github/dsh-v0.2' && !runtime.startsWith(repo)) throw new Error('candidate runtime must stay in the workspace');
+const runtime = resolve(process.env.DSI_EVALUATION_RUNTIME ?? '/home/bahman/github/dsh-v0.2.1');
+if (runtime !== '/home/bahman/github/dsh-v0.2.1' && !runtime.startsWith(repo)) throw new Error('candidate runtime must stay in the workspace');
 const routeIndex=process.argv.indexOf('--route');
 const route=JSON.parse(await readFile(routeIndex>=0?resolve(process.argv[routeIndex+1]):join(repo,'scripts/learned-procedure-go-route.json'),'utf8'));
 if(!/^[a-z][a-z0-9-]+$/.test(route.provider)||!route.model||!route.profile?.apiKeyEnv)throw Error('explicit nonsecret provider route and credential reference required');
@@ -22,7 +22,7 @@ const credentialEnv=await inheritedCredential(runtime,route.profile.apiKeyEnv,pr
 const {attributionHeaders}=await import(pathToFileURL(join(runtime,'node_modules/@deepseek-ai/dsh-llm/lib/index.js')));
 const userAgent=attributionHeaders()['user-agent'];
 const pkg = JSON.parse(await readFile(join(runtime, 'node_modules/@deepseek-ai/dsh/package.json'), 'utf8'));
-if (pkg.version !== '0.2.0-rc.2') throw new Error('requires pinned rc.2');
+if (pkg.version !== '0.2.1-rc.2') throw new Error('requires pinned rc.2');
 const manifest = JSON.parse(await readFile(join(repo, 'package.json'), 'utf8'));
 const zod = JSON.parse(await readFile(join(runtime, 'node_modules/zod/package.json'), 'utf8'));
 if (!/^4\.\d+\.\d+$/.test(manifest.dependencies?.zod ?? '') || zod.version !== manifest.dependencies.zod) {

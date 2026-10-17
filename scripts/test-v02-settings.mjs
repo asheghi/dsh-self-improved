@@ -28,7 +28,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
 const repo = fileURLToPath(new URL("..", import.meta.url));
-const RD = process.env.DSH_RUNTIME_RC2 ?? "/home/bahman/github/dsh-v0.2";
+const RD = process.env.DSH_RUNTIME_RC2 ?? "/home/bahman/github/dsh-v0.2.1";
 /** rc.2 runtime absolute imports (genuine classes, version assertion below). */
 const runtime = (pkg, file = "lib/index.js") => import(`${RD}/node_modules/@deepseek-ai/${pkg}/${file}`);
 
@@ -294,7 +294,7 @@ check("rc.2 remote surface: service registration, typert binding, SRC markers, c
   const manifest = JSON.parse(readFileSync(join(RD, "node_modules/@deepseek-ai/cordis/package.json"), "utf8"));
   // Cordis itself is a wheel-versioned shared lib (4.0.4 for rc.2); the dsh-*
   // peers pin 0.2.0-rc.2 (checked above), so accept the shipped cordis here.
-  assert.ok(["4.0.4"].includes(manifest.version), "cordis ships as the rc.2 runtime's pinned version");
+  assert.ok(["4.0.5"].includes(manifest.version), "cordis ships as the rc.2 runtime's pinned version");
 
   const { MemoryStore } = await import(join(repo, "lib/storage.js"));
   const dir = join(mkdtempSync(join(tmpdir(), "dsi-settings-remote-")), "store");
