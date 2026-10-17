@@ -1,11 +1,11 @@
 {
-  "suiteId": "package-2026-10-17T12:17:08.793Z-3389861",
-  "timestamp": "2026-10-17T12:17:17.746Z",
+  "suiteId": "package-2026-10-17T12:35:55.759Z-3908742",
+  "timestamp": "2026-10-17T12:36:04.614Z",
   "node": "v24.13.1",
   "peerMode": "coordinator-test-site-default",
   "peerRoot": "/home/bahman/github/dsh-v0.2.1/node_modules/@deepseek-ai",
   "harness": "offline symlink links to the exactly rc.2 peer tree; npm pack ran with real scripts; NO registry install, NO dependency patch, NO profile changes",
-  "srcStateAtRun": "dirty: src/continuity-inventory-ui.ts",
+  "srcStateAtRun": "clean",
   "srcStateNote": "the strict build behind C5/C6 compiled the src state above (build attribution is that state, not one named lane)",
   "strictPass": 58,
   "strictFail": 0

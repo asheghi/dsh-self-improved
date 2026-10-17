@@ -167,6 +167,8 @@ window.__ModuleLoader__.load({
       ".__dsi_saveBar{position:sticky;bottom:0;z-index:2;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:10px 12px;margin-top:4px;border:1px solid var(--dsw-alias-border-l2);border-radius:12px;background:var(--dsw-alias-bg-layer-1);box-shadow:0 -6px 18px rgba(0,0,0,.18)}" +
       ".__dsi_textarea{min-height:64px;height:auto;resize:vertical;line-height:20px;font-family:var(--dsw-font-mono,ui-monospace,monospace);font-size:12px}" +
       "@container (max-width:420px){.__dsi_btnSm{white-space:normal;height:auto;min-height:28px}.__dsi_browserRow{flex-direction:column}.__dsi_browserOps{flex:1 1 auto;flex-wrap:wrap}.__dsi_kv > div{flex-wrap:wrap}.__dsi_switchRow{gap:8px}}" +
+      ".__dsi_browserEditing{flex-direction:column;align-items:stretch;gap:8px}" +
+      ".__dsi_editArea{height:auto;min-height:72px;resize:vertical;line-height:20px}" +
       "@media (prefers-reduced-motion: reduce){.__dsi_tab,.__dsi_collapseChevron,.__dsi_switchTrack,.__dsi_btn{transition:none;animation:none}}";
     var tagId = "dsh-self-improved/main.css";
     if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId) + "]") === null) {
@@ -356,7 +358,7 @@ window.__ModuleLoader__.load({
       browserSkillDelete: "Delete",
       browserSkillDeleteConfirm: "Delete this synthesized skill? (system skills are protected)",
       browserSkillDeleted: "Deleted",
-      browserDetail: "Detail",
+      browserDetail: "Details",
       browserDetailClose: "Close",
       browserConfirm: "Confirm",
       browserCancel: "Cancel",
@@ -370,10 +372,10 @@ window.__ModuleLoader__.load({
       browserMetaUpdated: "Updated",
       browserMetaId: "ID",
       browserMetaSupersedes: "Supersedes",
-      browserCorrect: "Correct",
+      browserCorrect: "Edit",
       browserForget: "Forget",
-      browserCorrectPrompt: "Correct to:",
-      browserCorrected: "Corrected",
+      browserCorrectPrompt: "Editing",
+      browserCorrected: "Memory updated",
       browserForgotten: "Forgotten",
       groupEpisodesBrowser: "Episodes (tool outcomes)",
       browserEpisodesDisabled: "(episode learning disabled — enable it in Config to inspect stored rows; counts below still show)",
@@ -568,7 +570,7 @@ window.__ModuleLoader__.load({
       browserSkillDelete: "Delete",
       browserSkillDeleteConfirm: "Delete this synthesized skill? (system skills are protected)",
       browserSkillDeleted: "Deleted",
-      browserDetail: "Detail",
+      browserDetail: "Details",
       browserDetailClose: "Close",
       browserConfirm: "Confirm",
       browserCancel: "Cancel",
@@ -582,10 +584,10 @@ window.__ModuleLoader__.load({
       browserMetaUpdated: "Updated",
       browserMetaId: "ID",
       browserMetaSupersedes: "Supersedes",
-      browserCorrect: "Correct",
+      browserCorrect: "Edit",
       browserForget: "Forget",
-      browserCorrectPrompt: "Correct to:",
-      browserCorrected: "Corrected",
+      browserCorrectPrompt: "Editing",
+      browserCorrected: "Memory updated",
       browserForgotten: "Forgotten",
       groupEpisodesBrowser: "Episodes (tool outcomes)",
       browserEpisodesDisabled: "(episode learning disabled — enable it in Config to inspect stored rows; counts below still show)",
@@ -1494,23 +1496,22 @@ window.__ModuleLoader__.load({
 
       var listNodes = filtered.slice(0, 200).map(function (m) {
         if (editingId === m.id) {
-          return h("div", { key: m.id, className: "__dsi_browserRow" },
-            h("div", { className: "__dsi_browserMain" },
-              h("span", { className: "__dsi_browserKind" }, (KIND_LABEL[m.kind] || m.kind) + " · " + t("browserCorrectPrompt")),
-              h("textarea", {
-                className: "__dsi_input", style: { height: "auto", minHeight: 60, resize: "vertical" },
-                autoFocus: true, value: editDraft, disabled: busy,
-                onChange: function (e) { setEditDraft(e.target.value); },
-                onKeyDown: function (e) {
-                  if (e.key === "Escape") { e.preventDefault(); cancelCorrect(); }
-                  else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); saveCorrect(m); }
-                }
-              })
-            ),
-            h("span", { className: "__dsi_browserOps" },
-              h("button", { type: "button", className: "__dsi_btn", onClick: function () { saveCorrect(m); }, disabled: busy || !editDraft.trim() }, t("save")),
-              h("button", { type: "button", className: "__dsi_btn", onClick: cancelCorrect, disabled: busy }, t("browserCancel"))
-            )
+          return h("div", { key: m.id, className: "__dsi_browserRow __dsi_browserEditing" },
+            h("label", { className: "__dsi_browserKind", htmlFor: "dsi-edit-" + m.id }, (KIND_LABEL[m.kind] || m.kind) + " · " + t("browserCorrectPrompt")),
+            h("textarea", {
+              id: "dsi-edit-" + m.id, className: "__dsi_input __dsi_editArea",
+              autoFocus: true, value: editDraft, disabled: busy, rows: 3,
+              onChange: function (e) { setEditDraft(e.target.value); },
+              onKeyDown: function (e) {
+                if (e.key === "Escape") { e.preventDefault(); cancelCorrect(); }
+                else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); saveCorrect(m); }
+              }
+            }),
+            h("div", { className: "__dsi_toolbar" },
+              h("span", { className: "__dsi_muted" }, "Your version replaces this memory. Ctrl+Enter saves, Esc cancels."),
+              h("span", { className: "__dsi_browserOps" },
+                h("button", { type: "button", className: "__dsi_btn", onClick: cancelCorrect, disabled: busy }, t("browserCancel")),
+                h("button", { type: "button", className: "__dsi_btn __dsi_btnPrimary", onClick: function () { saveCorrect(m); }, disabled: busy || !editDraft.trim() || editDraft.trim() === m.content }, t("save"))))
           );
         }
         return h("div", { key: m.id, className: "__dsi_browserRow" },
@@ -1521,7 +1522,7 @@ window.__ModuleLoader__.load({
           ),
           h("span", { className: "__dsi_browserOps" },
             h("button", { type: "button", className: "__dsi_btn", onClick: function () { viewDetail(m); }, disabled: busy }, t("browserDetail")),
-            h("button", { type: "button", className: "__dsi_btn", onClick: function () { correct(m); }, disabled: busy }, t("browserCorrect")),
+            h("button", { type: "button", className: "__dsi_btn", title: "Change the text. Your version replaces this memory and counts as confirmed by you.", onClick: function () { correct(m); }, disabled: busy }, t("browserCorrect")),
             h("button", { type: "button", className: "__dsi_btn __dsi_btnDanger", onClick: function () { forget(m); }, disabled: busy }, t("browserForget"))
           )
         );
