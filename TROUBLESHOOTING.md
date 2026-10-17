@@ -11,6 +11,21 @@ dsh plugin --profile web remove dsh-self-improved
 dsh plugin --profile web add @asheghi/dsh-self-improved
 ```
 
+If you ever saved this plugin's settings, your profile's `cordis.patch.yml` has a row that still names the old package, and DSH now **ignores that whole row**, so your settings silently stop applying. `dsh --profile web --dump-config` shows:
+
+```
+patch: name mismatch for "dsh-self-improved" (expected "@asheghi/dsh-self-improved", got "dsh-self-improved"), skipping
+```
+
+Fix the `name:` in that row and restart:
+
+```yaml
+- id: dsh-self-improved
+  name: '@asheghi/dsh-self-improved'   # was: dsh-self-improved
+  config:
+    ...
+```
+
 Back up `$DSH_HOME/memory` first. Opening a 0.1 memory store with this version has not been tested yet; if you rely on those memories, keep the backup until you've checked them under **Settings → Evolving Memory → Memory**.
 
 ## Plugin skipped as incompatible

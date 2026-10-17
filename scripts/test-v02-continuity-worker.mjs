@@ -35,9 +35,9 @@ const z = await import(pathToFileURL(join(runtime, 'node_modules/zod/index.js'))
 const ctx = new Context(); const fibers = [];
 for (const plugin of [SessionStore, SessionProjectionRegistry, SessionQueryEngine, LlmRuntime]) { const fiber = ctx.plugin(plugin); await fiber.await(); fibers.push(fiber); }
 registerContinuityProjection(ctx, z);
-let handler; const requests = [];
+let handler, modelReasoning; const requests = [];
 class SyntheticAdapter extends LlmAdapter {
-  async resolveModel(provider, model) { return { provider, id: model, name: 'Synthetic fixture only' }; }
+  async resolveModel(provider, model) { return { provider, id: model, name: 'Synthetic fixture only', ...(modelReasoning ? { reasoning: modelReasoning } : {}) }; }
   async *stream(options) { requests.push(options); yield* handler(options); }
 }
 const registration = ctx.llm.registerAdapter(['synthetic-continuity'], new SyntheticAdapter());
@@ -108,8 +108,24 @@ try {
     const request = requests.at(-1), wire = JSON.stringify({ ...request, signal: undefined });
     for (const key of ['sessionId', 'purpose', 'tools', 'toolHistory']) assert.equal(Object.hasOwn(request, key), false);
     assert.ok(!wire.includes(f.session.id)); assert.ok(!wire.includes(f.project)); assert.ok(!wire.includes('FUTURE-TAIL-NOT-IN-OLD-CUT'));
-    assert.equal(request.maxTokens, 768); assert.equal(request.temperature, 0); assert.equal(handoffs.read('pj-' + 'f'.repeat(32), f.job), null);
+    assert.equal(request.maxTokens, 4096); assert.equal(Object.hasOwn(request, 'reasoningEffort'), false, 'no effort requested from a model without reasoning levels'); assert.equal(request.temperature, 0); assert.equal(handoffs.read('pj-' + 'f'.repeat(32), f.job), null);
     const before = requests.length; assert.equal(await f.worker.runOne(f.project), 'idle'); assert.equal(requests.length, before); f.worker.dispose();
+  });
+  await check('reasoning models: least effort requested, private reasoning discarded, handoff still completes', async () => {
+    modelReasoning = { efforts: [{ id: 'low', name: 'Low' }, { id: 'max', name: 'Max' }], defaultEffort: 'max' };
+    const f = await fixture('reasoning');
+    handler = async function*(o) {
+      yield { type: 'block-start', index: 0, blockType: 'reasoning' };
+      for (let i = 0; i < 3000; i++) yield { type: 'reasoning-delta', index: 0, text: 'PRIVATE-THINKING ' };
+      yield { type: 'block-end', index: 0, block: { type: 'reasoning', text: 'PRIVATE-THINKING' } };
+      yield { type: 'text-delta', index: 1, text: response(o) }; yield { type: 'finish', reason: { kind: 'stop' } };
+    };
+    try { assert.equal(await f.worker.runOne(f.project), 'completed'); }
+    finally { modelReasoning = undefined; }
+    assert.equal(requests.at(-1).reasoningEffort, 'low', 'the least selectable effort is requested');
+    const saved = handoffs.read(f.project, f.job); assert.ok(saved && saved.notes.length > 0);
+    assert.ok(!JSON.stringify(saved).includes('PRIVATE-THINKING'), 'reasoning text never reaches the handoff');
+    f.worker.dispose();
   });
   await check('oversized source and suspicious/injected material omitted; total minimized provider request bounded', async () => {
     const messages = ['HUGE-PASTE-CANARY ' + 'x'.repeat(240000), '> QUOTATION-CANARY', '```\nFENCED-PASTE-CANARY\n```',
