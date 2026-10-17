@@ -1,0 +1,14 @@
+{
+  "version": "infrastructure-correction-v9",
+  "authorization": "Parent explicitly approved separate documented protocol-corrected experiments under the user's delegated decisions before any held-out execution",
+  "priorRun": "fixtures/skill-measurement/real-host/run-h7tIRL",
+  "priorFreezeSha256": "e8dbda97fafd679529cb78412be3cb769a0981bc912f8d3f8d92015683d16968",
+  "priorResult": "Retained as failed-v8 pipeline stage: the four-step repeated pair produced IDENTICAL fingerprints (b26938bf48d0a485) across two genuine fresh roots with external verification passed, and the native full review had already ACCEPTED the first episode with five substantive operational fact memories, but the second review was still in flight when the frozen pipeline asserted immediately; zero eligible drafts and pipeline() refused honestly.",
+  "changes": [
+    "pipeline() now waits up to 180 seconds for BOTH training episodes to reach terminal review statuses (reviewed or rejected) after the evolve command returns, persisting the observation; this matches the plugin's actual background full-review behavior, not a retry",
+    "Point the amendment's prior run at the failed v8 experiment above and pin its exact freeze hash; all prior failures stay separately pinned"
+  ],
+  "unchanged": ["Held-out heldout-gamma, unrelated-control and current-rule-control trees and prompts", "trainingTasks stays the identical repeated training-fourstep pair", "Provider go-opencode and model glm-5.3-flash with high reasoning", "80 total provider calls and eight calls per session", "8000000 aggregate token ceiling and 8192 native output ceiling", "npm read-only package mount and credential/session-header transport", "No selective retry inside any failed stage, no held-out execution or tuning"],
+  "trainingTasks": ["training-fourstep", "training-fourstep"],
+  "phaseEAccepted": false
+}

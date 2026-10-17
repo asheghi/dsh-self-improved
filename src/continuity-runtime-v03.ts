@@ -59,7 +59,6 @@ export class ContinuityRuntimeV03 {
     let trusted: ContinuityRuntimeV03TrustedReceipt | null;
     try { trusted = snapshotReceipt(this.admission(receipt)); } catch { trusted = null; }
     if (!trusted || this.spent.has(trusted.receiptId)) return Promise.resolve({ kind: "denied", reason: "untrusted-receipt" });
-    if (hooks.canSummarize?.() !== true) return Promise.resolve({ kind: "denied", reason: "consent" });
     this.spent.add(trusted.receiptId);
     for (const active of this.active) active.controller.abort();
     const controller = new AbortController(); const abort = () => controller.abort();
@@ -75,11 +74,17 @@ export class ContinuityRuntimeV03 {
   private async run(trusted: ContinuityRuntimeV03TrustedReceipt, hooks: ContinuityRuntimeV03Hooks, signal: AbortSignal): Promise<ContinuityRuntimeV03Result> {
     try {
       signal.throwIfAborted();
-      const epoch = readContinuitySummaryPolicyEpochV02(this.store.getJournalSqlite());
-      if (epoch === null || hooks.canSummarize?.() !== true) return { kind: "denied", reason: "consent" };
+      // Pin optional body consent before the async capture; revoke/re-enable
+      // during that read cannot silently authorize a fresh provider epoch.
+      const epoch = hooks.canSummarize?.() === true
+        ? readContinuitySummaryPolicyEpochV02(this.store.getJournalSqlite()) : null;
+      // Structural capture has its own authenticated boundary/policy checks;
+      // summary consent must not disable body-free references.
       const captured = await this.capture.captureAtTurnEnd(hooks.query, hooks.readFreshSource, trusted.request, signal);
       if (!captured) return { kind: "denied", reason: "stale" };
       signal.throwIfAborted();
+      if (epoch === null || hooks.canSummarize?.() !== true
+        || readContinuitySummaryPolicyEpochV02(this.store.getJournalSqlite()) !== epoch) return { kind: "captured", jobId: captured.jobId };
       // Claim only the exact job made by this boundary. An older same-project job must not borrow this source reader.
       const claim = this.work.claim(trusted.request.projectId, hooks.now(), 30_000, captured.jobId);
       if (!claim) return { kind: "captured", jobId: captured.jobId };

@@ -40,7 +40,10 @@ window.__ModuleLoader__.load({
 
     // ─═ [css] ══════════════════════════════════════════════════════════════
     var CSS =
-      ".__dsi_root{max-width:720px;display:flex;flex-direction:column;gap:10px}" +
+      ".__dsi_root{max-width:720px;min-width:0;display:flex;flex-direction:column;gap:10px;overflow-wrap:anywhere;container-type:inline-size}" +
+      ".__dsi_root *{box-sizing:border-box}" +
+      ".__dsi_root input,.__dsi_root select,.__dsi_root textarea{min-width:0;max-width:100%}" +
+      "@container (max-width:420px){.__dsi_header,.__dsi_label,.__dsi_row,.__dsi_tabBar,.__dsi_browserRow,.__dsi_browserOps,.__dsi_collapseHeader{flex-wrap:wrap;min-width:0}.__dsi_btn,.__dsi_tab{height:auto;min-height:34px;max-width:100%;white-space:normal;overflow-wrap:anywhere;padding:6px 8px;line-height:22px}.__dsi_collapseTitle{min-width:0}.__dsi_table{table-layout:fixed}.__dsi_table th,.__dsi_table td{padding:6px 2px}}" +
       ".__dsi_header{display:flex;align-items:center;gap:8px;margin-bottom:2px}" +
       ".__dsi_intro{font-size:13px;line-height:20px;color:var(--dsw-alias-label-secondary);margin:0}" +
       ".__dsi_helpBtn{flex:none;width:24px;height:24px;border-radius:50%;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);color:var(--dsw-alias-label-primary);font-size:13px;line-height:1;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;padding:0}" +

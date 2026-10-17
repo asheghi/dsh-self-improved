@@ -48,6 +48,14 @@ try {
     assert.equal(saved.asOfSeq, 1); assert.ok(!JSON.stringify(saved).includes('PRIVATE-CANONICAL-BODY'));
     assert.equal(lane.listPending('pj-' + 'f'.repeat(32)).length, 0);
   });
+  await check('structural capture is independent of disabled summary consent epoch', async () => {
+    const { syncContinuitySummaryPolicyV02 } = await own('continuity-summary-ledger-owner');
+    store.runInImmediateTransaction(() => syncContinuitySummaryPolicyV02(store.getJournalSqlite(), true));
+    store.runInImmediateTransaction(() => syncContinuitySummaryPolicyV02(store.getJournalSqlite(), false));
+    assert.deepEqual(await owner.capture(session, 'turn-end'), { id: first.id, created: false });
+    assert.equal(lane.listPending(project).length, 1);
+    assert.equal(store.getJournalSqlite().prepare('SELECT allowed FROM continuity_summary_policy WHERE id=1').get().allowed, 0);
+  });
   const before = lane.readPolicy(session.id);
   store.close(); store = new MemoryStore(dir); lane = new ContinuityStoreV02(store, z);
   owner = new ContinuityOwnerV02(lane, ctx.sessionProjections, z, query, () => allowed);
@@ -104,6 +112,17 @@ try {
     consent = false; release(); assert.equal(await pending, null); assert.equal(drops, 1);
     assert.equal(lane.readPolicy(session.id).allowed, false);
     assert.equal(lane.listPending(project).length, 0); pendingOwner.dispose();
+  });
+  await check('cold native header reordering and verified omitted delegationDepth zero preserve exact ownership', async () => {
+    let drops = 0;
+    const normalized = { async observeSession(id, options) { const observation = await query.observeSession(id, options);
+      const header = { ...observation.header, delegationDepth: observation.header.delegationDepth ?? 0 };
+      return { ...observation, header: Object.fromEntries(Object.keys(header).reverse().map(key => [key, header[key]])),
+        [Symbol.dispose]() { drops++; observation[Symbol.dispose](); } };
+    } };
+    const guarded = new ContinuityOwnerV02(lane, ctx.sessionProjections, z, normalized, () => true);
+    assert(await guarded.capture(session, 'finish')); assert.equal(drops, 1); guarded.dispose();
+    lane.ensurePolicy(session.id, project, false);
   });
   await check('foreign observed identity fails closed and disposes the actual native lease', async () => {
     let drops = 0;

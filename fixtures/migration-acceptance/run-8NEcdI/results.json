@@ -1,0 +1,100 @@
+{
+  "startedAt": "2026-10-15T10:55:58.333Z",
+  "runtime": "/home/bahman/github/dsh-v0.2",
+  "selected": [
+    "authCore",
+    "learningHarness"
+  ],
+  "scope": "isolated-regression-only",
+  "results": [
+    {
+      "name": "build",
+      "argv": [
+        "scripts/typecheck-v02.mjs",
+        "--emit-lib"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 3610
+    },
+    {
+      "name": "authCore/test-v02-auth-restoration-candidate",
+      "argv": [
+        "scripts/test-v02-auth-restoration-candidate.mjs"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 169
+    },
+    {
+      "name": "authCore/test-v02-auth-receipt-core-candidate",
+      "argv": [
+        "scripts/test-v02-auth-receipt-core-candidate.mjs"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 525
+    },
+    {
+      "name": "authCore/test-v02-auth-lifecycle",
+      "argv": [
+        "scripts/test-v02-auth-lifecycle.mjs"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 77
+    },
+    {
+      "name": "learningHarness/test-learned-procedure-executor",
+      "argv": [
+        "scripts/test-learned-procedure-executor.mjs"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 2470
+    },
+    {
+      "name": "learningHarness/test-learned-procedure-authorization",
+      "argv": [
+        "scripts/test-learned-procedure-authorization.mjs"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 64
+    },
+    {
+      "name": "learningHarness/test-learned-procedure-sandbox",
+      "argv": [
+        "scripts/test-learned-procedure-sandbox.mjs"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 1705
+    },
+    {
+      "name": "learningHarness/test-learned-procedure-measurement",
+      "argv": [
+        "scripts/test-learned-procedure-measurement.mjs"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 184
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+// Run the existing scoped Chromium battery with the explicit private core graph.
+import assert from 'node:assert/strict';
+import { readFile, writeFile, realpath } from 'node:fs/promises';
+import { resolve, join } from 'node:path';
+import { spawn } from 'node:child_process';
+const root = await realpath(resolve('.'));
+const runtime = await realpath(process.env.DSH_AUTH_CANDIDATE_RUNTIME ?? '');
+assert(runtime.startsWith(join(root, '.tmp-import-lane/auth-runtime-')));
+assert.equal(JSON.parse(await readFile(join(runtime, '.auth-runtime-owner.json'), 'utf8')).workspace, root);
+let text = await readFile('scripts/run-v02-browser.mjs', 'utf8');
+const anchor = "const root=resolve(new URL('..',import.meta.url).pathname),temp=";
+assert.equal(text.split(anchor).length, 2);
+text = text.replace(anchor, `const root=${JSON.stringify(root)},temp=`);
+const fixture = "['scripts/test-v02-mounted-ui.mjs','up']";
+assert.equal(text.split(fixture).length, 2);
+text = text.replace(fixture, "['scripts/run-v02-auth-runtime-candidate.mjs','up']");
+const file = join(runtime, 'browser-auth-candidate.mjs'); await writeFile(file, text);
+const child = spawn(process.execPath, [file], { env: process.env, stdio: 'inherit' });
+process.on('SIGTERM', () => child.kill('SIGTERM'));
+child.once('exit', code => { process.exitCode = code ?? 1; });

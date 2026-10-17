@@ -1,6 +1,6 @@
 # Live enablement runbook (reversible)
 
-**Status: a reviewed procedure, not a record of a run.** Nothing in this document has been executed against a live profile. Every step therefore carries its own verification, and every step is reversible. If a verification fails, stop at that step — do not proceed and do not improvise.
+**Status: deployment is gated, not approved or executed.** The private candidate's scoped unary Host-authenticated continuity boundary passes. **The governing migration plan's Phase E real-learning gate is recorded UNMET by the user's explicit finalization decision; further efficacy attempts are intentionally not authorized.** Before live enablement a separately approved runtime/profile cutover procedure is required; the [phase C decision](<MIGRATION-PHASE-C-ACCEPTANCE.md>) and [finalization checkpoint](<MIGRATION-FINALIZATION.md>) carry exact evidence. Nothing in this document has been executed against a live profile. If a verification fails, stop; do not proceed or improvise.
 
 Runtime prerequisites: this plugin is pinned to the rc.2 contracts it was built and tested against (`node scripts/typecheck-v02.mjs`). Do not enable it against a different runtime without re-running that check.
 
@@ -14,28 +14,29 @@ Runtime prerequisites: this plugin is pinned to the rc.2 contracts it was built 
 
 Both continuity flags and `episodeLearning.enabled` default to **false**, and the summary consent is independent of the structural one: turning continuity on does not turn provider transfer on. Agree to `summaryEnabled` only if you accept the transfer in the middle column.
 
-Standing risk you are also accepting: the rc.2 runtime admits **every** loopback `/api` request as the same operator peer in this installation, so the operator door stops the agent's ordinary paths but not a process that can open a loopback connection. The measured detail is in [MIGRATION-PHASE-C-ACCEPTANCE.md](MIGRATION-PHASE-C-ACCEPTANCE.md).
+**Mandatory runtime gate, not an acceptable deployment waiver:** the installed rc.2 runtime currently admits loopback `/api` requests as the same operator peer without signed-cookie authentication. Do not enable continuity on that runtime. The staged authenticated core has passed its named private unary whole-Host gates, but must still be separately approved and applied, then verified on the target runtime, before these steps proceed. The plugin now fails closed when the required Host receipt verifier is absent; a mounted operator door or shared Peer ID is not authentication. Track evidence in [Host receipt audit](<MIGRATION-AUTH-HOST-RECEIPT-AUDIT.md>).
 
 ## Step 1 — Inventory (read-only; write nothing yet)
 
 1. `plugin_manager` → `list_bundles` and `list_plugins`. Record the **profile name**, whether `dsh-self-improved` is already present, and its `enabled` / `fiberPhase`.
 2. Confirm the runtime is the pinned one (`dsh --version`) and record it.
-3. Record the **profile patch file path** shown for this profile. That file is the only configuration file this procedure will touch, and it is the thing to back up.
+3. Record the exact profile composition and package/lock metadata paths. Supported installation can change this recoverable profile snapshot beyond the patch file alone; back up the coherent set before any write.
 4. Record the current values of the three flags above (all are expected to be default/false). If any is already true, this profile has been configured before — stop and reconcile before continuing.
 5. Record where the plugin will start writing: `<DSH_HOME>/memory` (memory DB and journal) and `<DSH_HOME>/skills`. Note that **skill activation writes no files at all** — learned skills are runtime registrations, so there is nothing on disk to clean up later.
 
 ## Step 2 — Back up before any write
 
-1. Copy the profile patch file to a timestamped backup directory; record its size and hash.
-2. If `<DSH_HOME>/memory` exists, copy the whole directory (not only `memory.db`; the journal is part of the store) and record its size.
-3. Keep the backup path in your notes. Step "Rollback / full revert" below restores exactly these two things.
+1. Obtain the required profile/filesystem approval and record the exact resolved source and backup paths. Quiesce every Host and other store writer and verify exclusive ownership before copying or restoring any SQLite store; copying an actively written directory is not a verified consistent backup.
+2. Back up the profile composition and package/lock metadata as one recoverable profile snapshot; record hashes. Preserve preexisting user edits. Package installation affects more than the patch file alone.
+3. If `<DSH_HOME>/memory` exists, back up the whole quiesced directory, including SQLite sidecars and the journal; record hashes and verify the backup can reopen in an isolated restore test. Never run an older plugin against a newer schema.
+4. Keep the verified backup and inventory receipt. A full restore requires its own reviewed, approved, quiesced procedure; do not overwrite live files or silently merge incompatible generations.
 
 ## Step 3 — Install with EVERYTHING still off
 
 The package declares `dsh.bundle.patch` (`cordis.patch.yml`), which inserts one loader row (`id: dsh-self-improved`, `name: dsh-self-improved`). So this is a normal bundle install — no hand-edited YAML:
 
-- Preferred: `dsh plugin --profile <profile> add dsh-self-improved` from this checkout (or `plugin_manager` `install_bundle` with the local package spec).
-- Do **not** hand-edit the profile patch file unless the install command is unavailable; if you must, insert the same row the shipped patch declares.
+- Use `plugin_manager` `install_bundle` with the absolute local package directory after approval. Inspect its `application` and `warnings` fields and verify the mounted registration; installation can require approval for build scripts.
+- Never hand-edit the profile patch or package metadata and never run a package manager in the profile directory. If supported installation is unavailable, stop and resolve that dependency.
 
 **Verify before enabling anything:** `plugin_manager list_plugins` shows the row enabled and its fiber active, and the plugin's own surface reports the lanes as **disabled** (Overview tab, or `/memory status`). No offers, no episodes, no provider calls, no new files under `<DSH_HOME>/memory` beyond an opened store.
 
@@ -64,12 +65,12 @@ If the plugin does not mount, stop here and restore from Step 2. A row that exis
 
 - **Per lane (seconds):** set the flag back to `false`. Structural continuity, the summary lane and episode learning all stop on apply; the summary lane cancels in-flight provider work synchronously and cannot commit late output.
 - **Uninstall:** `dsh plugin --profile <profile> remove dsh-self-improved` (or `plugin_manager` `remove_bundle`). Verify the row is gone and that no learned skill remains registered — activation is owned by the plugin fiber, so unloading disposes it automatically.
-- **Full revert:** restore the Step 2 backup of the profile patch file, and the `<DSH_HOME>/memory` directory if you want the pre-enablement store back.
-- **What persists after any rollback:** memory rows, episodes, event rows and skill drafts stay on disk until you purge them (`/memory forget`, `/memory episode-purge`). Nothing is deleted by disabling a lane, by uninstalling, or by this runbook. Logical revocation is not physical erasure of historical bytes.
+- **Full revert:** obtain explicit approval, stop all store/profile writers, verify exclusive ownership and resolved restore targets, then restore the verified compatible profile snapshot and memory backup from Step 2. Validate schema/plugin compatibility and an isolated reopen before restarting the live Host. Do not blindly overwrite user edits or restore only the patch while leaving changed package metadata.
+- **What persists after disable/uninstall:** memory rows, episodes, event rows and skill drafts remain unless explicitly purged (`/memory forget`, `/memory episode-purge`). A full snapshot restore can replace post-backup data: preserve the current generation separately under the approved restore procedure before replacing it. Logical revocation is not physical erasure of historical bytes.
 
 ## Limits to keep in mind while using it
 
 - **No measurement claim.** Nothing in this plugin proves it helped. Counts of offers, handoffs, injections or activations are not task success; the measurement gate is unmet by design (the harness exists, the run has not been done).
-- **Unverified pages.** The rendered-page battery was never run (the browser tooling in this environment answers `Target closed`), so keyboard-only operation, narrow layouts, light/dark, save-conflict and destructive-confirmation behaviour are unverified for the very pages you will use.
+- **Scoped browser evidence.** The actual isolated Chromium battery now passes keyboard focus/tab navigation, narrow layout, light/dark, save-conflict, unsaved-draft and destructive-confirmation checks; see [browser receipt](<MIGRATION-BROWSER-REPORT.json>). This is not full accessibility coverage or a test of your live profile.
 - **Best-effort redaction, not secret detection.** Do not rely on the plugin to keep credentials out of captured text.
 - **Project scope derives from the session's working directory.** Verify per project rather than assuming.

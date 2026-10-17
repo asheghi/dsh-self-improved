@@ -43,8 +43,13 @@ export class ContinuityWorkerV02 {
     private readonly llm: Pick<LlmRuntime, "stream">,
     private readonly route: { provider: string; model: string },
     private readonly consent: (scope: Readonly<{ sessionId: string; projectId: string }>) => boolean = () => false,
-    private readonly clock: () => number = Date.now) {
+    private readonly clock: () => number = Date.now,
+    private readonly admittedClaim: (claim: Readonly<ContinuityWorkClaim>) => boolean = () => false,
+    private readonly claimScope?: Readonly<{ sessionId: string; minimumCut: number }>) {
     if (!route.provider || !route.model || route.provider.length > 256 || route.model.length > 256) throw new Error("invalid continuity provider route");
+    // This coordinate is Host-owner authority, not source.kind authentication.
+    // Snapshot it so caller mutation cannot widen exported history mid-flight.
+    if (claimScope) this.claimScope = Object.freeze({ sessionId: claimScope.sessionId, minimumCut: claimScope.minimumCut });
     this.work = new ContinuityWorkV02(owner);
     this.handoffs = new ContinuityHandoffV02(owner, z);
     // Snapshot trusted route; never forward unknown caller properties/sessionId.
@@ -59,7 +64,7 @@ export class ContinuityWorkerV02 {
   private admitted(claim: ContinuityWorkClaim, signal: AbortSignal): boolean {
     if (this.disposed || signal.aborted) return false;
     const scope = Object.freeze({ sessionId: claim.sessionId, projectId: claim.projectId });
-    if (!this.consent(scope)) return false;
+    if (!this.consent(scope) || !this.admittedClaim(claim)) return false;
     return !this.disposed && !signal.aborted && this.work.isCurrent(claim, this.clock());
   }
   private excerpts(claim: ContinuityWorkClaim, observation: SessionObservation): Excerpt[] {
@@ -70,6 +75,9 @@ export class ContinuityWorkerV02 {
     for (let i = source.events.length - 1; i >= source.inheritedEventCount && remaining > 0 && out.length < 8; i--) {
       const event = source.events[i];
       if (event.type !== "user/message" || event.data.source?.kind !== "user" || event.surfaceOp !== "append") continue;
+      // Mounted authenticated lane transfers ONLY its exact admitted native
+      // human coordinate, never adjacent human-shaped automation/history.
+      if (!this.claimScope || claim.sessionId !== this.claimScope.sessionId || event.seq !== this.claimScope.minimumCut) continue;
       const raw = event.data.content.filter(block => block.type === "text").map(block => block.text).join("\n");
       // Conservative refusal rather than promoting obvious external paste or
       // quotation as a direct-human orientation excerpt. This heuristic cannot
@@ -83,7 +91,7 @@ export class ContinuityWorkerV02 {
     return out.reverse();
   }
   async runOne(projectId: string, signal?: AbortSignal): Promise<ContinuityWorkerResult> {
-    if (this.disposed || signal?.aborted) return "refused";
+    if (this.disposed || signal?.aborted || !this.claimScope) return "refused";
     if (this.active) return "busy";
     const control = new AbortController(); this.active = control;
     const abort = () => control.abort(); signal?.addEventListener("abort", abort, { once: true });
@@ -97,7 +105,7 @@ export class ContinuityWorkerV02 {
     // failure can be diagnosed from the host console without logging content.
     let stage = "claim";
     try {
-      claim = this.work.claim(projectId, this.clock(), LEASE_MS);
+      claim = this.work.claim(projectId, this.clock(), LEASE_MS, this.claimScope);
       if (!claim) return "idle";
       if (!this.admitted(claim, control.signal)) { control.abort(); return "refused"; }
       // Logical ID comes only from the trusted durable claim. Never invent a

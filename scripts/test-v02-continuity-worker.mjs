@@ -46,7 +46,7 @@ const db = store.getJournalSqlite(); let passes = 0, serial = 0;
 const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
 const check = async (name, fn) => { await fn(); passes++; console.log('PASS ' + name); };
 const user = (session, text, source = { kind: 'user' }) => session.append('user/message', createUserMessage({ source, content: [{ type: 'text', text }] }), { surfaceOp: 'append' });
-async function fixture(name, messages = ['Continue fixing the synthetic unfinished parser.']) {
+async function fixture(name, messages = ['Continue fixing the synthetic unfinished parser.'], authorizedSeq) {
   const session = ctx.sessions.create('worker-' + ++serial + '-' + name, { meta: { cwd: '/synthetic/worker/' + serial } });
   for (const message of messages) {
     if (typeof message === 'string') user(session, message);
@@ -63,8 +63,10 @@ async function fixture(name, messages = ['Continue fixing the synthetic unfinish
     const view = await transform(observation);
     return { ...view, [Symbol.dispose]() { drops++; observation[Symbol.dispose](); } };
   } };
+  const humanSeq = authorizedSeq ?? messages.findLastIndex(message => typeof message === 'string' || message.source.kind === 'user');
   const worker = new ContinuityWorkerV02(store, query, ctx.sessionProjections, z, ctx.llm,
-    { provider: 'synthetic-continuity', model: 'fixture' }, () => consent, () => now);
+    { provider: 'synthetic-continuity', model: 'fixture' }, () => consent, () => now,
+    claim => claim.sessionId === session.id && claim.cut >= humanSeq, { sessionId: session.id, minimumCut: humanSeq });
   return { session, project, job: job.id, worker, get observes() { return observes; }, get drops() { return drops; },
     set consent(value) { consent = value; }, set now(value) { now = value; }, set transform(value) { transform = value; } };
 }
@@ -76,6 +78,20 @@ const valid = async function*(options) { yield { type: 'text-delta', index: 0, t
 const status = f => work.readStatus(f.project, f.job)?.status;
 const absent = f => { assert.equal(handoffs.read(f.project, f.job), null); assert.notEqual(status(f), 'completed'); };
 try {
+  await check('missing authenticated coordinate refuses before claim/source/provider despite permissive callbacks', async () => {
+    const f = await fixture('unscoped'); const before = requests.length;
+    const unscoped = new ContinuityWorkerV02(store, { observeSession() { throw new Error('must not observe'); } },
+      ctx.sessionProjections, z, ctx.llm, { provider: 'synthetic-continuity', model: 'fixture' }, () => true, () => 1000, () => true);
+    assert.equal(await unscoped.runOne(f.project), 'refused'); assert.equal(requests.length, before);
+    assert.equal(status(f), undefined); unscoped.dispose(); f.worker.dispose();
+  });
+  await check('only exact authenticated coordinate exports; adjacent user-shaped history before and after omitted', async () => {
+    const f = await fixture('exact-coordinate', ['UNAUTHENTICATED-BEFORE', 'Authorized unfinished parser request', 'UNAUTHENTICATED-AFTER'], 1);
+    handler = valid; assert.equal(await f.worker.runOne(f.project), 'completed');
+    const body = requests.at(-1).messages[0].content[0].text;
+    assert.deepEqual(JSON.parse(body).excerpts, [{ seq: 1, text: 'Authorized unfinished parser request' }]);
+    assert.ok(!body.includes('UNAUTHENTICATED')); f.worker.dispose();
+  });
   await check('default body/provider consent refuses BEFORE native source/provider and never acknowledges', async () => {
     const f = await fixture('deny'); f.consent = false; const before = requests.length; handler = valid;
     assert.equal(await f.worker.runOne(f.project), 'refused'); assert.equal(f.observes, 0); assert.equal(requests.length, before); absent(f); f.worker.dispose();

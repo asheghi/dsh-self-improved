@@ -1,11 +1,11 @@
 {
-  "suiteId": "package-2026-10-12T17:55:19.318Z-2167",
-  "timestamp": "2026-10-12T17:55:43.310Z",
+  "suiteId": "package-2026-10-15T12:54:53.396Z-28",
+  "timestamp": "2026-10-15T12:55:14.081Z",
   "node": "v24.13.1",
   "peerMode": "coordinator-test-site-default",
   "peerRoot": "/home/bahman/github/dsh-v0.2/node_modules/@deepseek-ai",
   "harness": "offline symlink links to the exactly rc.2 peer tree; npm pack ran with real scripts; NO registry install, NO dependency patch, NO profile changes",
-  "srcStateAtRun": "clean",
+  "srcStateAtRun": "dirty: src/business.ts, src/continuity-host-auth-v02.ts, src/continuity-owner-v02.ts, src/continuity-runtime-v03.ts, src/continuity-work-v02.ts, src/continuity-worker-v02.ts, src/index.ts",
   "srcStateNote": "the strict build behind C5/C6 compiled the src state above (build attribution is that state, not one named lane)",
   "strictPass": 59,
   "strictFail": 0

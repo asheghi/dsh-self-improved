@@ -127,6 +127,15 @@ result: **STRICT 54 PASS / 0 FAIL** (node v24.13.1, npm 11.8.0).
   after each wrapper run (parent-leak fix proven), repo root gains no stray
   tarball, and the suite's own unique temp root is fully removed (fs at exit).
 
+## Finalization harness machine-site references
+
+The C6 inventory additionally includes `scripts/run-v02-auth-runtime-candidate.mjs` and `scripts/start-learned-procedure-host.mjs`:
+
+- The auth candidate runner contains the existing mounted fixture's exact installed-runtime declaration as a **checked source-replacement anchor**. It does not launch that installation: `DSH_AUTH_CANDIDATE_RUNTIME` must resolve to an ownership-marked workspace copy, and that explicit candidate replaces the anchor before execution.
+- The real-learning bootstrap retains the coordinator installation as its explicit read-only package source default. `DSI_EVALUATION_RUNTIME` selects an ownership-scoped workspace candidate instead; current evaluation uses that candidate. This is isolated migration tooling, not a portable consumer runtime default or a claim that the local site exists on other machines.
+
+These references are inventoried intentionally; no absolute coordinator path is permitted in the plugin's runtime/source/client/manifest/patch payload by C6. New script references still require individual documentation and review. The first finalization packaging run reported these missing inventory entries as a failure; it is not retroactively relabelled a pass.
+
 ## Honest limitations
 
 - No `npm install … @registry` was performed (offline mandate). Downstream

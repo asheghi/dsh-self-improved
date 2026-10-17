@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /** Reproducible isolated regression gate; NOT deployment/browser/authorization acceptance. */
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { isAbsolute, join } from 'node:path';
 
@@ -13,6 +13,8 @@ if (!runtime || !isAbsolute(runtime) || !existsSync(join(runtime, 'node_modules'
 }
 const groups = {
   increments: ['test-v02-continuity-runtime-v03', 'test-v02-continuity-sessions-v03', 'test-v02-continuity-provider-worker-v03', 'test-episode-evaluation'],
+  learningHarness: ['test-learned-procedure-executor', 'test-learned-procedure-authorization', 'test-learned-procedure-sandbox', 'test-learned-procedure-measurement', 'test-learned-procedure-go', 'test-learned-procedure-effects'],
+  authCore: ['test-v02-auth-restoration-candidate', 'test-v02-auth-receipt-core-candidate', 'test-v02-auth-lifecycle', 'test-v02-auth-core-cutover-safety'],
   memory: ['test-phase-a', 'test-v02-recall-ledger', 'test-storage', 'test-redact', 'test-episodes', 'test-episode-review', 'test-episode-rollout', 'test-extract', 'test-recall', 'test-evolve', 'test-commands', 'test-hermes', 'test-audit-skills', 'test-settings-ui', 'test-user-edit-preservation'],
   import: ['test-v02-import-lane', 'test-v02-import-audit', 'test-v02-import-gates', 'test-v02-import-seam', 'test-migration-v02', 'test-v02-policy-lane', 'test-v02-fact-policy', 'test-v02-minimization', 'test-v02-revocation'],
   packaging: ['test-v02-package', 'test-v02-typecheck-modes', 'test-v02-remote-cancellation', 'test-v02-client-smoke'],
@@ -31,8 +33,12 @@ const gates = [ ['build', ['scripts/typecheck-v02.mjs', '--emit-lib']], ...selec
 for (const [, argv] of gates) if (!existsSync(join(root, argv[0]))) {
   console.error(`Required gate does not exist: ${argv[0]}`); process.exit(2);
 }
-const reportDir = join(root, 'fixtures', 'migration-acceptance');
-mkdirSync(reportDir, { recursive: true });
+const reportBase = join(root, 'fixtures', 'migration-acceptance');
+mkdirSync(reportBase, { recursive: true });
+// Never overwrite a prior group's result: separate runs are evidence, not retries
+// that may silently erase an earlier failure or a different gate selection.
+const reportDir = mkdtempSync(join(reportBase, 'run-'));
+console.log(`Acceptance evidence: ${reportDir}`);
 const startedAt = new Date().toISOString();
 const results = [];
 for (const [name, argv] of gates) {

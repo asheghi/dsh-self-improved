@@ -58,6 +58,7 @@
  *   -based invalidation of pending model work) is Phase B/Phase D work.
  */
 import { randomBytes } from "node:crypto";
+import { authenticatedContinuityInvocation } from "./continuity-host-auth-v02.js";
 import type { Context } from "@deepseek-ai/cordis";
 import { Remote, RemoteError, TypertRemoteService } from "@deepseek-ai/dsh-typert-protocol";
 import {
@@ -729,19 +730,24 @@ export class MemoryBusinessService extends TypertRemoteService {
     return { peerId: remotePeerId(this.ctx), source: "remote" };
   }
 
+  private continuityCaller(): BusinessCaller {
+    if (!authenticatedContinuityInvocation(this.ctx)) throw rejected("Host-authenticated request admission required for continuity");
+    return this.caller();
+  }
+
   @Remote
   async continuityStatus(targetSessionId: string, signal?: AbortSignal): Promise<ContinuityUiInventory> {
-    return this.business.continuityStatus(this.caller(), targetSessionId, signal);
+    return this.business.continuityStatus(this.continuityCaller(), targetSessionId, signal);
   }
 
   @Remote
   async prepareContinue(targetSessionId: string, jobId: string, signal?: AbortSignal): Promise<{ op: string; token: string; ttlMs: number }> {
-    return this.business.prepareContinue(this.caller(), targetSessionId, jobId, signal);
+    return this.business.prepareContinue(this.continuityCaller(), targetSessionId, jobId, signal);
   }
 
   @Remote
   async continueSession(targetSessionId: string, jobId: string, authorization: MutationAuthorization, signal?: AbortSignal): Promise<ContinuityUiOfferNotes | null> {
-    return this.business.continueSession(this.caller(), targetSessionId, jobId, authorization, signal);
+    return this.business.continueSession(this.continuityCaller(), targetSessionId, jobId, authorization, signal);
   }
 
   @Remote

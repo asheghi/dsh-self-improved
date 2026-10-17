@@ -1,0 +1,9 @@
+{
+  "actualBrowser": true,
+  "status": "available; final mounted battery passed",
+  "engine": "/usr/bin/chromium headless via Node global WebSocket CDP",
+  "priorStartupFailure": "Chromium process_singleton_posix Socket path too long when TMPDIR was the long fixture path",
+  "resolution": "Use short workspace-local .bt-XXXXXX TMPDIR; ownership-guarded cleanup after process exit",
+  "externalRuntimeWrites": false,
+  "liveGuiTouched": false
+}

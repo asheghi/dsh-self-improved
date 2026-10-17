@@ -15,3 +15,8 @@ docs/
 .tmp-*/
 # Generated per-run fixture homes/DBs/native caches
 fixtures/**/temp/
+# Isolated browser profiles and real-provider homes may contain auth state.
+.bt-*/
+.pe-*/
+fixtures/v02-ui/browser-probe/
+fixtures/skill-measurement/real-host/

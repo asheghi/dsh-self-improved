@@ -56,6 +56,7 @@ import type { BrowserChannel } from "./commands.js";
 import { createContinuityRegistrationController, loadContinuitySchema, CONTINUITY_PROJECTION_KEY } from "./continuity-registry-v02.js";
 import { ContinuityStoreV02, fenceExistingContinuity } from "./continuity-store-v02.js";
 import { mountContinuityRuntime } from "./continuity-runtime-v02.js";
+import { mountContinuityHostAuthV02, continuityHostAuthAvailable } from "./continuity-host-auth-v02.js";
 import { ContinuityWorkerV02 } from "./continuity-worker-v02.js";
 import { ContinuityHandoffV02 } from "./continuity-handoff-v02.js";
 import { LearnedSkillActivator } from "./skill-activation.js";
@@ -598,6 +599,12 @@ export function apply(ctx: Context, rawConfig: RuntimeConfig): void {
   let stopContinuityWorker: () => void = () => {};
   let summaryPolicyHealthy = true;
   let summaryPolicyGeneration = -1;
+  // Separate process-local authenticated boundary epoch: structural-only
+  // continuity does not depend on the absent/off durable summary ledger.
+  // Every relevant consent/privacy/master change invalidates old receipts;
+  // restart drops all authority and requires a new authenticated prompt.
+  let continuityAuthEpoch = 0;
+  let continuityAuthFingerprint: string | undefined;
   let summaryPolicyFingerprint: string | undefined;
   /** Currently accepted background jobs (extraction pumps, reviews, evolution rounds). */
   const acceptedJobs = new Set<Promise<unknown>>();
@@ -763,6 +770,12 @@ export function apply(ctx: Context, rawConfig: RuntimeConfig): void {
       excludedSessionIds: config.continuity?.excludedSessionIds ?? [],
       excludedProjectIds: config.continuity?.excludedProjectIds ?? [],
     });
+    const authFingerprint = JSON.stringify({ capture: readModule("capture"), structural: config.continuity?.enabled === true,
+      summary: config.continuity?.summaryEnabled === true, summaryPolicy: fingerprint });
+    if (continuityAuthFingerprint !== authFingerprint) {
+      continuityAuthFingerprint = authFingerprint;
+      continuityAuthEpoch = continuityAuthEpoch < Number.MAX_SAFE_INTEGER && continuityAuthEpoch >= 0 ? continuityAuthEpoch + 1 : -1;
+    }
     if (summaryPolicyFingerprint === fingerprint && summaryPolicyHealthy) return;
     // Close accepted body ingress and propagate transport abort BEFORE storage
     // operations. A failed durable fence must never leave a provider running.
@@ -797,11 +810,14 @@ export function apply(ctx: Context, rawConfig: RuntimeConfig): void {
       }, "continuity registration policy owner");
       syncContinuityProjection = syncProjection;
       syncProjection();
-      child.inject(["sessionQuery"], (queryChild) => {
+      // The candidate Host verifier must exist before the first runtime sync.
+      // Mounting on sessionQuery alone can permanently sync(false) while the
+      // Connection service is still starting, even though later receipts verify.
+      child.inject(["sessionQuery", "connection"], (queryChild) => {
         if (disposed || shuttingDown || !continuityStorePolicyHealthy) return;
         try {
           const lane = new ContinuityStoreV02(store, schemaZod);
-          const continuityEnabled = (): boolean => continuityStorePolicyHealthy && readModule("capture") && config.continuity?.enabled === true;
+          const continuityEnabled = (): boolean => continuityHostAuthAvailable(queryChild) && continuityStorePolicyHealthy && readModule("capture") && config.continuity?.enabled === true;
           // Operator-door Continue reader. Built on the FIRST operator request
           // and only while the lane is enabled, so a disabled lane creates no
           // continuity tables and holds no handoff instance at all.
@@ -815,10 +831,15 @@ export function apply(ctx: Context, rawConfig: RuntimeConfig): void {
             return operatorHandoffs;
           };
           continuityHandoffReader = operatorHandoffReader;
-          const runtime = mountContinuityRuntime(queryChild, lane, queryChild.sessionProjections, schemaZod, queryChild.sessionQuery,
-            (session) => continuityEnabled() && !!session.header.cwd
+          const auth = mountContinuityHostAuthV02(queryChild, () => continuityAuthEpoch,
+            session => continuityEnabled() && !!session.header.cwd
               && !config.continuity?.excludedSessionIds.includes(session.id)
-              && !config.continuity?.excludedProjectIds.includes(opaqueProjectIdFromKey(projectKeyFromCwd(session.header.cwd))),
+              && !config.continuity?.excludedProjectIds.includes(opaqueProjectIdFromKey(projectKeyFromCwd(session.header.cwd))));
+          const runtime = mountContinuityRuntime(queryChild, lane, queryChild.sessionProjections, schemaZod, queryChild.sessionQuery,
+            (session) => {
+              const state = queryChild.sessionProjections.stateOf(session, CONTINUITY_PROJECTION_KEY);
+              return !!state && auth.has(session, state.lastHumanSeq, continuityAuthEpoch);
+            },
             (task) => { trackAcceptedJob(task); });
           const syncRuntime = (): void => {
             // Shutdown UNLOAD preserves durable progress. Privacy/settings
@@ -850,14 +871,15 @@ export function apply(ctx: Context, rawConfig: RuntimeConfig): void {
             // coordinate is necessary; mere model/tool boundary activity does
             // not repeatedly schedule provider work for an abandoned task.
             const state = queryChild.sessionProjections.stateOf(session, CONTINUITY_PROJECTION_KEY);
-            if (!state || state.lastHumanSeq < session.inheritedEventCount) return;
-            const route = currentSummaryRoute(), generation = summaryPolicyGeneration;
+            if (!state || state.lastHumanSeq < session.inheritedEventCount || !auth.has(session, state.lastHumanSeq, continuityAuthEpoch)) return;
+            const route = currentSummaryRoute(), generation = summaryPolicyGeneration, authEpoch = continuityAuthEpoch;
             if (!route || generation < 0) return;
             try { if (!claimHumanBoundary(session, projectId, state.lastHumanSeq, generation)) return; }
             catch { console.warn("[dsh-self-improved] continuity handoff human authority watermark refused"); return; }
             workerPending = true;
             const consent = (scope: Readonly<{ sessionId: string; projectId: string }>): boolean => {
-              if (workerDisposed || !summaryEnabled() || scope.projectId !== projectId || summaryPolicyGeneration !== generation
+              if (workerDisposed || !summaryEnabled() || scope.sessionId !== session.id || scope.projectId !== projectId || summaryPolicyGeneration !== generation
+                || !auth.has(session, state.lastHumanSeq, authEpoch)
                 || config.continuity?.excludedSessionIds.includes(scope.sessionId) || config.continuity?.excludedProjectIds.includes(scope.projectId)) return false;
               const current = currentSummaryRoute();
               if (!current || current.provider !== route.provider || current.model !== route.model) return false;
@@ -877,7 +899,9 @@ export function apply(ctx: Context, rawConfig: RuntimeConfig): void {
               await runtime.flush();
               if (!consent({ sessionId: session.id, projectId })) return;
               const worker = new ContinuityWorkerV02(store, queryChild.sessionQuery, queryChild.sessionProjections,
-                schemaZod, queryChild.llm, route, consent);
+                schemaZod, queryChild.llm, route, consent, Date.now,
+                  claim => claim.sessionId === session.id && claim.cut >= state.lastHumanSeq && auth.has(session, state.lastHumanSeq, authEpoch),
+                  { sessionId: session.id, minimumCut: state.lastHumanSeq });
               activeWorker = worker;
               try {
                 const result = await worker.runOne(projectId, shutdownDeadlineGate.signal);
@@ -890,7 +914,7 @@ export function apply(ctx: Context, rawConfig: RuntimeConfig): void {
             // Noncooperative work retains the SAME shared-store ownership.
             trackAcceptedJob(task);
           });
-          const stopRuntime = (): void => { runtime.dispose(); workerDisposed = true; removeWorkerBoundary(); stopWorker(); };
+          const stopRuntime = (): void => { runtime.dispose(); auth.dispose(); workerDisposed = true; removeWorkerBoundary(); stopWorker(); };
           queryChild.effect(() => () => {
             stopRuntime();
             if (continuityHandoffReader === operatorHandoffReader) continuityHandoffReader = null;
@@ -1483,7 +1507,7 @@ export function apply(ctx: Context, rawConfig: RuntimeConfig): void {
     // and the Continue action can never disagree about what is excluded.
     const continuityUiGates = {
       enabled: () => !shuttingDown && readModule("capture") && config.continuity?.enabled === true,
-      healthy: () => continuityStorePolicyHealthy,
+      healthy: () => continuityStorePolicyHealthy && continuityHostAuthAvailable(ctx),
       allows: (id: string, projectId?: string) => !(config.continuity?.excludedSessionIds ?? []).includes(id)
         && (projectId === undefined || !(config.continuity?.excludedProjectIds ?? []).includes(projectId)),
     };
@@ -1507,7 +1531,11 @@ export function apply(ctx: Context, rawConfig: RuntimeConfig): void {
           active: lane.list().slice(0, 50).map((entry) => ({ name: entry.name,
             evaluationVersion: entry.evaluationVersion, activatedAt: entry.activatedAt })) };
       },
-      continuityLane: () => readContinuityLaneStatus(store, {
+      continuityLane: () => !continuityHostAuthAvailable(ctx) ? {
+        structural: "unavailable", body: "off", route: currentSummaryRoute() !== null,
+        reason: "Authenticated Host prompt and request receipts are unavailable in this runtime. Continuity capture, summaries, and Continue are refused until the Host capability is installed and verified.",
+        pending: 0, failed: 0, handoffs: 0, lastCut: null,
+      } : readContinuityLaneStatus(store, {
         enabled: config.continuity?.enabled === true,
         bodyEnabled: summaryEnabled(),
         route: currentSummaryRoute() !== null,

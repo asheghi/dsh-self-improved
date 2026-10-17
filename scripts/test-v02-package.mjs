@@ -379,7 +379,7 @@ if (resolution === null) {
         // choice): ring test scripts default to the documented coordinator site
         // unless overridden, and validate-episode-rollout.mjs still carries the
         // undocumented legacy /home/bahman/github/dsh/node_modules default.
-        const documentedDefaults = new Set(["typecheck-v02.mjs", "test-v02-package.mjs", "test-v02-mounted-ui.mjs", "test-v02-policy-lane.mjs", "test-v02-remote-cancellation.mjs", "test-v02-runtime.mjs", "test-v02-settings.mjs", "test-v02-shutdown-safety.mjs"]);
+        const documentedDefaults = new Set(["typecheck-v02.mjs", "test-v02-package.mjs", "test-v02-mounted-ui.mjs", "test-v02-policy-lane.mjs", "test-v02-remote-cancellation.mjs", "test-v02-runtime.mjs", "test-v02-settings.mjs", "test-v02-shutdown-safety.mjs", "run-v02-auth-runtime-candidate.mjs", "start-learned-procedure-host.mjs"]);
         const undocumented = scriptsWithSite.filter((f) => !documentedDefaults.has(f));
         // Audit exact documented inventory, not a stale arbitrary file-count
         // allowance. New test scripts must not add hidden machine defaults.

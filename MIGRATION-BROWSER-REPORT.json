@@ -1,0 +1,70 @@
+{
+  "actualBrowser": true,
+  "fixtureRun": "mounted-ui-1792056783016-839280",
+  "build": "f350b0b83a3acb7f7bd8e5a2d8833f25be9bc83c7acc64ec98765850fe05e813",
+  "client": "6095d1b9f35df8ed64c33ee4b57b15e4e2fecc443f8e1cbda0dc0301cd925e41",
+  "results": [
+    {
+      "name": "mounted settings and seeded memory",
+      "ok": true,
+      "detail": "Real gateway fixture and rendered plugin tabs"
+    },
+    {
+      "name": "keyboard tab focus-visible and tab arrow navigation",
+      "ok": true,
+      "detail": {
+        "outline": "rgb(122, 170, 255) auto 2px",
+        "tag": "INPUT"
+      }
+    },
+    {
+      "name": "unsaved draft survives navigation",
+      "ok": true,
+      "detail": "Dirty value 9 retained across tabs"
+    },
+    {
+      "name": "stale settings conflict and rebase",
+      "ok": true,
+      "detail": "Second real page saved maxResults=3; first page preserved 9 and rebased/saved"
+    },
+    {
+      "name": "narrow viewport no plugin horizontal overflow",
+      "ok": true,
+      "detail": {
+        "width": 101,
+        "scrollWidth": 101,
+        "clientWidth": 101,
+        "left": 236,
+        "right": 337,
+        "viewport": 390
+      }
+    },
+    {
+      "name": "light and dark rendered token colors",
+      "ok": true,
+      "detail": {
+        "Light": {
+          "foreground": "rgb(97, 102, 107)",
+          "background": "rgb(255, 255, 255)"
+        },
+        "Dark": {
+          "foreground": "rgb(207, 211, 214)",
+          "background": "rgb(21, 21, 23)"
+        }
+      }
+    },
+    {
+      "name": "destructive confirmation cancel and accept",
+      "ok": true,
+      "detail": "Native confirm cancellation retained row; acceptance removed it"
+    },
+    {
+      "name": "durable browser effects and zero model requests",
+      "ok": true,
+      "detail": "Settings override and logical forget persisted; zero model requests"
+    }
+  ],
+  "passed": 8,
+  "failed": 0,
+  "createdTargetsClosed": 2
+}

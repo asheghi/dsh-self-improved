@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 // Actual rc.2 Loader main plugin, real native observation + SQLite, ONLY synthetic adapter.
+// Explicit isolated admission stub below exercises lifecycle/policy, NOT genuine
+// Host HTTP authorization. Genuine ingress is tested by the separate core-candidate suite.
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { mkdtempSync, mkdirSync, cpSync, symlinkSync, readFileSync } from 'node:fs';
@@ -29,6 +31,17 @@ const { SessionProjectionRegistry } = await native('dsh-session-projection');
 const { LlmRuntime, LlmAdapter, createUserMessage } = await native('dsh-llm');
 const { MemoryStore } = await import(pathToFileURL(join(pkg, 'lib/storage.js')).href);
 const root = new Context(), fibers = [];
+// Test-owned synthetic admission only. Production default-deny is unchanged.
+// Genuine-object, finalized-only, one-use semantics avoid turning arbitrary
+// user-shaped history into admitted excerpts inside these lifecycle fixtures.
+const fixtureReceipts = new WeakMap(); let fixturePrompt = 0;
+root.provide('connection', {
+  consumeFinalizedPromptReceipt(receipt) {
+    if (fixtureReceipts.get(receipt) !== 'finalized') return undefined;
+    fixtureReceipts.delete(receipt); return receipt;
+  },
+  readAuthenticatedInvocationAdmission() { return undefined; },
+});
 if (!settingsRouteUpdate) root.provide('settings', { configure: () => () => {} });
 root.provide('systemPrompt', { section: () => {} });
 root.provide('tools', { register: () => () => {} }); root.provide('commands', { register: () => () => {} });
@@ -103,7 +116,15 @@ const childReady = missingCapability ? Promise.resolve({ await: async () => {} }
 });
 const check = async (name, fn) => { await fn(); passes++; console.log('PASS ' + name); };
 const newSession = name => root.sessions.create('main-worker-' + ++serial + '-' + name, { meta: { cwd: '/synthetic/main-worker/' + serial } });
-const user = (s, text = 'Continue the unfinished synthetic parser.') => s.append('user/message', createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text }] }), { surfaceOp: 'append' });
+const user = (s, text = 'Continue the unfinished synthetic parser.') => {
+  const requestId = `synthetic-isolated-admission-${++fixturePrompt}`;
+  const message = createUserMessage({ source: { kind: 'user', rpcId: requestId }, content: [{ type: 'text', text }] });
+  const receipt = Object.freeze({ sessionId: s.id, messageId: message.id, requestId });
+  fixtureReceipts.set(receipt, 'provisional'); root.emit('session/prompt-admission', { phase: 'provisional', receipt });
+  const event = s.append('user/message', message, { surfaceOp: 'append' });
+  fixtureReceipts.set(receipt, 'finalized'); root.emit('session/prompt-admission', { phase: 'finalized', receipt });
+  return event;
+};
 const update = async patch => { const next = structuredClone(config); patch(next); await entry.update({ config: next }); await loader.await(); Object.assign(config, next); };
 const boundary = s => s.append('turn/end', { turn: 1, reason: { kind: 'interrupted' } });
 const waitDrops = (s, extra) => {
@@ -184,6 +205,9 @@ try {
     });
   } else {
   await update(next => { next.continuity.summaryEnabled = true; }); handler = successful;
+  // A settings epoch change invalidates prior admission; explicitly admit a
+  // fresh fixture prompt rather than treating saved history as authority.
+  user(structural);
   await check('separate explicit body consent runs ONE pass after durable owner capture, exact partial handoff no session binding', async () => {
     const settled = waitDrops(structural, 2); boundary(structural); await settled(); assert.equal(providerCalls, 1); assert.equal(completedFor(structural), 1); assert.equal(handoffsFor(structural), 1);
     assert.equal(pendingFor(structural), 2, 'bounded pass does NOT drain all references');
@@ -233,7 +257,10 @@ try {
       await loader.create({ id: 'self-improved', name: './index.js', config }); entryRemoved = false; await loader.await(); await (await nextChild).await(); entry = loader.resolve('self-improved');
       assert.equal(providerCalls, 130, 'main reconstruction itself never drives provider');
       assert.deepEqual(db.prepare('SELECT * FROM continuity_summary_human WHERE session_id=?').get(structural.id), before);
-      const unchanged = waitDrops(structural, 1); boundary(structural); await unchanged(); assert.equal(providerCalls, 130, 'map/process-local lifecycle reset cannot regain old authority');
+      const priorObservations = observed.get(structural.id) ?? 0; boundary(structural);
+      for (let turn = 0; turn < 4; turn++) await new Promise(resolve => setImmediate(resolve));
+      assert.equal(observed.get(structural.id) ?? 0, priorObservations, 'restart requires fresh admission even for structural source reads');
+      assert.equal(providerCalls, 130, 'map/process-local lifecycle reset cannot regain old authority');
       user(structural, 'Another new own human instruction after reconstruction.'); const fresh = waitDrops(structural, 2); boundary(structural); await fresh(); assert.equal(providerCalls, 131);
       const repeat = waitDrops(structural, 1); boundary(structural); await repeat(); assert.equal(providerCalls, 131);
       loader.remove('self-improved'); entryRemoved = true; await closeDone.promise; assert.equal(closed, true);
@@ -299,7 +326,7 @@ try {
   }
   }
   for (const [id, n] of observed) assert.equal(dropped.get(id), n, 'every acquired native lease disposed exactly once');
-  console.log(`${passes} PASS / 0 FAIL; actual Loader/native observations/SQLite; ONLY registered synthetic adapter; fixture=${dir}`);
+  console.log(`${passes} PASS / 0 FAIL; actual Loader/native observations/SQLite; synthetic adapter AND explicit isolated admission stub; NOT authenticated Host ingress evidence; fixture=${dir}`);
 } finally {
   if (!entryRemoved && loader?.resolve('self-improved')) { loader.remove('self-improved'); await loader.await(); }
   db?.close(); MemoryStore.prototype.close = originalClose; registration(); await loaderFiber.dispose(); for (const fiber of fibers.reverse()) await fiber.dispose();

@@ -1,0 +1,23 @@
+// Real Cordis delayed dependency regression; not whole-main acceptance.
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
+import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
+assert(process.env.DSH_RUNTIME_RC2, 'explicit exact runtime required');
+const require = createRequire(resolve(process.env.DSH_RUNTIME_RC2, 'package.json'));
+const { Context } = await import(pathToFileURL(require.resolve('@deepseek-ai/cordis')));
+const source = await readFile('src/index.ts', 'utf8');
+const match = source.match(/child\.inject\((\[[^\n]+\]), \(queryChild\) => \{/);
+assert(match, 'main continuity dependency declaration');
+const dependencies = JSON.parse(match[1]);
+assert.deepEqual(dependencies, ['sessionQuery', 'connection']);
+const ctx = new Context(); let mounts = 0, disposed = 0;
+const mount = ctx.inject(dependencies, child => { mounts++; assert(child.get('connection')); child.effect(() => () => disposed++); });
+const query = ctx.plugin(child => child.provide('sessionQuery', {})); await query.await();
+await new Promise(resolve => setImmediate(resolve)); assert.equal(mounts, 0, 'query alone must not freeze runtime disabled');
+const connection = ctx.plugin(child => child.provide('connection', {})); await connection.await(); await mount.await();
+assert.equal(mounts, 1, 'late Connection wakes dependent runtime');
+await connection.dispose(); await new Promise(resolve => setImmediate(resolve)); assert.equal(disposed, 1, 'Connection unload disposes dependent authority');
+await query.dispose(); await mount.dispose();
+console.log('PASS actual Cordis delayed Connection mount/unload lifecycle using main declared dependencies; no authority bypass or synthetic receipts.');

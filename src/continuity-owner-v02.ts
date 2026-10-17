@@ -3,7 +3,7 @@ import type { SessionQueryEngine } from "@deepseek-ai/dsh-session-query";
 import type { SessionProjectionRegistry } from "@deepseek-ai/dsh-session-projection";
 import type * as Zod from "zod";
 import { ContinuityStoreV02, type ContinuityTrigger } from "./continuity-store-v02.js";
-import { bindContinuityCheckpoint, recoverContinuityCheckpoint } from "./continuity-checkpoint-v02.js";
+import { bindContinuityCheckpoint, recoverContinuityCheckpoint, continuityCanonicalDigest, continuityCanonicalHeader } from "./continuity-checkpoint-v02.js";
 import { CONTINUITY_PROJECTION_KEY } from "./continuity-registry-v02.js";
 import { opaqueProjectIdFromKey, projectKeyFromCwd, isDelegatedHeader } from "./capture.js";
 
@@ -34,7 +34,7 @@ export class ContinuityOwnerV02 {
     try {
       if (this.disposed) return null;
       // An async observation must belong to EXACT original native ownership.
-      if (JSON.stringify(observation.header) !== JSON.stringify(session.header)
+      if (continuityCanonicalDigest(continuityCanonicalHeader(observation.header)) !== continuityCanonicalDigest(continuityCanonicalHeader(session.header))
         || observation.inheritedEventCount !== session.inheritedEventCount) throw new Error("continuity observation ownership mismatch");
       if (!this.admitted(session) || isDelegatedHeader(observation.header)) {
         this.lane.ensurePolicy(session.id, projectId, false);

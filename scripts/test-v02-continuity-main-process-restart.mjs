@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Actual main plugin + native Session services across two private OS processes.
-// This is lifecycle/persistence evidence only; the human event is synthetic.
+// Lifecycle/persistence evidence only; explicit synthetic admission below is
+// NOT genuine Host HTTP authentication. Production default-deny is unchanged.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
@@ -40,7 +41,7 @@ if (!mode) {
   const seedPid = run('seed');
   const verifyPid = run('verify');
   assert.notEqual(seedPid, verifyPid); assert.notEqual(seedPid, process.pid); assert.notEqual(verifyPid, process.pid);
-  console.log(`PASS actual main-plugin structural state survives distinct OS processes (${seedPid}, ${verifyPid}); fixture=${root}`);
+  console.log(`PASS actual main-plugin structural state survives distinct OS processes (${seedPid}, ${verifyPid}); explicit synthetic admission only, NOT Host-authenticated ingress evidence; fixture=${root}`);
 } else {
   assert.ok(['seed', 'verify'].includes(mode));
   const absoluteFixture = resolve(fixture);
@@ -61,6 +62,26 @@ if (!mode) {
   const { MemoryStore } = await own('storage');
 
   const context = new Context(), fibers = [];
+  // Deliberately isolated test admission, never a production verifier. Authority
+  // is genuine-object/finalized/one-use and intentionally lost across processes.
+  const fixtureReceipts = new WeakMap();
+  const fixtureConnection = {
+    consumeFinalizedPromptReceipt(receipt) {
+      if (fixtureReceipts.get(receipt) !== 'finalized') return undefined;
+      fixtureReceipts.delete(receipt); return receipt;
+    },
+    readAuthenticatedInvocationAdmission() { return undefined; },
+  };
+  context.provide('connection', fixtureConnection);
+  const admitFixturePrompt = (session, text) => {
+    const requestId = 'synthetic-main-process-restart-admission';
+    const message = createUserMessage({ source: { kind: 'user', rpcId: requestId }, content: [{ type: 'text', text }] });
+    const receipt = Object.freeze({ sessionId: session.id, messageId: message.id, requestId });
+    fixtureReceipts.set(receipt, 'provisional'); context.emit('session/prompt-admission', { phase: 'provisional', receipt });
+    session.append('user/message', message, { surfaceOp: 'append' });
+    fixtureReceipts.set(receipt, 'finalized'); context.emit('session/prompt-admission', { phase: 'finalized', receipt });
+    return receipt;
+  };
   context.provide('settings', { configure: () => () => {} });
   context.provide('systemPrompt', { section: () => {} });
   context.provide('tools', { register: () => () => {} });
@@ -148,17 +169,24 @@ if (!mode) {
     if (mode === 'seed') {
       await loadMainPlugin(); db = new DatabaseSync(join(storageRoot, 'memory.db'), { readOnly: true });
       const session = context.sessions.create(sessionId, { meta: { cwd: '/synthetic/main-process-restart' } });
-      session.append('user/message', createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'Fixture-only unfinished task across a process restart.' }] }), { surfaceOp: 'append' });
+      // A plain user-shaped append cannot authenticate this fixture session.
+      session.append('user/message', createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'Unauthenticated fixture history.' }] }), { surfaceOp: 'append' });
       session.append('turn/start', { turn: 1 });
-      const settled = waitDrops(sessionId, 1);
       session.append('turn/end', { turn: 1, reason: { kind: 'interrupted' } });
+      for (let turn = 0; turn < 4; turn++) await new Promise(resolvePromise => setImmediate(resolvePromise));
+      check('user-shaped append without explicit fixture admission performs zero source reads/jobs',
+        (attempted.get(sessionId) ?? 0) === 0 && pendingFor(sessionId) === 0);
+      const receipt = admitFixturePrompt(session, 'Fixture-only unfinished task across a process restart.');
+      session.append('turn/start', { turn: 2 });
+      const settled = waitDrops(sessionId, 1);
+      session.append('turn/end', { turn: 2, reason: { kind: 'interrupted' } });
       await settled();
       await mount(JsonlPersistence, { root: nativeRoot, compression: 'none' });
       const native = await persistNative(sessionId);
       const policy = policyFor(sessionId), checkpoint = checkpointFor(sessionId), job = jobFor(sessionId);
       check('actual main plugin captures one structural checkpoint/job with summary off', !!policy && policy.allowed === 1 && !!checkpoint && job?.status === 'pending' && pendingFor(sessionId) === 1);
       check('private native JSONL source flushes and provider tripwire stays unused', native.events.length >= 2 && providerCalls === 0 && !hasTable('continuity_summary_policy'));
-      writeFileSync(join(absoluteFixture, 'main-seed.json'), JSON.stringify({ sessionId, native, policy, checkpoint, job }));
+      writeFileSync(join(absoluteFixture, 'main-seed.json'), JSON.stringify({ sessionId, native, policy, checkpoint, job, receipt }));
       db.close(); db = undefined;
     } else {
       const saved = JSON.parse(readFileSync(join(absoluteFixture, 'main-seed.json'), 'utf8'));
@@ -176,6 +204,13 @@ if (!mode) {
       await loadMainPlugin(); db = new DatabaseSync(join(storageRoot, 'memory.db'), { readOnly: true });
       check('main plugin boot does not scan/re-capture a cold session without a live event',
         (observed.get(sessionId) ?? 0) === readsBeforePluginBoot);
+      check('serialized prior-process admission proof cannot authenticate after restart',
+        fixtureConnection.consumeFinalizedPromptReceipt(saved.receipt) === undefined
+        && fixtureConnection.readAuthenticatedInvocationAdmission(saved.receipt) === undefined);
+      context.emit('session/prompt-admission', { phase: 'provisional', receipt: saved.receipt });
+      context.emit('session/prompt-admission', { phase: 'finalized', receipt: saved.receipt });
+      for (let turn = 0; turn < 4; turn++) await new Promise(resolvePromise => setImmediate(resolvePromise));
+      check('replayed serialized proof never observes or re-captures cold source', (observed.get(sessionId) ?? 0) === readsBeforePluginBoot);
       const policy = policyFor(sessionId), checkpoint = checkpointFor(sessionId), job = jobFor(sessionId);
       check('main-plugin process restart preserves exact structural policy/checkpoint/pending job',
         JSON.stringify(policy) === JSON.stringify(saved.policy)

@@ -1,0 +1,26 @@
+{
+  "version": "configured-provider-route-v1",
+  "discoveredFrom": "authenticated read-only settings/describe and session/modelCatalog on current Host",
+  "provider": "go-opencode",
+  "model": "glm-5.3-flash",
+  "reasoningEffort": "high",
+  "profile": {
+    "apiKeyEnv": "GO_OPENCODE_API_KEY",
+    "api": "openai-completions",
+    "baseURL": "https://opencode.ai/zen/go/v1",
+    "models": [{
+      "id": "glm-5.3-flash",
+      "name": "GLM-5.3-Flash",
+      "contextWindow": 1000000,
+      "maxTokens": 131072,
+      "input": ["text", "image"],
+      "reasoningEfforts": {"low": "low", "high": "high", "max": "max"},
+      "compat": {"chatTemplateKwargs": {}, "chatTemplateArgs": {}}
+    }],
+    "compat": {"chatTemplateKwargs": {}, "chatTemplateArgs": {}},
+    "defaultContextWindow": 262144,
+    "defaultMaxTokens": 32768,
+    "reasoning": "high",
+    "retryPolicy": {"mode": "normal", "maxRetries": 0}
+  }
+}

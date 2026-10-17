@@ -37,8 +37,11 @@ export class ContinuityWorkV02 {
     this.db = store.getJournalSqlite();
     store.runInImmediateTransaction(() => this.db.exec(CONTINUITY_WORK_V02_DDL));
   }
-  claim(projectId: string, now: number, ttl: number): ContinuityWorkClaim | null {
+  claim(projectId: string, now: number, ttl: number, scope?: Readonly<{ sessionId: string; minimumCut: number }>): ContinuityWorkClaim | null {
     project(projectId); time(now);
+    const sessionId = scope?.sessionId ?? null, minimumCut = scope?.minimumCut ?? -1;
+    if (scope && (typeof sessionId !== "string" || !sessionId || sessionId.length > 256 || sessionId.includes("\0")
+      || !Number.isSafeInteger(minimumCut) || minimumCut < 0)) throw new Error("invalid authenticated continuity claim scope");
     if (!Number.isSafeInteger(ttl) || ttl < 1 || ttl > 60000 || !Number.isSafeInteger(now + ttl)) throw new Error("invalid continuity lease");
     return this.store.runInImmediateTransaction(() => {
       // Bound expiry cleanup per acquisition so old backlog cannot monopolize
@@ -47,8 +50,9 @@ export class ContinuityWorkV02 {
         const row = this.db.prepare(`SELECT j.id,j.session_id,j.project_id,j.generation,j.cut,j.source_hash,j.trigger,w.attempts
           FROM continuity_jobs j ${eligible} LEFT JOIN continuity_work w ON w.job_id=j.id
           WHERE j.project_id=? AND j.status='pending'
+            AND (? IS NULL OR (j.session_id=? AND j.cut>=?))
             AND (w.job_id IS NULL OR (w.status='running' AND w.lease_deadline<=?))
-          ORDER BY j.cut,j.id LIMIT 1`).get(projectId, now) as Row | undefined;
+          ORDER BY j.cut,j.id LIMIT 1`).get(projectId, sessionId, sessionId, minimumCut, now) as Row | undefined;
         if (!row) return null;
         if (row.attempts === 3) {
           this.db.prepare("UPDATE continuity_work SET status='failed' WHERE job_id=? AND status='running' AND lease_deadline<=?").run(row.id, now);

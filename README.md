@@ -127,22 +127,13 @@ With `episodeLearning.enabled`, the plugin records tool calls and results per se
 
 ## Installation
 
-```bash
-dsh plugin --profile web add github:asheghi/dsh-self-improved
-```
+**Live migration remains gated.** The private candidate's scoped unary authentication/continuity and browser checks pass, but real learned-procedure evaluation and approved runtime/profile cutover are not complete. No installed runtime or production profile has been migrated by this work. Follow the [reversible live-enablement runbook](./MIGRATION-LIVE-ENABLEMENT.md) and [current execution checkpoint](./MIGRATION-FINALIZATION.md), including coherent verified backups and exact approvals, rather than installing directly from this section.
 
-Restart dsh after installing. The npm/marketplace name `dsh-self-improved` resolves to a different project, not this one.
+The npm/marketplace name `dsh-self-improved` resolves to a different project, not this one. Install pitfalls (pnpm store and build prep, peerDependencies double instance, duplicate loader entry id): [TROUBLESHOOTING.md](./TROUBLESHOOTING.md).
 
-Install pitfalls (pnpm store and build prep, peerDependencies double instance, duplicate loader entry id): [TROUBLESHOOTING.md](./TROUBLESHOOTING.md).
+### Local development
 
-### Local development (file: link)
-
-```bash
-# build, then copy lib/ + client.js + package.json into
-# $DSH_HOME/profiles/web/node_modules/dsh-self-improved/
-# add "dsh-self-improved": "file:node_modules/dsh-self-improved" to package.json dependencies
-# add the cordis.patch.yml insert (see TROUBLESHOOTING.md), then restart
-```
+Build and verify this workspace, then use the supported plugin manager's `install_bundle` with the absolute local package directory only after the deployment gates and required approval. Inspect `application` and `warnings` and verify the actual mounted registration. Do not manually copy artifacts into the live profile, edit its package/composition metadata, or run a package manager inside it. Installation and restart behavior are determined by the manager's result, not assumed.
 
 ### Build and install portability contract
 

@@ -1,0 +1,66 @@
+{
+  "startedAt": "2026-10-15T12:55:43.127Z",
+  "runtime": "/home/bahman/github/dsh-v0.2",
+  "selected": [
+    "skills"
+  ],
+  "scope": "isolated-regression-only",
+  "results": [
+    {
+      "name": "build",
+      "argv": [
+        "scripts/typecheck-v02.mjs",
+        "--emit-lib"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 3687
+    },
+    {
+      "name": "skills/test-v02-skill-activation",
+      "argv": [
+        "scripts/test-v02-skill-activation.mjs"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 84
+    },
+    {
+      "name": "skills/test-v02-skill-experiment",
+      "argv": [
+        "scripts/test-v02-skill-experiment.mjs"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 58
+    },
+    {
+      "name": "skills/test-v02-skill-activation-drafts",
+      "argv": [
+        "scripts/test-v02-skill-activation-drafts.mjs"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 140
+    },
+    {
+      "name": "skills/test-v02-skill-evaluation-structural",
+      "argv": [
+        "scripts/test-v02-skill-evaluation-structural.mjs"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 118
+    }
+  ]
+}

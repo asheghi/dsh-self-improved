@@ -1,0 +1,243 @@
+{
+  "startedAt": "2026-10-15T10:58:41.036Z",
+  "runtime": "/home/bahman/github/dsh-v0.2",
+  "selected": [
+    "continuity"
+  ],
+  "scope": "isolated-regression-only",
+  "results": [
+    {
+      "name": "build",
+      "argv": [
+        "scripts/typecheck-v02.mjs",
+        "--emit-lib"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 3660
+    },
+    {
+      "name": "continuity/test-v02-continuity-schema-v03",
+      "argv": [
+        "scripts/test-v02-continuity-schema-v03.mjs"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 1087
+    },
+    {
+      "name": "continuity/test-v02-continuity-lineage-binding",
+      "argv": [
+        "scripts/test-v02-continuity-lineage-binding.mjs"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 895
+    },
+    {
+      "name": "continuity/test-v02-continuity-ancestry",
+      "argv": [
+        "scripts/test-v02-continuity-ancestry.mjs"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 200
+    },
+    {
+      "name": "continuity/test-v02-continuity-projection-v03",
+      "argv": [
+        "scripts/test-v02-continuity-projection-v03.mjs"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 157
+    },
+    {
+      "name": "continuity/test-v02-continuity-fence",
+      "argv": [
+        "scripts/test-v02-continuity-fence.mjs"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 938
+    },
+    {
+      "name": "continuity/test-v02-continuity-store",
+      "argv": [
+        "scripts/test-v02-continuity-store.mjs"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 326
+    },
+    {
+      "name": "continuity/test-v02-continuity-work",
+      "argv": [
+        "scripts/test-v02-continuity-work.mjs"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 1044
+    },
+    {
+      "name": "continuity/test-v02-continuity-worker",
+      "argv": [
+        "scripts/test-v02-continuity-worker.mjs"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 942
+    },
+    {
+      "name": "continuity/test-v02-continuity-handoff",
+      "argv": [
+        "scripts/test-v02-continuity-handoff.mjs"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 904
+    },
+    {
+      "name": "continuity/test-v02-continuity-summary-ledger-owner",
+      "argv": [
+        "scripts/test-v02-continuity-summary-ledger-owner.mjs"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 124
+    },
+    {
+      "name": "continuity/test-v02-continuity-inventory-ui",
+      "argv": [
+        "scripts/test-v02-continuity-inventory-ui.mjs"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 441
+    },
+    {
+      "name": "continuity/test-v02-continuity-continue-door",
+      "argv": [
+        "scripts/test-v02-continuity-continue-door.mjs"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 305
+    },
+    {
+      "name": "continuity/test-v02-provider-stub",
+      "argv": [
+        "scripts/test-v02-provider-stub.mjs"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 326
+    },
+    {
+      "name": "continuity/test-v02-continuity-main-worker",
+      "argv": [
+        "scripts/test-v02-continuity-main-worker.mjs"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 681
+    },
+    {
+      "name": "continuity/test-v02-continuity-main-process-restart",
+      "argv": [
+        "scripts/test-v02-continuity-main-process-restart.mjs"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 1233
+    },
+    {
+      "name": "continuity/test-v02-continuity-host-restart",
+      "argv": [
+        "scripts/test-v02-continuity-host-restart.mjs"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 1440
+    },
+    {
+      "name": "continuity/test-v02-continuity-client",
+      "argv": [
+        "scripts/test-v02-continuity-client.mjs"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 71
+    },
+    {
+      "name": "continuity/test-v02-settings",
+      "argv": [
+        "scripts/test-v02-settings.mjs"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 1105
+    },
+    {
+      "name": "continuity/test-v02-aux-default-route",
+      "argv": [
+        "scripts/test-v02-aux-default-route.mjs"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 388
+    },
+    {
+      "name": "continuity/settings-route-update",
+      "argv": [
+        "scripts/test-v02-continuity-main-worker.mjs",
+        "--settings-route-update"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 860
+    }
+  ]
+}

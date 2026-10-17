@@ -87,10 +87,37 @@ try {
       assert.deepEqual(f.counts(), { reads: 0, providers: 0 }); await denied.dispose();
     } finally { await f.close(); }
   });
-  await check('omitted/disabled live consent and preabort perform no capture or source reads', async () => {
+  await check('structural capture survives omitted/false consent and disabled epoch without lease/provider/handoff', async () => {
+    for (const [consent, enabled] of [[undefined, true], [() => false, true], [() => true, false], [() => false, false]]) {
+      const f = fixture(); try {
+        f.store.runInImmediateTransaction(() => syncContinuitySummaryPolicyV02(f.db, enabled));
+        const result = await f.runtime.onTrustedTurnEnd(f.receipt, { ...f.hooks, canSummarize: consent });
+        assert.equal(result.kind, 'captured'); assert.equal(f.counts().providers, 0);
+        assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM continuity_jobs').get().n, 1);
+        assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM continuity_work').get().n, 0);
+        assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM continuity_handoff').get().n, 0);
+        const checkpoint = f.db.prepare('SELECT * FROM continuity_checkpoint').get();
+        assert.ok(!JSON.stringify(checkpoint).includes('SYNTHETIC-PRIVATE-HUMAN-TEXT'));
+        assert.equal((await f.runtime.onTrustedTurnEnd(f.receipt, f.hooks)).reason, 'untrusted-receipt');
+      } finally { await f.close(); }
+    }
+  });
+  await check('summary consent revoke/re-enable during structural capture cannot borrow a fresh provider epoch', async () => {
+    const f = fixture(); let changed = false; try {
+      const result = await f.runtime.onTrustedTurnEnd(f.receipt, { ...f.hooks, readFreshSource: async signal => {
+        const source = await fresh(f.root.id, signal);
+        if (!changed) { changed = true; f.store.runInImmediateTransaction(() => {
+          syncContinuitySummaryPolicyV02(f.db, false); syncContinuitySummaryPolicyV02(f.db, true);
+        }); }
+        return source;
+      } });
+      assert.equal(result.kind, 'captured'); assert.equal(f.counts().providers, 0);
+      assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM continuity_work').get().n, 0);
+      assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM continuity_handoff').get().n, 0);
+    } finally { await f.close(); }
+  });
+  await check('preabort performs no capture or source reads', async () => {
     const f = fixture(); try {
-      assert.equal((await f.runtime.onTrustedTurnEnd(f.receipt, { ...f.hooks, canSummarize: undefined })).reason, 'consent');
-      assert.equal((await f.runtime.onTrustedTurnEnd(f.receipt, { ...f.hooks, canSummarize: () => false })).reason, 'consent');
       const abort = new AbortController(); abort.abort(); assert.equal((await f.runtime.onTrustedTurnEnd(f.receipt, f.hooks, abort.signal)).kind, 'cancelled');
       assert.deepEqual(f.counts(), { reads: 0, providers: 0 }); assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM continuity_jobs').get().n, 0);
     } finally { await f.close(); }

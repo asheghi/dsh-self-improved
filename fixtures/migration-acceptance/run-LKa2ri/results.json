@@ -1,0 +1,66 @@
+{
+  "startedAt": "2026-10-15T12:54:49.870Z",
+  "runtime": "/home/bahman/github/dsh-v0.2",
+  "selected": [
+    "packaging"
+  ],
+  "scope": "isolated-regression-only",
+  "results": [
+    {
+      "name": "build",
+      "argv": [
+        "scripts/typecheck-v02.mjs",
+        "--emit-lib"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 3456
+    },
+    {
+      "name": "packaging/test-v02-package",
+      "argv": [
+        "scripts/test-v02-package.mjs"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 20765
+    },
+    {
+      "name": "packaging/test-v02-typecheck-modes",
+      "argv": [
+        "scripts/test-v02-typecheck-modes.mjs"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 949
+    },
+    {
+      "name": "packaging/test-v02-remote-cancellation",
+      "argv": [
+        "scripts/test-v02-remote-cancellation.mjs"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 5530
+    },
+    {
+      "name": "packaging/test-v02-client-smoke",
+      "argv": [
+        "scripts/test-v02-client-smoke.mjs"
+      ],
+      "passed": true,
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "durationMs": 75
+    }
+  ]
+}
