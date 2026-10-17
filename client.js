@@ -82,10 +82,12 @@ window.__ModuleLoader__.load({
       ".__dsi_browserOps{flex:none;display:flex;gap:6px}" +
       ".__dsi_browserOps .__dsi_btn{height:28px;padding:0 10px;font-size:13px;line-height:26px;border-radius:8px}" +
       ".__dsi_tabs{display:flex;flex-direction:column;gap:10px}" +
-      ".__dsi_tabBar{display:flex;gap:4px;border-bottom:1px solid var(--dsw-alias-border-l2);padding-bottom:8px}" +
-      ".__dsi_tab{height:32px;border:1px solid transparent;background:transparent;color:var(--dsw-alias-label-secondary);border-radius:8px;padding:0 14px;font:inherit;font-size:14px;line-height:32px;cursor:pointer}" +
-      ".__dsi_tab:hover,.__dsi_tab:focus-visible{color:var(--dsw-alias-label-primary);outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:2px}" +
-      ".__dsi_tabActive{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-3);border-color:var(--dsw-alias-border-l2)}" +
+      ".__dsi_tabBar{display:flex;gap:2px;border-bottom:1px solid var(--dsw-alias-border-l2);overflow-x:auto;scrollbar-width:none}" +
+      ".__dsi_tab{position:relative;height:38px;border:0;border-bottom:2px solid transparent;margin-bottom:-1px;background:transparent;color:var(--dsw-alias-label-secondary);border-radius:0;padding:0 14px;font:inherit;font-size:14px;line-height:36px;white-space:nowrap;cursor:pointer;transition:color .15s,border-color .15s}" +
+      ".__dsi_tab:hover{color:var(--dsw-alias-label-primary)}" +
+      ".__dsi_tab:focus-visible{outline:2px solid transparent}" +
+      ".__dsi_tab:focus-visible::after{content:'';position:absolute;inset:4px 2px 5px;border:2px solid var(--dsw-alias-state-business-primary);border-radius:8px;pointer-events:none}" +
+      ".__dsi_tabActive{color:var(--dsw-alias-label-primary);font-weight:600;border-bottom-color:var(--dsw-alias-state-business-primary)}" +
       // Slide switch — native input visually hidden BUT the control keeps a
       // visible keyboard focus treatment on the track (accessibility gate).
       ".__dsi_switch{position:relative;display:inline-block;width:36px;height:20px;flex:none}" +
